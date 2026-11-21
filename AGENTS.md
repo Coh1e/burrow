@@ -59,9 +59,19 @@ Report the result, key changes, checks run with outcomes, and remaining limitati
 Claim completion only when the evidence supports the agreed acceptance criteria.
 Keep the report concise. Include exact commands when they help reproduce verification.
 
-## Issue tracking
+## Agent skills
 
-Use GitHub Issues in Coh1e/coop for tasks and specifications.
+### Issue tracker
+
+For tasks, specifications and issue dependencies, follow the [GitHub Issues workflow](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+When triaging issues, use the [project label mapping](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Before exploring a feature or proposing a design, consult the [domain documentation guide](docs/agents/domain.md).
 
 ## Next-step guidance
 
