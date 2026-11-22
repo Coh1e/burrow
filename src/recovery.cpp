@@ -8,7 +8,7 @@
 #include <set>
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 std::string lower_name(std::string value) {
     for (auto& character : value)

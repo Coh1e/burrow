@@ -7,7 +7,7 @@
 ## 前置
 
 ```powershell
-cd D:\Projects\coop
+cd D:\Projects\burrow
 ./scripts/build.ps1 -Action build
 ./scripts/install-hooks.ps1     # 每个克隆一次
 ```
@@ -17,17 +17,17 @@ cd D:\Projects\coop
 ## 1. 正常安装
 
 ```powershell
-$root = "D:\Projects\coop\.local\manual\root"
+$root = "D:\Projects\burrow\.local\manual\root"
 Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$root/buckets/test/bucket" | Out-Null
 
-$zip  = "D:\Projects\coop\.local\deps\test-archives\tidy-5.8.0-win64.zip"
+$zip  = "D:\Projects\burrow\.local\deps\test-archives\tidy-5.8.0-win64.zip"
 @{ version='5.8.0'; url=([uri]$zip).AbsoluteUri
    hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
    extract_dir='tidy-5.8.0-win64\bin'; bin='tidy.exe' } |
   ConvertTo-Json | Set-Content "$root/buckets/test/bucket/tidy.json" -Encoding utf8
 
-$exe = "D:\Projects\coop\.local\build\coop.exe"
+$exe = "D:\Projects\burrow\.local\build\burrow.exe"
 & $exe --root $root install test/tidy
 "exit=$LASTEXITCODE"
 ```
@@ -40,7 +40,7 @@ $exe = "D:\Projects\coop\.local\build\coop.exe"
 
 ```powershell
 # 安装一个更大的包，同时在另一个窗口每 100ms 采样
-Get-ChildItem "$root\.coop\transactions" -Recurse -Directory |
+Get-ChildItem "$root\.burrow\transactions" -Recurse -Directory |
   Where-Object Name -like 'extract-*'
 ```
 
@@ -89,7 +89,7 @@ $z.Dispose()
 ## 5. 多产物：第二个失败不能牵动第一个
 
 ```powershell
-$lua = "D:\Projects\coop\.local\deps\test-archives\luajit-2.1.1791988261-1-any.pkg.tar.zst"
+$lua = "D:\Projects\burrow\.local\deps\test-archives\luajit-2.1.1791988261-1-any.pkg.tar.zst"
 $b = [IO.File]::ReadAllBytes($lua); $t = "$root\truncated.tar.zst"
 [IO.File]::WriteAllBytes($t, $b[0..([int]($b.Length*0.6))])   # 能打开、解到一半失败
 @{ version='1.0.0'
@@ -99,7 +99,7 @@ $b = [IO.File]::ReadAllBytes($lua); $t = "$root\truncated.tar.zst"
   ConvertTo-Json -Depth 8 | Set-Content "$root/buckets/test/bucket/multi.json" -Encoding utf8
 & $exe --root $root install test/multi --json 2>&1 | Out-String
 "exit=$LASTEXITCODE"                    # 必须是 1，且不发布 current
-Get-ChildItem "$root\.coop\transactions\*\payload" -Filter tidy.exe -Recurse | Select-Object FullName
+Get-ChildItem "$root\.burrow\transactions\*\payload" -Filter tidy.exe -Recurse | Select-Object FullName
 ```
 
 最后那条是关键：第一个产物的 `tidy.exe` 必须还在 staging 里。它证明"失败只撤自己写入的范围"。
@@ -108,7 +108,7 @@ Get-ChildItem "$root\.coop\transactions\*\payload" -Filter tidy.exe -Recurse | S
 
 ```powershell
 & $exe --root $root recover
-Get-ChildItem "$root\.coop\transactions\*\journal.json" | ForEach-Object { Select-String -Path $_ -Pattern '"state"' }
+Get-ChildItem "$root\.burrow\transactions\*\journal.json" | ForEach-Object { Select-String -Path $_ -Pattern '"state"' }
 ```
 
 ## 7. 回归

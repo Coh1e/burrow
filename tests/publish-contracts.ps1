@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # #66: the contracts the publish seam owns, asserted through the real CLI.
 #  1. A declared extract_dir that selects nothing must fail. It must not publish a version that
 #     merely looks installed: with no `bin` declared, a silent skip produced a successful install
@@ -8,13 +8,13 @@ param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$Test
 #     archive, then fails on a corrupt second one; the first archive's content must still be in the
 #     staging directory left behind, which the transaction keeps in a rolled-back state.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $ripgrep = Join-Path $archives 'ripgrep-15.2.0-x86_64-pc-windows-msvc.zip'
 $tidy = Join-Path $archives 'tidy-5.8.0-win64.zip'
@@ -34,8 +34,8 @@ function Write-Manifest([string]$name,[hashtable]$manifest) {
     [IO.File]::WriteAllText("$root/buckets/test/bucket/$name.json",
         ($ordered | ConvertTo-Json -Depth 16),[Text.UTF8Encoding]::new($false))
 }
-function Invoke-Coop([string[]]$arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+function Invoke-Burrow([string[]]$arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -48,7 +48,7 @@ function Invoke-Coop([string[]]$arguments) {
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'coop timed out' }
+    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'burrow timed out' }
     $result = [pscustomobject]@{ exit = $process.ExitCode
         output = $stdout.GetAwaiter().GetResult(); error = $stderr.GetAwaiter().GetResult() }
     $process.Dispose()
@@ -60,7 +60,7 @@ function Assert-NoCurrent([string]$name) {
 
 # 1. A declared extract_dir that selects nothing fails, and names the directory.
 Write-Manifest 'empty-selection' @{version='1.0.0';url=(File-Uri $ripgrep);hash=(File-Hash $ripgrep);extract_dir='missing-dir'}
-$run = Invoke-Coop @('--root',$root,'install','test/empty-selection','--json')
+$run = Invoke-Burrow @('--root',$root,'install','test/empty-selection','--json')
 $text = $run.error + $run.output
 if ($run.exit -eq 0) { throw "a missing extract_dir installed successfully: $text" }
 if ($text -notmatch 'missing-dir') { throw "the failure did not name the missing extract_dir: $text" }
@@ -78,7 +78,7 @@ try {
     }
 } finally { $zip.Dispose() }
 Write-Manifest 'collision' @{version='1.0.0';url=(File-Uri $collision);hash=(File-Hash $collision);extract_dir='d';bin='a.txt'}
-$run = Invoke-Coop @('--root',$root,'install','test/collision','--json')
+$run = Invoke-Burrow @('--root',$root,'install','test/collision','--json')
 $text = $run.error + $run.output
 if ($run.exit -eq 0) { throw "colliding archive entries installed successfully: $text" }
 if ($text -notmatch '(?i)collide') { throw "the failure did not report a collision: $text" }
@@ -87,7 +87,7 @@ Assert-NoCurrent 'collision'
 # 3. The same missing extract_dir on a package that does declare an entry fails through the extraction
 #    contract, not through a downstream entry check noticing an empty directory.
 Write-Manifest 'empty-with-bin' @{version='1.0.0';url=(File-Uri $ripgrep);hash=(File-Hash $ripgrep);extract_dir='missing-dir';bin='rg.exe'}
-$run = Invoke-Coop @('--root',$root,'install','test/empty-with-bin','--json')
+$run = Invoke-Burrow @('--root',$root,'install','test/empty-with-bin','--json')
 $text = $run.error + $run.output
 if ($run.exit -eq 0) { throw "a missing extract_dir installed successfully: $text" }
 if ($text -notmatch 'extract_dir') { throw "the failure came from somewhere other than the extraction contract: $text" }
@@ -107,11 +107,11 @@ Write-Manifest 'isolation' @{
     extract_dir=@('tidy-5.8.0-win64\bin','mingw64')
     bin='tidy.exe'
 }
-$run = Invoke-Coop @('--root',$root,'install','test/isolation','--json')
+$run = Invoke-Burrow @('--root',$root,'install','test/isolation','--json')
 $text = $run.error + $run.output
 if ($run.exit -eq 0) { throw "the corrupt second artifact installed successfully: $text" }
 Assert-NoCurrent 'isolation'
-$staging = @(Get-ChildItem -LiteralPath "$root/.coop/transactions" -Directory -Force -ErrorAction SilentlyContinue |
+$staging = @(Get-ChildItem -LiteralPath "$root/.burrow/transactions" -Directory -Force -ErrorAction SilentlyContinue |
     ForEach-Object { Join-Path $_.FullName 'payload' } | Where-Object { Test-Path -LiteralPath $_ })
 if ($staging.Count -eq 0) { throw 'the failed multi-artifact install left no staging directory to inspect' }
 $survived = @($staging | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'tidy.exe') })
@@ -126,7 +126,7 @@ $directoryOnly = Join-Path $root 'directory-only.zip'
 $zip = [IO.Compression.ZipFile]::Open($directoryOnly,'Create')
 try { [void]$zip.CreateEntry('d/sub/') } finally { $zip.Dispose() }
 Write-Manifest 'directory-only' @{version='1.0.0';url=(File-Uri $directoryOnly);hash=(File-Hash $directoryOnly);extract_dir='d'}
-$run = Invoke-Coop @('--root',$root,'install','test/directory-only','--json')
+$run = Invoke-Burrow @('--root',$root,'install','test/directory-only','--json')
 $text = $run.error + $run.output
 if ($run.exit -eq 0) { throw "a directory-only extract_dir selection installed successfully: $text" }
 if ($text -notmatch 'extract_dir') { throw "the failure did not name the extract_dir contract: $text" }
@@ -152,10 +152,10 @@ Write-Manifest 'shared-scope' @{
     url=@((File-Uri $emptyDirectory),(File-Uri $nested))
     hash=@((File-Hash $emptyDirectory),(File-Hash $nested))
 }
-$run = Invoke-Coop @('--root',$root,'install','test/shared-scope','--json')
+$run = Invoke-Burrow @('--root',$root,'install','test/shared-scope','--json')
 $text = $run.error + $run.output
 if ($run.exit -eq 0) { throw "the traversal artifact installed successfully: $text" }
-$staging = @(Get-ChildItem -LiteralPath "$root/.coop/transactions" -Directory -Force -ErrorAction SilentlyContinue |
+$staging = @(Get-ChildItem -LiteralPath "$root/.burrow/transactions" -Directory -Force -ErrorAction SilentlyContinue |
     ForEach-Object { Join-Path $_.FullName 'payload' } | Where-Object { Test-Path -LiteralPath $_ })
 if ($staging.Count -eq 0) { throw 'the failed install left no staging directory to inspect' }
 if (@($staging | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'shared') }).Count -eq 0) {

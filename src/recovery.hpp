@@ -2,7 +2,7 @@
 #include "data.hpp"
 #include <vector>
 
-namespace coop {
+namespace burrow {
 // A pending transaction is reported from its journal only. Recovery never infers success
 // from the absence of a process and never re-runs lifecycle scripts.
 Json pending_recovery_report(const Context& context, bool execute,

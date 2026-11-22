@@ -11,7 +11,7 @@
 #include <set>
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 // Version evidence needs both the SHA256 and the parsed manifest. Reading the file once keeps
 // list cost proportional to the manifest size instead of the number of opens.
@@ -163,7 +163,7 @@ Json cleanup_scope(const Json& inventory, const Json& cleanable) {
         {"scope_summary",{{"delete",cleanable.size()},{"keep",keep.size()},{"already_absent",absent}}}};
 }
 
-// Shared clients may replace current without updating Coop's private record. Only a local,
+// Shared clients may replace current without updating Burrow's private record. Only a local,
 // non-reparse version with matching standard installation evidence can supersede that record.
 std::string published_version(const fs::path& app) {
     try {
@@ -197,7 +197,7 @@ CleanupResult cleanup_package(const Context& context, const std::string& package
     if (!fs::is_regular_file(managed_path) && !fs::is_regular_file(retained_path)) {
         outcome.failed = true;
         outcome.value = {{"package",package_name},{"action","cleanup"},{"status","blocked"},
-            {"reason","Package has no Coop management or retained-version evidence"}};
+            {"reason","Package has no Burrow management or retained-version evidence"}};
         return outcome;
     }
     const auto managed_hash = fs::is_regular_file(managed_path) ? sha256_file(managed_path) : std::string{};
@@ -713,11 +713,11 @@ Json version_cleanup_inventory(const Context& context, const std::string& packag
             return equal_name(item.at("version").get<std::string>(),version);
         });
         if (record == recorded.end()) {
-            // A version Coop never recorded is not a cleanup candidate, so its whole tree does not
+            // A version Burrow never recorded is not a cleanup candidate, so its whole tree does not
             // need to be stamped. Stamping every unrecorded version made `list` walk complete
             // installed programs (tens of thousands of files) to report evidence no decision uses.
-            if (entry.at("status").get<std::string>() == "retained") entry["status"] = "no-coop-version-record";
-            entry["reason"] = "No Coop version record exists for this local directory; ownership is unverified";
+            if (entry.at("status").get<std::string>() == "retained") entry["status"] = "no-burrow-version-record";
+            entry["reason"] = "No Burrow version record exists for this local directory; ownership is unverified";
             result.push_back(std::move(entry));
             continue;
         }
@@ -748,13 +748,13 @@ Json version_cleanup_inventory(const Context& context, const std::string& packag
         const auto expected_stamp = record->value("tree_stamp",std::string{});
         if (!expected_stamp.empty() && entry.value("tree_stamp",std::string{}) != expected_stamp) {
             entry["status"] = "modified";
-            entry["reason"] = "Version contents changed after Coop recorded them; refusing to delete them";
+            entry["reason"] = "Version contents changed after Burrow recorded them; refusing to delete them";
         } else if (!expected_manifest.empty() && entry.value("manifest_sha256",std::string{}) != expected_manifest) {
             entry["status"] = "modified";
-            entry["reason"] = "Manifest changed after Coop recorded this version; refusing to delete it";
+            entry["reason"] = "Manifest changed after Burrow recorded this version; refusing to delete it";
         } else if (!expected_install.empty() && entry.value("install_record_sha256",std::string{}) != expected_install) {
             entry["status"] = "modified";
-            entry["reason"] = "Installation record changed after Coop recorded this version; refusing to delete it";
+            entry["reason"] = "Installation record changed after Burrow recorded this version; refusing to delete it";
         } else if (recovery_protected) {
             entry["status"] = "recovery-protected";
             entry["reason"] = "A pending transaction may need this version for recovery";
@@ -794,7 +794,7 @@ Json version_cleanup_inventory(const Context& context, const std::string& packag
 // `cleanup -k/--cache` removes cached artifacts no installed version refers to. Scoop's cache names
 // carry `<app>#<version>#`, so an entry is kept exactly while that app's current version is
 // installed; anything else (an older version, an app that is gone) is removable. Files without the
-// two markers are left alone: Coop wrote them before this layout and cannot attribute them to a
+// two markers are left alone: Burrow wrote them before this layout and cannot attribute them to a
 // package.
 static std::string lowercase_name(std::string value) {
     for (auto& character : value) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
@@ -833,7 +833,7 @@ static int cache_cleanup(const Context& context, bool dry_run) {
 }
 // `cleanup --transactions` trims the evidence of finished writes. A pending transaction is never
 // touched (it is what `recover` needs), and the newest records are kept so a recent failure can still
-// be inspected: the default keeps ten. Coop-specific, because Scoop keeps no such record.
+// be inspected: the default keeps ten. Burrow-specific, because Scoop keeps no such record.
 int cleanup_transactions(const Context& context, bool dry_run) {
     const auto directory = state_directory(context)/L"transactions";
     std::error_code error;
@@ -871,7 +871,7 @@ int cleanup_transactions(const Context& context, bool dry_run) {
         if (!dry_run) {
             try { erase_tree(finished[index].path); }
             catch (const std::exception& failure) {
-                std::cerr << "coop: cannot remove "<<path_text(finished[index].path)<<": "<<failure.what()<<'\n';
+                std::cerr << "burrow: cannot remove "<<path_text(finished[index].path)<<": "<<failure.what()<<'\n';
                 continue;
             }
         }
@@ -917,9 +917,9 @@ int cleanup_command(const Context& context, const std::vector<std::wstring>& nam
                 for (const auto& entry : removed) std::cout << lines::cleanup_version(entry.value("version",std::string{})) << '\n';
                 removedAnything = true;
             }
-            if (item.contains("reason")) std::cerr << "coop: " << item.at("reason").get<std::string>() << '\n';
+            if (item.contains("reason")) std::cerr << "burrow: " << item.at("reason").get<std::string>() << '\n';
             for (const auto& entry : item.value("unmanageable",Json::array()))
-                std::cerr << "coop: " << item.value("package",std::string{}) << " " <<
+                std::cerr << "burrow: " << item.value("package",std::string{}) << " " <<
                     entry.value("version",std::string{}) << ": " << entry.value("reason",std::string{}) << '\n';
         }
         if (removedAnything) std::cout << '\n';

@@ -1,6 +1,6 @@
 # 四样本可重复验收
 
-对应规格 [#96](https://github.com/Coh1e/coop/issues/96) 与执行票 #97–#101。
+对应规格 [#96](https://github.com/Coh1e/burrow/issues/96) 与执行票 #97–#101。
 实际运行结果与边界见[四样本真实验证](history/four-sample-validation-96.md)。本文件定义验收入口与流程，
 任务状态以 GitHub 规格及执行票为准。
 
@@ -55,13 +55,13 @@ Python 与模块记录分别绑定运行时发行归档和下载的 wheel；运�
 
 ## 场景与断言
 
-- jq：Scoop 装旧版→Coop 预览/更新→双方识别；重新建立旧版→Coop reset→Scoop
-  强制重新解析 bucket 后真实更新→Coop 识别。两方向断言真实版本、标准 Manifest、
+- jq：Scoop 装旧版→Burrow 预览/更新→双方识别；重新建立旧版→Burrow reset→Scoop
+  强制重新解析 bucket 后真实更新→Burrow 识别。两方向断言真实版本、标准 Manifest、
   scoop-install.json、current 目标、双方列表、JSON 计算及旧版保留，再检查 cleanup 与双向卸载。
   旧版安装只读引用 Scoop 既有的 `workspace/jq.json`，使用前与项目内官方历史 Manifest
   完整比对并保存双方摘要，缺失或内容不同即停止。该来源使 Scoop 的 `-f` 版本固定解除机制
   能重新选择 main 最新版；普通任意路径的本地 Manifest 更新仍跟随原文件，不能用于证明版本更新。
-- wgcf：安装→reset→Scoop 卸载→Scoop 重装→Coop 卸载。断言帮助内容、shim 目标及
+- wgcf：安装→reset→Scoop 卸载→Scoop 重装→Burrow 卸载。断言帮助内容、shim 目标及
   带引号的配置参数；只写无账户信息的测试配置，逐阶段校验摘要，不注册账户或运行 VPN。
 - pdd：限制测试进程 PATH 验证缺宿主预览，再使用项目内 Python/dateutil/six 完成上述
   生命周期。固定日期计算须同时输出 `0y 0m 10d` 与 `10d`，导入路径须落在项目依赖目录。

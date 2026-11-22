@@ -1,6 +1,6 @@
 # 普通归档的原生生命周期覆盖
 
-日期：2026-10-26。任务：[R05 / #26](https://github.com/Coh1e/coop/issues/26)，父规格 [#21](https://github.com/Coh1e/coop/issues/21)。本文记录当前实际启用的普通归档格式、布局语义、真实样本、验证方式与仍不适用的机制；不是对整个归档生态的兼容承诺。安装器边界见 [Installer/Uninstaller 与特殊安装机制](installer-support.md)，多下载项、架构与摘要算法见[多产物、架构与摘要算法支持](multi-artifact-support.md)。
+日期：2026-10-26。任务：[R05 / #26](https://github.com/Coh1e/burrow/issues/26)，父规格 [#21](https://github.com/Coh1e/burrow/issues/21)。本文记录当前实际启用的普通归档格式、布局语义、真实样本、验证方式与仍不适用的机制；不是对整个归档生态的兼容承诺。安装器边界见 [Installer/Uninstaller 与特殊安装机制](installer-support.md)，多下载项、架构与摘要算法见[多产物、架构与摘要算法支持](multi-artifact-support.md)。
 
 ## 库与构建
 
@@ -12,7 +12,7 @@
 | zstd | 1.5.7 | zstd 压缩流（`.tar.zst`/`.tzst`） | BSD-3-Clause |
 | bzip2 | 1.0.8 | bzip2 压缩流（`.tar.bz2`/`.tbz`/`.tbz2`） | bzip2 license |
 
-全部依赖以源码固定版本由 `scripts/fetch-deps.ps1` 下载并校验 SHA256，静态链接进 `coop.exe`；构建、许可文本和测试资产只写入项目内 `.local`。ZIP、tar 与普通 7z 由静态链接的读取器解开，不启动 PowerShell、7z.exe、tar.exe、bzip2.exe 或其他外部解压程序；内容识别为 7z 自解压（SFX）的载荷是唯一例外，它交给 root 内已安装的 7-Zip helper，未安装 helper 时回退原生读取，见下文「7z 自解压（SFX）与 LZMA 边界」。`tests/archive-lifecycle.ps1` 用 `process_guard` 观察没有 helper 时的 tar.zst 与 7z SFX 安装，工作负载只有 `coop.exe`；`tests/seven-zip-sfx.ps1` 让 helper 路由与无 helper 回退都实际运行。
+全部依赖以源码固定版本由 `scripts/fetch-deps.ps1` 下载并校验 SHA256，静态链接进 `burrow.exe`；构建、许可文本和测试资产只写入项目内 `.local`。ZIP、tar 与普通 7z 由静态链接的读取器解开，不启动 PowerShell、7z.exe、tar.exe、bzip2.exe 或其他外部解压程序；内容识别为 7z 自解压（SFX）的载荷是唯一例外，它交给 root 内已安装的 7-Zip helper，未安装 helper 时回退原生读取，见下文「7z 自解压（SFX）与 LZMA 边界」。`tests/archive-lifecycle.ps1` 用 `process_guard` 观察没有 helper 时的 tar.zst 与 7z SFX 安装，工作负载只有 `burrow.exe`；`tests/seven-zip-sfx.ps1` 让 helper 路由与无 helper 回退都实际运行。
 
 ## 覆盖矩阵
 
@@ -41,7 +41,7 @@
 
 ## 目录布局语义
 
-固定 Scoop 0.6.0 的 `expand-7zipArchive` 先解开压缩包装，再对内部 tar 应用 `extract_dir`；普通 tar 也应用同一规则。Coop 对 ZIP、7z 和全部 tar 压缩统一使用同一语义：
+固定 Scoop 0.6.0 的 `expand-7zipArchive` 先解开压缩包装，再对内部 tar 应用 `extract_dir`；普通 tar 也应用同一规则。Burrow 对 ZIP、7z 和全部 tar 压缩统一使用同一语义：
 
 1. 归档内容直接写入事务 staging 中的目标位置：一份产物只写一遍，不存在"先解压到临时树、再整树复制"的第二次写盘。安装器格式（MSI 镜像、Inno Setup、NSIS 载荷）仍由各自的提取器先写工作树，再合并进来。
 2. 若声明 `extract_dir`，把该目录**内容**提升到归档目标目录；目录名本身不保留。嵌套同名目录（例如归档含 `wrap/deep/wrap/deep/bin` 且 `extract_dir=wrap/deep`）因此最终得到 `wrap/deep/bin`，与 Scoop 的 `robocopy /e /move` 结果一致。
@@ -58,9 +58,9 @@
 2. 下载到事务目录，按 Manifest 声明的 SHA256/SHA512/SHA1/MD5 校验；全部产物校验通过并重查计划后才解压。多下载项、`#/` 改名和架构覆盖见[多产物、架构与摘要算法支持](multi-artifact-support.md)。
 3. 归档条目只允许普通文件和目录。绝对路径、`..`、盘符、保留名、尾部空格/点、链接条目、设备/FIFO 等特殊类型会被拒绝；已存在的 reparse point 不会被跟随。7z 自解压文件按内容识别为 7z 容器：有 helper 时由 helper 读取，否则回退原生读取；两种路径都不执行下载的 PE stub。
 4. 解压、布局提升和入口目标检查都在事务 staging 内完成；失败时当前 `current`、入口和管理记录保持原样。提交后删除临时下载；失败事务保留 pending/rolled-back 日志。
-5. 更新成功后旧版本目录保留；普通卸载不会删除旧版本目录；`coop cleanup` 在版本记录、摘要和恢复前提均可核对时显式清理非当前旧版本。无脚本包的 `persist` 目录/文件映射另按[持久化数据支持](persistence-support.md)处理；归档内部链接条目仍被拒绝。
+5. 更新成功后旧版本目录保留；普通卸载不会删除旧版本目录；`burrow cleanup` 在版本记录、摘要和恢复前提均可核对时显式清理非当前旧版本。无脚本包的 `persist` 目录/文件映射另按[持久化数据支持](persistence-support.md)处理；归档内部链接条目仍被拒绝。
 6. 条目数量和展开大小有上限；Unicode 条目路径经 UTF-8/宽字符转换后写入项目内测试根。
-7. 共享 Scoop 安装没有 Coop 私有记录时，归档布局以标准 `apps/<包>/current`、保存的 Manifest/安装记录、每个声明入口/快捷方式目标存在且可检查的版本树作为事实。Scoop 本身不保存解压树摘要，因此不会伪造“内容摘要相同”；更新只替换 current 与新版本，旧版本保留，卸载只删除已核对的当前版本目录，声明的持久化数据另行处理。命令入口恢复仍按 `.shim`/启动器证据核对。
+7. 共享 Scoop 安装没有 Burrow 私有记录时，归档布局以标准 `apps/<包>/current`、保存的 Manifest/安装记录、每个声明入口/快捷方式目标存在且可检查的版本树作为事实。Scoop 本身不保存解压树摘要，因此不会伪造“内容摘要相同”；更新只替换 current 与新版本，旧版本保留，卸载只删除已核对的当前版本目录，声明的持久化数据另行处理。命令入口恢复仍按 `.shim`/启动器证据核对。
 
 ## 真实样本与校验
 
@@ -89,37 +89,37 @@ Manifest 版本、URL、hash 与 `extract_dir` 取自真实 Main 修订与本机
 
 | 场景 | 覆盖点 | 实际结果 |
 | --- | --- | --- |
-| ZIP：ripgrep 14.1.1 → 15.2.0 | Coop 安装、Scoop reset、Coop 更新、Scoop 继续、旧版本保留、cleanup/卸载 | 两端运行分别输出 14.1.1 与 15.2.0；`scoop list` 识别 15.2.0；`scoop reset` 后入口仍运行；计划与 journal 操作序列一致 |
-| tar.gz：air 1.67.3 → 1.67.4 | Coop 安装/更新、Scoop reset、旧版本保留 | `air -v` 输出 1.67.3 → 1.67.4；Scoop 识别并 reset 后仍运行 |
-| 7z：fastfetch 2.68.1 → 2.70.0 | Coop 安装/更新、Scoop reset、旧版本保留 | `fastfetch --version` 输出 2.68.1 → 2.70.0；Scoop 识别并 reset 后仍运行 |
-| 共享 tar.gz：Scoop 安装 air 1.67.3，Coop 更新到 1.67.4 | 无私有记录、Scoop→Coop→Scoop、Scoop reset、更新失败保护 | Scoop 安装后 Coop 直接识别并更新；计划和 journal 一致；Scoop 识别 1.67.4 并 reset；损坏的 1.67.5 tar.gz 更新退出 1，journal 在 `download,verify,extract` 后回滚，当前仍运行 1.67.4，目标版本目录未出现 |
-| Main/luajit | tar.zst、嵌套 `extract_dir`、Coop 安装、Scoop reset | `luajit -v` 输出 2.1.1791988261；`bin/luajit.exe` 位于正确布局；Scoop 识别并 reset 后仍运行 |
-| Main/curl | tar.xz、嵌套 `extract_dir`、Coop 安装、Scoop reset | `curl --version` 输出 8.23.0；`bin/curl.exe` 位于正确布局；Scoop 识别并 reset 后仍运行 |
-| Main/unzip | 真实 `#/dl.7z` 自解压下载改名、7z、Coop 安装、Scoop reset | `unzip -v` 输出 UnZip 6.00；Scoop 识别并 reset 后仍运行 |
-| Main/tidy | ZIP 嵌套 `extract_dir`、Coop 安装、Scoop reset | `tidy --version` 输出 5.8.0；Scoop 识别并 reset 后仍运行 |
+| ZIP：ripgrep 14.1.1 → 15.2.0 | Burrow 安装、Scoop reset、Burrow 更新、Scoop 继续、旧版本保留、cleanup/卸载 | 两端运行分别输出 14.1.1 与 15.2.0；`scoop list` 识别 15.2.0；`scoop reset` 后入口仍运行；计划与 journal 操作序列一致 |
+| tar.gz：air 1.67.3 → 1.67.4 | Burrow 安装/更新、Scoop reset、旧版本保留 | `air -v` 输出 1.67.3 → 1.67.4；Scoop 识别并 reset 后仍运行 |
+| 7z：fastfetch 2.68.1 → 2.70.0 | Burrow 安装/更新、Scoop reset、旧版本保留 | `fastfetch --version` 输出 2.68.1 → 2.70.0；Scoop 识别并 reset 后仍运行 |
+| 共享 tar.gz：Scoop 安装 air 1.67.3，Burrow 更新到 1.67.4 | 无私有记录、Scoop→Burrow→Scoop、Scoop reset、更新失败保护 | Scoop 安装后 Burrow 直接识别并更新；计划和 journal 一致；Scoop 识别 1.67.4 并 reset；损坏的 1.67.5 tar.gz 更新退出 1，journal 在 `download,verify,extract` 后回滚，当前仍运行 1.67.4，目标版本目录未出现 |
+| Main/luajit | tar.zst、嵌套 `extract_dir`、Burrow 安装、Scoop reset | `luajit -v` 输出 2.1.1791988261；`bin/luajit.exe` 位于正确布局；Scoop 识别并 reset 后仍运行 |
+| Main/curl | tar.xz、嵌套 `extract_dir`、Burrow 安装、Scoop reset | `curl --version` 输出 8.23.0；`bin/curl.exe` 位于正确布局；Scoop 识别并 reset 后仍运行 |
+| Main/unzip | 真实 `#/dl.7z` 自解压下载改名、7z、Burrow 安装、Scoop reset | `unzip -v` 输出 UnZip 6.00；Scoop 识别并 reset 后仍运行 |
+| Main/tidy | ZIP 嵌套 `extract_dir`、Burrow 安装、Scoop reset | `tidy --version` 输出 5.8.0；Scoop 识别并 reset 后仍运行 |
 
-运行前后 Coop 安装清单相同，新增包均已卸载，未修改原 15 个安装。完整命令、退出码和原始日志位于 `.local/pi/tasks/26/evidence/real-scoop-archives/`；汇总为 `real-scoop-archives-evidence.json`。本地夹具另覆盖 bzip2/lzma、坏 tar.zst 更新、坏 ZIP、路径穿越、链接条目、中断和 `extract_to`。
+运行前后 Burrow 安装清单相同，新增包均已卸载，未修改原 15 个安装。完整命令、退出码和原始日志位于 `.local/pi/tasks/26/evidence/real-scoop-archives/`；汇总为 `real-scoop-archives-evidence.json`。本地夹具另覆盖 bzip2/lzma、坏 tar.zst 更新、坏 ZIP、路径穿越、链接条目、中断和 `extract_to`。
 
 ## 测试
 
 - `tests/archive-lifecycle.ps1`（CTest `archive_lifecycle`）：真实 ZIP/tar.gz/tar.xz/tar.zst、嵌套 ZIP、7z SFX、bzip2/lzma、Unicode、多产物 `extract_to`、坏 tar.zst 更新保护；tar.zst 安装由 `process_guard` 观察，不能启动外部解压器；没有 helper 时 Main/unzip 的 7z SFX 仍走原生读取。
 - `tests/seven-zip-sfx.ps1`（CTest `seven_zip_sfx`）：用 root 内 7-Zip 生成 `LZMA:lc8` 的 7z SFX（与 PortableGit 同类边界，liblzma 报 `Invalid options`），断言 helper 解包成功且 journal 记录 helper、签名偏移与退出码；同一 SFX 在没有 helper 的 root 上必须回退原生读取并失败，不能发布任何状态。
 - `tests/archive-safety.ps1`（CTest `archive_safety`）：坏归档、缺失入口、路径穿越、链接/硬链接、损坏 MSI 在数据库阶段失败、中断更新和当前版本保护。
-- `tests/publish-baseline.ps1`（CTest `publish_baseline`）：八份安装夹具（ZIP 带 `extract_dir`、tar.xz、tar.zst、tar.gz、MSI、Inno Setup、NSIS 载荷、7-Zip helper）与两份失败夹具的逐文件快照——路径、摘要、链接类型、`current` 目标，以及两份安装记录的可比对字段（bucket、architecture、version、bin），提交在 `tests/baseline/publish`；`-Update` 重生成，默认模式比对。两条记录本身按**存在**记录、不做逐字节比对：Coop 会把读到的 Manifest 原样写回，而它携带夹具的绝对 `file://` URL，逐字节哈希会随检出路径变化。
+- `tests/publish-baseline.ps1`（CTest `publish_baseline`）：八份安装夹具（ZIP 带 `extract_dir`、tar.xz、tar.zst、tar.gz、MSI、Inno Setup、NSIS 载荷、7-Zip helper）与两份失败夹具的逐文件快照——路径、摘要、链接类型、`current` 目标，以及两份安装记录的可比对字段（bucket、architecture、version、bin），提交在 `tests/baseline/publish`；`-Update` 重生成，默认模式比对。两条记录本身按**存在**记录、不做逐字节比对：Burrow 会把读到的 Manifest 原样写回，而它携带夹具的绝对 `file://` URL，逐字节哈希会随检出路径变化。
 - `tests/publish-contracts.ps1`（CTest `publish_contracts`）：空的 `extract_dir` 选择必须失败并命名目录（声明的与只含目录条目的两种、含未声明 `bin` 的包）、同目标条目碰撞必须失败并给出路径、多产物包第二个产物失败不破坏第一个已发布内容，且不删除前一个产物发布过的空目录。
 - `tests/publish-write-once.ps1`（CTest `publish_write_once`）：安装期间用文件系统监视器记录事务目录下创建的所有路径，断言从未出现第二棵解压树；同时要求监视器确实看到 staging，避免"什么都没看到"式空断言。
 - 人工步骤与"手测覆盖不到"的清单见[产物发布的人工验收步骤](manual-publish-acceptance.md)。
 - `tests/msi-lifecycle.ps1`（CTest `msi_lifecycle`）：真实 7-Zip 26.05/26.03 MSI 的只读预览、安装、更新、卸载、持久化保留与截断 MSI 失败；全程 `process_guard` 观察无 `msiexec`，Windows Installer 机器缓存不变。
 - `tests/nsis-lifecycle.ps1`（CTest `nsis_lifecycle`）：真实 apngasm 3.1.3/3.1.1 NSIS 载荷的只读预览、安装、更新、截断失败、缺失 helper 与普通卸载；helper 来自同一 root 的普通 7-Zip 26.05 安装并断言逐文件不变，全程 `process_guard` 观察无 `setup.exe`。
-- `tests/real-scoop-nsis.ps1`：真实共用根上 Main/apngasm 的 Coop↔Scoop 双向交替与客户端间版本目录逐文件 SHA256 对比。
-- `tests/real-scoop-msi.ps1`：真实共用根上 kalker/pkgconf 的 Coop↔Scoop 双向交替与客户端间版本目录逐文件 SHA256 对比。
-- `tests/scoop-interop.ps1`（CTest `scoop_interop`）：无 Coop 记录的共享归档更新/卸载、Scoop reset、缺失入口拒绝，以及直接文件/多产物路径。
+- `tests/real-scoop-nsis.ps1`：真实共用根上 Main/apngasm 的 Burrow↔Scoop 双向交替与客户端间版本目录逐文件 SHA256 对比。
+- `tests/real-scoop-msi.ps1`：真实共用根上 kalker/pkgconf 的 Burrow↔Scoop 双向交替与客户端间版本目录逐文件 SHA256 对比。
+- `tests/scoop-interop.ps1`（CTest `scoop_interop`）：无 Burrow 记录的共享归档更新/卸载、Scoop reset、缺失入口拒绝，以及直接文件/多产物路径。
 - `tests/real-scoop-archives.ps1`：上述同一真实 Scoop 根上的顺序交替脚本，只选择未安装的包，失败时尽力卸载本轮安装并删除临时 bucket。
 
 ## 未完成与边界
 
 - 本文件只证明这些真实样本与机制路径，不构成 Main/Extras 完整分母、安装器、真实脚本、用户环境或全部入口类型的完成证明。
-- 7z SFX 的可读性取决于 liblzma 接受的 LZMA 属性与过滤器链：`LZMA:lc8`、`Delta LZMA BCJ2` 等超出原生读取范围，需要 root 内已安装的 7-Zip helper；helper 缺失时这类载荷失败并给出原生错误，Coop 不内嵌、不下载 helper。这条 helper 路由只按内容命中 SFX，普通 7z/ZIP/tar 不因此变成外部依赖。
+- 7z SFX 的可读性取决于 liblzma 接受的 LZMA 属性与过滤器链：`LZMA:lc8`、`Delta LZMA BCJ2` 等超出原生读取范围，需要 root 内已安装的 7-Zip helper；helper 缺失时这类载荷失败并给出原生错误，Burrow 不内嵌、不下载 helper。这条 helper 路由只按内容命中 SFX，普通 7z/ZIP/tar 不因此变成外部依赖。
 - MSI 管理镜像提取已启用（#33）；Inno Setup 提取已通过声明的外部 innounp helper 启用（#34）；NSIS 安装器载荷提取已通过声明的外部 7-Zip helper 启用（#35），不内嵌也不静默下载这些工具。外部 cabinet、多段/partial cabinet、WiX/Dark 与厂商 EXE 安装器结构仍未启用；分卷/多部分归档（`.001`、`.partN.rar`）、rar/cab/nupkg 等未作为普通归档生命周期启用。`installer.file/args` 不是归档机制，已由 R11（#32）作为独立安装器程序接入，见[Installer/Uninstaller 与特殊安装机制](installer-support.md)。
 - 共享归档的更新/卸载以标准布局和入口目标为事实；Scoop 不提供解压树摘要，因此用户对版本目录内部的任意修改不会像直接文件摘要那样被逐一发现。需要内容摘要的场景仍应使用可核对产物的包，或后续在卸载/清理前增加显式树摘要记录。
 - R22（#43）已移除旧接管命令与旧预览执行列表：共享归档的更新/卸载一直是 IR 计划路径，现在执行器只消费单一 `Plan`，不再存在接受归档限制的专用旧路径。

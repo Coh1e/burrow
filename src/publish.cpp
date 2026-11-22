@@ -6,7 +6,7 @@
 #include "nsis.hpp"
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 // Every external mechanism reports the same two facts about the artifact it unpacked, next to its own
 // record, so the journal entries stay uniform without repeating the decoration at each branch.

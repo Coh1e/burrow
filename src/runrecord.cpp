@@ -5,7 +5,7 @@
 #include <ctime>
 #include <iostream>
 
-namespace coop {
+namespace burrow {
 namespace {
 std::uint64_t g_run_counter = 0;
 std::string timestamp() {
@@ -81,11 +81,11 @@ std::size_t report_abandoned_runs(const Context& context,bool consume) {
         if (record.contains("packages") && record.at("packages").is_array())
             for (const auto& item : record.at("packages"))
                 if (item.is_string()) packages += (packages.empty() ? "" : " ")+item.get<std::string>();
-        std::cerr << "coop: an interrupted run was recorded: coop "<<record.value("command",std::string{"unknown"});
+        std::cerr << "burrow: an interrupted run was recorded: burrow "<<record.value("command",std::string{"unknown"});
         if (!packages.empty()) std::cerr << ' ' << packages;
         std::cerr << " (pid "<<record.value("pid",0)<<", started "<<record.value("started",std::string{"unknown"})
                   <<", last stage: "<<record.value("stage",std::string{"unknown"})<<")\n";
-        std::cerr << "coop: the record carries no ownership evidence, so nothing is restored from it\n";
+        std::cerr << "burrow: the record carries no ownership evidence, so nothing is restored from it\n";
         if (consume) {
             std::error_code remove_error;
             fs::remove(entry.path(),remove_error);

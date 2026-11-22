@@ -2,7 +2,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
-using namespace coop;
+using namespace burrow;
 void check(bool value) { if (!value) throw std::runtime_error("Update policy assertion failed"); }
 int main() {
     try {

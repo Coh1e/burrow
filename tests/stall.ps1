@@ -1,8 +1,8 @@
 # Red when: a write command that produces no output for several seconds stops reporting that it is still
 # working, or that report leaks into a --json run or a quiet run.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -24,30 +24,30 @@ New-Item -ItemType Directory -Path "$root/buckets/probe/bucket" -Force | Out-Nul
   "bin": "rg.exe"
 }
 "@ | Set-Content "$root/buckets/probe/bucket/slow.json" -Encoding utf8 -NoNewline
-$previousStall = $env:COOP_TEST_STALL_MS
+$previousStall = $env:BURROW_TEST_STALL_MS
 try {
-    $env:COOP_TEST_STALL_MS = '6500'
+    $env:BURROW_TEST_STALL_MS = '6500'
 
     # Text mode reports the silence instead of looking frozen.
-    $out = Invoke-CoopNative $CoopExe  --root $root install probe/slow
+    $out = Invoke-BurrowNative $BurrowExe  --root $root install probe/slow
     if ($LASTEXITCODE -cne 0) { throw "the install failed: $($out -join ' | ')" }
-    if (($out -join "`n") -cnotmatch 'coop: still working, \d+s without progress') {
+    if (($out -join "`n") -cnotmatch 'burrow: still working, \d+s without progress') {
         throw "a silent write command printed no stall report: $($out -join ' | ')"
     }
-    Invoke-CoopNative $CoopExe  --root $root uninstall slow | Out-Null
+    Invoke-BurrowNative $BurrowExe  --root $root uninstall slow | Out-Null
 
     # A --json run stays machine-readable: the report must not appear.
-    $out = Invoke-CoopNative $CoopExe  --root $root install probe/slow --json
+    $out = Invoke-BurrowNative $BurrowExe  --root $root install probe/slow --json
     if ($LASTEXITCODE -cne 0) { throw 'the json install failed' }
     if (($out -join "`n") -cmatch 'still working') { throw 'a --json run printed the stall report' }
-    Invoke-CoopNative $CoopExe  --root $root uninstall slow -q | Out-Null
+    Invoke-BurrowNative $BurrowExe  --root $root uninstall slow -q | Out-Null
 
     # A quiet run suppresses progress, including this report.
-    $out = Invoke-CoopNative $CoopExe  --root $root install probe/slow -q
+    $out = Invoke-BurrowNative $BurrowExe  --root $root install probe/slow -q
     if ($LASTEXITCODE -cne 0) { throw 'the quiet install failed' }
     if (($out -join "`n") -cmatch 'still working') { throw 'a quiet run printed the stall report' }
 } finally {
-    if ($null -eq $previousStall) { Remove-Item Env:\COOP_TEST_STALL_MS -ErrorAction SilentlyContinue }
-    else { $env:COOP_TEST_STALL_MS = $previousStall }
+    if ($null -eq $previousStall) { Remove-Item Env:\BURROW_TEST_STALL_MS -ErrorAction SilentlyContinue }
+    else { $env:BURROW_TEST_STALL_MS = $previousStall }
 }
 Write-Output 'PASS: a silent write command reports that it is still working'

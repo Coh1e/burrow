@@ -19,10 +19,10 @@
     {
       "id": "R25",
       "title": "R25：psmodule 机制与依赖级联",
-      "scope": "把 Manifest 的 psmodule 声明归一为 IR 模块名，在计划与执行中创建 <root>/modules/<name> 到安装目录的 junction，并按 Scoop 语义维护用户级 PSModulePath 条目（保存原值与归属，撤销只删除 Coop 写入的条目和 junction）；安装器、脚本、入口与卸载现有路径不变。",
+      "scope": "把 Manifest 的 psmodule 声明归一为 IR 模块名，在计划与执行中创建 <root>/modules/<name> 到安装目录的 junction，并按 Scoop 语义维护用户级 PSModulePath 条目（保存原值与归属，撤销只删除 Burrow 写入的条目和 junction）；安装器、脚本、入口与卸载现有路径不变。",
       "reason": "28 个包因 adapter/unsupported-capability 被阻塞，另有 inadyn-mt、lazy-posh-git 因依赖 gsudo/posh-git 级联失败；Scoop 的 psmodules.ps1 只用 junction 和 PSModulePath，没有额外专有语义。",
       "acceptance": [
-        "在项目内真实兼容根用真实 CLI 安装 extras/posh-git：<root>/modules/posh-git 是指向 apps/posh-git/current 的真实 junction，用户 PSModulePath 含 <root>/modules，新 PowerShell 进程 Import-Module posh-git 成功；卸载后 junction 与 Coop 自己写入的 PSModulePath 条目被撤销，其他条目和用户后续修改保持。",
+        "在项目内真实兼容根用真实 CLI 安装 extras/posh-git：<root>/modules/posh-git 是指向 apps/posh-git/current 的真实 junction，用户 PSModulePath 含 <root>/modules，新 PowerShell 进程 Import-Module posh-git 成功；卸载后 junction 与 Burrow 自己写入的 PSModulePath 条目被撤销，其他条目和用户后续修改保持。",
         "install --dry-run 展示 psmodule 操作且不创建 junction、不写用户环境；实际执行的高层操作与预览对应。",
         "main/gsudo（同包 psmodule+bin+post_install）计划可执行并验证 junction；inadyn-mt、lazy-posh-git 不再报 capability/dependency-unsupported。",
         "重新运行全量盘点：28 个 psmodule 包不再出现 Not yet supported: psmodule；仍有其他机制阻塞的包单独保留，不计为已支持。",
@@ -49,7 +49,7 @@
       "id": "R26",
       "title": "R26：命令入口宿主扩展（.py、无扩展名、.config）",
       "scope": "按固定 Scoop v0.6.0 的 shim 宿主分支实现 .py、无扩展名和 .config 入口：.py 走 python 宿主，其余走 Scoop 的 bash 分支；生成与 Scoop 同形的 shim 文件，缺失外部宿主时在执行前明确诊断，不静默失败。",
-      "reason": "11 个包因 adapter/unsupported-command-host 被阻塞；Scoop 的 shim() 对 .py 和 else 分支都有明确宿主语义（core.ps1:1076-1116），Coop 只支持 EXE/COM/BAT/CMD/PS1/JAR。",
+      "reason": "11 个包因 adapter/unsupported-command-host 被阻塞；Scoop 的 shim() 对 .py 和 else 分支都有明确宿主语义（core.ps1:1076-1116），Burrow 只支持 EXE/COM/BAT/CMD/PS1/JAR。",
       "acceptance": [
         "项目内根分别安装 .py、无扩展名、.config 三类入口的样本后，通过生成的 shim/.cmd 实际运行并得到预期输出与退出码；宿主不存在时在执行前给出明确诊断，退出非零且不创建半成品入口。",
         "真实 Main/Extras 样本（如 main/git-filter-repo、main/neofetch、main/pulumi、main/vapoursynth）在同一真实盘点根 install --dry-run 不再报 unsupported-command-host；选定至少两个样本真实安装并运行其版本或帮助命令。",
@@ -107,7 +107,7 @@
       "id": "R28",
       "title": "R28：跨 bucket 依赖来源（versions bucket）验证",
       "scope": "用项目内固定的官方 versions bucket（只读修订）与同一 Main/Extras Manifest 修订验证 versions/* 依赖：确认 5 个包的计划依赖顺序、缺失/环境影响诊断；若 bucket 限定名或版本化包名解析有缺陷则修复。共享真实 Scoop 根是否注册 versions bucket 仍由人类决定。",
-      "reason": "5 个包（buck、glslviewer、terraform-provider-ibm、node-compiler、rabbitmqadmin）的依赖位于官方 versions bucket，本机未注册；fixture 已证明 Coop 在 bucket 存在时能解析 versions/python27 并给出依赖顺序，在缺失时给出 dependency-missing。",
+      "reason": "5 个包（buck、glslviewer、terraform-provider-ibm、node-compiler、rabbitmqadmin）的依赖位于官方 versions bucket，本机未注册；fixture 已证明 Burrow 在 bucket 存在时能解析 versions/python27 并给出依赖顺序，在缺失时给出 dependency-missing。",
       "acceptance": [
         "项目内固定官方 versions bucket 的 40 位修订并在清单中记录来源；对同一修订的 5 个 Main/Extras 包 install --dry-run 显示 dependency_order 含 versions/* 且 execution_available=true，或对确实缺失的依赖继续给出去重诊断。",
         "至少一个样本验证已安装依赖复用（installed=true、不重复下载安装）与依赖先于主包的计划顺序；若其入口依赖 R26 尚未完成，明确记录为依赖项而不是通过。",
@@ -137,7 +137,7 @@
   "boundaries": [
     {
       "id": "arm64-only",
-      "reason": "These three packages publish only arm64 artifacts. Under 64bit Coop refuses them exactly as Scoop Get-SupportedArchitecture does, and --arch arm64 planning succeeds. Their arm64 lifecycle real run is the human-approved exception recorded in #42/#45 on 2026-10-27, limited to these three packages; it stays unrun/unverified, so it is never counted as ARM64 runtime proof or as an excluded package.",
+      "reason": "These three packages publish only arm64 artifacts. Under 64bit Burrow refuses them exactly as Scoop Get-SupportedArchitecture does, and --arch arm64 planning succeeds. Their arm64 lifecycle real run is the human-approved exception recorded in #42/#45 on 2026-10-27, limited to these three packages; it stays unrun/unverified, so it is never counted as ARM64 runtime proof or as an excluded package.",
       "evidence": "R21 closure-verify-20261027-060914/closure-verify-summary.json: three packages keep ir/missing-artifact under 64bit, exit 0 with execution_available=true under --arch arm64. Human approval (2026-10-27) is recorded in #42/#45 comments; pinned Scoop manifest.ps1:156-181 gives the equivalent 64bit refusal.",
       "approval_date": "2026-10-27",
       "approval_scope": "3 ARM64-only package lifecycles only"
@@ -150,7 +150,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -163,7 +163,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -176,7 +176,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -189,7 +189,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -202,7 +202,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -215,7 +215,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -228,7 +228,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -241,7 +241,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -254,7 +254,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -267,7 +267,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -280,7 +280,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -293,7 +293,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -306,7 +306,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -319,7 +319,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -332,7 +332,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -345,7 +345,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -358,7 +358,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -371,7 +371,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -384,7 +384,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -397,7 +397,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -410,7 +410,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -423,7 +423,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -436,7 +436,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -449,7 +449,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -462,7 +462,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -475,7 +475,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -488,7 +488,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -501,7 +501,7 @@
       "codes": [
         "adapter/unsupported-capability"
       ],
-      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Coop has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
+      "cause": "The adapter rejects the declared psmodule field as an unsupported capability; Burrow has no modules junction or PSModulePath handling (src/ir_adapter.cpp:351-355, src/script.cpp:16-19 only loads the pinned psmodules helper for scripts). Scoop installs the module by junctioning <root>/modules/<name> to $dir and adding modulesdir to PSModulePath (pinned scoop-lib/psmodules.ps1:1-53).",
       "resolution": {
         "kind": "ticket",
         "ticket": "R25"
@@ -514,7 +514,7 @@
       "codes": [
         "ir/dependency-missing"
       ],
-      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Coop resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
+      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Burrow resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R28"
@@ -528,7 +528,7 @@
       "codes": [
         "ir/dependency-missing"
       ],
-      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Coop resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
+      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Burrow resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R28"
@@ -542,7 +542,7 @@
       "codes": [
         "ir/dependency-missing"
       ],
-      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Coop resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
+      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Burrow resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R28"
@@ -556,7 +556,7 @@
       "codes": [
         "ir/dependency-missing"
       ],
-      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Coop resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
+      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Burrow resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R28"
@@ -570,7 +570,7 @@
       "codes": [
         "ir/dependency-missing"
       ],
-      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Coop resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
+      "cause": "The declared dependency package lives in the official versions bucket, which is not registered in this environment; Burrow resolves versions/* when the bucket exists and otherwise reports the missing source instead of guessing (fixture evidence in the R21 report). This is an environment precondition for verification (R28), not a missing dependency mechanism.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R28"
@@ -701,7 +701,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -717,7 +717,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -733,7 +733,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -749,7 +749,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -765,7 +765,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -781,7 +781,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -799,7 +799,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -815,7 +815,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -831,7 +831,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -847,7 +847,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -863,7 +863,7 @@
       "codes": [
         "adapter/unsupported-command-host"
       ],
-      "cause": "The command entry target type has no Coop launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
+      "cause": "The command entry target type has no Burrow launcher; the adapter only accepts EXE, COM, BAT, CMD, PS1 and JAR (src/ir_adapter.cpp:252-255). Scoop has explicit shim hosts for .py (python) and for every other suffix (bash) at pinned scoop-lib/core.ps1:1076-1116.",
       "resolution": {
         "kind": "ticket",
         "ticket": "R26"
@@ -906,7 +906,7 @@
     "verified_at": "2026-10-27T06:14:31.9817738Z",
     "code_head": "991e67544b319f9bc65f8276f5349d5bd5c14fcf",
     "base_head": "62c4057a5be69e76c2f46147d76d2ecea5c3b3b5",
-    "coop_sha256": "20e8fdbc3514f2d142a510c49ea5510a995fd62513840073039c1e3bae19ddbf",
+    "burrow_sha256": "20e8fdbc3514f2d142a510c49ea5510a995fd62513840073039c1e3bae19ddbf",
     "inventory": {
       "baseline": {
         "project_head": "8283e6a062f5044f8a180ede05634c0efca619c7",
@@ -925,8 +925,8 @@
         "plan_executable": 4141,
         "plan_blocked": 6
       },
-      "full_inventory_evidence": "D:\\Projects\\coop\\.local\\pi\\tasks\\49\\evidence\\coverage-versions-final\\coverage-20261027-054326\\summary.json",
-      "reused_because": "current head differs from the measurement head only in documentation, guard tests and the coverage ledger; no product code or measurement input changed; coop.exe sha256 is identical"
+      "full_inventory_evidence": "D:\\Projects\\burrow\\.local\\pi\\tasks\\49\\evidence\\coverage-versions-final\\coverage-20261027-054326\\summary.json",
+      "reused_because": "current head differs from the measurement head only in documentation, guard tests and the coverage ledger; no product code or measurement input changed; burrow.exe sha256 is identical"
     },
     "row_status": {
       "resolved": 49,

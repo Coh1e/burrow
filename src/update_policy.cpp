@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 bool digit(char c) { return c >= '0' && c <= '9'; }
 bool identifier(char c) { return digit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-'; }
@@ -98,7 +98,7 @@ const char* update_state_message(UpdateState state) {
     case UpdateState::manifest_changed: return "Same-version manifest changed; use --force to reinstall";
     case UpdateState::downgrade: return "Target version is lower; update refuses to downgrade (including --force)";
     case UpdateState::incomparable: return "Cannot reliably compare versions; update is blocked (including --force)";
-    case UpdateState::held: return "Package is held; use coop unhold before updating (including --force)";
+    case UpdateState::held: return "Package is held; use burrow unhold before updating (including --force)";
     }
     return "Cannot determine update eligibility";
 }

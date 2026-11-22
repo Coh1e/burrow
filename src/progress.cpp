@@ -8,12 +8,12 @@
 #include <thread>
 #include <windows.h>
 
-namespace coop {
+namespace burrow {
 namespace {
 Progress* g_progress = nullptr;
 // Every emitted line and every progress tick updates this stamp; the stall watchdog compares it with
 // the current time. A write command that reaches a step which can block (name resolution, TCP connect,
-// TLS, a lock) leaves no other visible trace until that step returns, which is how `coop update coop`
+// TLS, a lock) leaves no other visible trace until that step returns, which is how `burrow update burrow`
 // once looked frozen without printing a single line.
 std::atomic<long long> g_last_output_ms{0};
 long long now_ms() {
@@ -46,7 +46,7 @@ StallWatchdog::StallWatchdog(int threshold_seconds) : threshold_seconds_(thresho
             // The stamp moves forward so the next warning is one interval away, not immediate.
             g_last_output_ms.store(now);
             const std::lock_guard<std::mutex> lock(g_output_mutex);
-            std::cout << "\ncoop: still working, "<<(now-stamp)/1000<<"s without progress\n";
+            std::cout << "\nburrow: still working, "<<(now-stamp)/1000<<"s without progress\n";
             std::cout.flush();
         }
     });
@@ -189,8 +189,8 @@ std::string already_installed(const std::string& name,const std::string& version
     return "WARN  '"+name+"' ("+version+") is already installed.";
 }
 // Verbatim alignment covers the stage lines. A sentence that names the client itself follows the
-// client the user is actually running, so Coop does not tell its own user to run Scoop.
-std::string advise_update(const std::string& name) { return "Use 'coop update "+name+"' to install a new version."; }
+// client the user is actually running, so Burrow does not tell its own user to run Scoop.
+std::string advise_update(const std::string& name) { return "Use 'burrow update "+name+"' to install a new version."; }
 std::string version_move(const std::string& name,const std::string& from,const std::string& to) {
     return name+": "+from+" -> "+to;
 }

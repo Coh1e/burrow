@@ -32,7 +32,7 @@
 #include <set>
 #include <windows.h>
 
-namespace coop {
+namespace burrow {
 static std::string lowercase(std::string value);
 // While an update or uninstall is pending, the old management record may already have been
 // moved into the transaction. Readers then use that last committed record instead of the
@@ -61,7 +61,7 @@ static Json previous_record(const Context& context, const std::string& name, con
 }
 static void list_scope(Json& result, const Context& context, const fs::path& root, const std::string& scope,
                        bool recovery_protected) {
-    // Installation facts come from the shared Scoop layout through the IR adapter. Coop's private
+    // Installation facts come from the shared Scoop layout through the IR adapter. Burrow's private
     // records are optional management metadata read separately below, so they can never decide
     // whether an installed package is visible or block a query when they are missing or stale.
     for (const auto& fact : ir::read_installations(root)) {
@@ -79,7 +79,7 @@ static void list_scope(Json& result, const Context& context, const fs::path& roo
             item["architecture"] = fact.architecture;
             item["directory"] = path_text(fact.directory);
             // `hold` lives in the install record Scoop itself writes, so a hold set by either client
-            // is visible here without any Coop-private state.
+            // is visible here without any Burrow-private state.
             item["hold"] = package_is_held(fact.directory);
             item["status"] = "installed";
             if (scope == "user")
@@ -91,11 +91,11 @@ static void list_scope(Json& result, const Context& context, const fs::path& roo
                 const auto record = read_json(managed);
                 item["management"] = "managed";
                 item["status"] = record.value("status",std::string("unknown"));
-                item["origin"] = record.value("origin",std::string("coop"));
+                item["origin"] = record.value("origin",std::string("burrow"));
             } catch (const std::exception& error) {
-                const auto message = std::string("Coop management record is unreadable; shared installation facts are still reported: ")+error.what();
+                const auto message = std::string("Burrow management record is unreadable; shared installation facts are still reported: ")+error.what();
                 item["diagnostics"].push_back(message);
-                details.push_back({{"layer","adapter"},{"code","coop-record-unreadable"},{"message",message}});
+                details.push_back({{"layer","adapter"},{"code","burrow-record-unreadable"},{"message",message}});
             }
         }
         item["diagnostic_details"] = std::move(details);
@@ -179,12 +179,12 @@ Json installed_packages(const Context& context) {
                 item["status"] = "pending-recovery";
                 item["diagnostics"] = Json::array();
             } else if (recovery->second.value("action",std::string{}) == "install") {
-                // A later Scoop operation installed the same package while Coop's own install is
+                // A later Scoop operation installed the same package while Burrow's own install is
                 // still pending. Report the installation that actually exists now and keep the
                 // pending transaction visible instead of hiding either fact.
                 item["last_operation"] = "pending-recovery";
                 item["status"] = "pending-recovery";
-                item["diagnostics"].push_back("A pending Coop install coexists with an installation readable from the shared layout");
+                item["diagnostics"].push_back("A pending Burrow install coexists with an installation readable from the shared layout");
             } else {
                 // The current link can already be staged in the transaction while the last
                 // committed management record is still in place. Report that record's version as
@@ -230,7 +230,7 @@ static Json catalog_item(const Json& source, const Json& entry, const fs::path& 
 }
 // Scoop's Get-LocalBucket puts the well-known buckets first, in the order of its buckets.json
 // (main, extras, …), and appends every other bucket alphabetically. A plain alphabetical sort put
-// `coh1e/coop` above `main/…`, which is not the order Scoop prints.
+// `coh1e/burrow` above `main/…`, which is not the order Scoop prints.
 static int bucket_rank(const std::string& bucket) {
     static const std::vector<std::string> known = {"main","extras","versions","nirsoft","sysinternals",
         "php","nerd-fonts","nonportable","java","games"};
@@ -429,7 +429,7 @@ static std::set<std::string> deprecated_names(const Context& context) {
     return deprecated_names(bucket_sources(context));
 }
 // Scoop's `Info` column carries exceptions only: `Deprecated package`, `Global install`, `Held
-// package` and a non-default architecture. Coop adds its own pending-recovery state there because a
+// package` and a non-default architecture. Burrow adds its own pending-recovery state there because a
 // write that needs recovery must be visible without reading `--json`.
 static std::string exception_labels(const Json& item, const std::set<std::string>& deprecated) {
     std::vector<std::string> labels;
@@ -607,11 +607,11 @@ static void print_installed_table(const Context& context, const Json& result, co
     for (const auto& item : result) {
         if (field_text(item,"last_operation") != "pending-recovery") continue;
         const auto name = field_text(item,"name");
-        std::cout << "WARN  " << name << ": pending recovery; run 'coop recover " << name << "'\n";
+        std::cout << "WARN  " << name << ": pending recovery; run 'burrow recover " << name << "'\n";
     }
 }
 // Scoop's search falls back to the buckets it knows about but that are not installed locally, asking
-// the GitHub tree API for manifest names. Coop follows the same rule: only when the local buckets have
+// the GitHub tree API for manifest names. Burrow follows the same rule: only when the local buckets have
 // no match, one request per missing known bucket, with an overall time budget so a slow or blocked
 // network cannot hold the command for minutes.
 namespace {
@@ -636,7 +636,7 @@ static Json remote_search(const Context& context, const std::string& needle) {
     std::vector<std::string> installed;
     for (const auto& source : bucket_sources(context))
         installed.push_back(lowercase(source.value("name",std::string{})));
-    std::string api = environment_text(L"COOP_GITHUB_API");
+    std::string api = environment_text(L"BURROW_GITHUB_API");
     if (api.empty()) api = "https://api.github.com";
     const bool local_api = api.starts_with("file://");
     // One request per missing known bucket, all at once. Sequentially this took ~10 s for the ten
@@ -652,7 +652,7 @@ static Json remote_search(const Context& context, const std::string& needle) {
             std::vector<std::string> names;
             int status = 0;
             std::string body;
-            try { body = http_get_text(url,{{"User-Agent","Coop"},{"Accept","application/vnd.github+json"}},status); }
+            try { body = http_get_text(url,{{"User-Agent","Burrow"},{"Accept","application/vnd.github+json"}},status); }
             catch (const std::exception&) { return names; }
             if (status != 200) return names;
             Json tree = Json::object();
@@ -831,7 +831,7 @@ static void print_info_block(const Context& context, const Json& item, const std
         add("Installed",text);
     }
     if (verbose) {
-        // Scoop's verbose view reports how much the installation occupies. Coop reports one total:
+        // Scoop's verbose view reports how much the installation occupies. Burrow reports one total:
         // the current version plus the persisted data the Manifest declares.
         std::uintmax_t total = 0;
         std::error_code error;
@@ -911,26 +911,26 @@ static std::string manifest_version_text(const fs::path& path) {
     try { return read_json(path).value("version",std::string{}); }
     catch (const std::exception&) { return {}; }
 }
-static ResultItem coop_version_unknown() {
-    return {"coop","process",ResultState::blocked,"version-incomparable",{},
-        {{"version-incomparable","Could not determine whether Coop has an update: versions cannot be compared."}}};
+static ResultItem burrow_version_unknown() {
+    return {"burrow","process",ResultState::blocked,"version-incomparable",{},
+        {{"version-incomparable","Could not determine whether Burrow has an update: versions cannot be compared."}}};
 }
-static ResultItem check_official_coop_update() {
+static ResultItem check_official_burrow_update() {
     try {
-        auto api = environment_text(L"COOP_GITHUB_API");
+        auto api = environment_text(L"BURROW_GITHUB_API");
         if (api.empty()) api = "https://api.github.com";
         int status = 0;
-        const auto body = http_get_text(api+"/repos/Coh1e/coop/releases/latest",
-            {{"User-Agent","Coop"},{"Accept","application/vnd.github+json"}},status);
+        const auto body = http_get_text(api+"/repos/Coh1e/burrow/releases/latest",
+            {{"User-Agent","Burrow"},{"Accept","application/vnd.github+json"}},status);
         if (status != 200) throw std::runtime_error("Release request failed");
         const auto release = Json::parse(body);
         const auto tag = release.at("tag_name").get<std::string>();
         const std::regex version("^v?([0-9]+)\\.([0-9]+)\\.([0-9]+)$");
         std::smatch latest, current;
-        const std::string running = COOP_VERSION;
+        const std::string running = BURROW_VERSION;
         if (tag.empty()) throw std::runtime_error("Missing release version");
         if (!std::regex_match(tag,latest,version) || !std::regex_match(running,current,version))
-            return coop_version_unknown();
+            return burrow_version_unknown();
         bool newer = false;
         for (std::size_t index = 1; index <= 3; ++index) {
             // Compare decimal components without integer overflow, even for untrusted API input.
@@ -943,29 +943,29 @@ static ResultItem check_official_coop_update() {
             newer = left.size() != right.size() ? left.size() > right.size() : left > right;
             break;
         }
-        return {"coop","process",newer ? ResultState::attention : ResultState::ok,
+        return {"burrow","process",newer ? ResultState::attention : ResultState::ok,
             newer ? "update-available" : "remote-current",
             {{"remote_version",tag},{"message",newer ?
-                "Coop update available: "+running+" -> "+tag+". See https://github.com/Coh1e/coop/releases/latest" :
-                "Coop is up to date."}}, {}};
+                "Burrow update available: "+running+" -> "+tag+". See https://github.com/Coh1e/burrow/releases/latest" :
+                "Burrow is up to date."}}, {}};
     } catch (const std::exception&) {
-        return {"coop","process",ResultState::failed,"remote-check-failed",{},
-            {{"remote-check-failed","Could not check Coop updates."}}};
+        return {"burrow","process",ResultState::failed,"remote-check-failed",{},
+            {{"remote-check-failed","Could not check Burrow updates."}}};
     }
 }
-static ResultItem check_coop_update(const Context& context, const Json& sources) {
-    ResultItem result{"coop","process",ResultState::failed,"remote-check-failed",{}, {}};
+static ResultItem check_burrow_update(const Context& context, const Json& sources) {
+    ResultItem result{"burrow","process",ResultState::failed,"remote-check-failed",{}, {}};
     try {
-        const auto app = context.root/L"apps"/L"coop";
+        const auto app = context.root/L"apps"/L"burrow";
         if (!fs::exists(app)) {
-            result = check_official_coop_update();
+            result = check_official_burrow_update();
             result.data["source"] = std::string("official-release");
             return result;
         }
         const auto current = app/L"current";
         const auto installed = read_json(installed_record(current,L"install"));
         const auto bucket = installed.at("bucket").get<std::string>();
-        if (bucket.empty()) throw std::runtime_error("Coop install record has no bucket");
+        if (bucket.empty()) throw std::runtime_error("Burrow install record has no bucket");
         result.data["source"] = std::string("bucket");
         result.data["bucket"] = bucket;
         for (const auto& source : sources) {
@@ -976,16 +976,16 @@ static ResultItem check_coop_update(const Context& context, const Json& sources)
             if (source.value("fixed_revision",std::string{}).empty() &&
                 (kind == "git" || fs::exists(path/L".git")) &&
                 bucket_manifests_may_be_stale(source)) {
-                throw std::runtime_error("Coop's installation bucket may have stale manifests");
+                throw std::runtime_error("Burrow's installation bucket may have stale manifests");
             }
             const auto directory = fs::is_directory(path/L"bucket") ? path/L"bucket" : path;
-            const auto candidate = manifest_version_text(directory/L"coop.json");
+            const auto candidate = manifest_version_text(directory/L"burrow.json");
             const auto version = manifest_version_text(installed_record(current,L"manifest"));
             const auto order = compare_update_versions(version,candidate);
             if (version.empty() || candidate.empty())
-                throw std::runtime_error("Cannot compare installed Coop and its source manifest");
+                throw std::runtime_error("Cannot compare installed Burrow and its source manifest");
             if (order == VersionOrder::unknown) {
-                const auto unknown = coop_version_unknown();
+                const auto unknown = burrow_version_unknown();
                 result.state = unknown.state;
                 result.reason = unknown.reason;
                 result.diagnostics = unknown.diagnostics;
@@ -995,13 +995,13 @@ static ResultItem check_coop_update(const Context& context, const Json& sources)
             result.state = newer ? ResultState::attention : ResultState::ok;
             result.reason = newer ? "update-available" : "remote-current";
             result.data["source_version"] = candidate;
-            result.data["message"] = newer ? "Coop update available from bucket "+bucket+": "+version+" -> "+candidate :
-                "Coop is up to date in bucket "+bucket+".";
+            result.data["message"] = newer ? "Burrow update available from bucket "+bucket+": "+version+" -> "+candidate :
+                "Burrow is up to date in bucket "+bucket+".";
             return result;
         }
-        throw std::runtime_error("Coop's installation bucket is unavailable");
+        throw std::runtime_error("Burrow's installation bucket is unavailable");
     } catch (const std::exception& error) {
-        result.diagnostics.push_back({result.reason,"Could not check Coop updates: "+std::string(error.what())});
+        result.diagnostics.push_back({result.reason,"Could not check Burrow updates: "+std::string(error.what())});
         return result;
     }
 }
@@ -1090,7 +1090,7 @@ static int status_command(const Context& context, bool local) {
         read_local_status(context,sources,report);
         if (!local) {
             report.request.local_only = false;
-            for (const auto& remote : {check_coop_update(context,sources),check_scoop_update(context)}) {
+            for (const auto& remote : {check_burrow_update(context,sources),check_scoop_update(context)}) {
                 for (auto& client : report.clients) {
                     if (client.name != remote.name) continue;
                     if (client.state != ResultState::failed) {
@@ -1128,7 +1128,7 @@ static int status_command(const Context& context, bool local) {
     bool remote_checks_ok = !source_discovery_failed;
     bool remote_checks_failed = source_discovery_failed;
     if (!local && !context.json_output) {
-        for (const auto& client : {check_coop_update(context,sources),check_scoop_update(context)}) {
+        for (const auto& client : {check_burrow_update(context,sources),check_scoop_update(context)}) {
             if (const auto message = client.data.find("message"); message != client.data.end())
                 std::cout << (client.state == ResultState::ok ? "" : "WARN  ") << std::get<std::string>(message->second) << '\n';
             for (const auto& diagnostic : client.diagnostics)
@@ -1267,7 +1267,7 @@ static int which_command(const Context& context, const std::string& name) {
         std::cout << friendly_path(path_text(candidate)) << '\n';
         return 0;
     }
-    // Scoop exits 2 here; Coop keeps its own 0/1/2 contract, where 2 means the command line was
+    // Scoop exits 2 here; Burrow keeps its own 0/1/2 contract, where 2 means the command line was
     // wrong. The message is Scoop's.
     std::cout << "WARN  '" << name << "' not found, not a scoop shim, or a broken shim.\n";
     return 1;
@@ -1283,18 +1283,18 @@ static int home_command(const Context& context, const std::string& name) {
 }
 // ---------------------------------------------------------------------------
 // `help`, `depends`, `export` and `checkup`. The command table lives in commands.cpp so that
-// `coop help` and `coop --help` cannot list different commands; usage strings and summaries follow
-// Scoop 0.6.0's own help headers, and the `implemented` flag is Coop's, so help never promises a
+// `burrow help` and `burrow --help` cannot list different commands; usage strings and summaries follow
+// Scoop 0.6.0's own help headers, and the `implemented` flag is Burrow's, so help never promises a
 // command that does not exist yet.
 // ---------------------------------------------------------------------------
 static int help_command(const std::vector<std::wstring>& args) {
     if (args.size() > 1) throw UsageError("help accepts at most one command");
     if (args.empty()) {
-        // Scoop's page, verbatim: `coop help` is compared line by line with `scoop help`, so Coop
+        // Scoop's page, verbatim: `burrow help` is compared line by line with `scoop help`, so Burrow
         // adds no rows (init and recover stay out) and rewrites no summary.
-        std::cout << "Usage: coop <command> [<args>]\n\n"
+        std::cout << "Usage: burrow <command> [<args>]\n\n"
                      "Available commands are listed below.\n\n"
-                     "Type 'coop help <command>' to get more help for a specific command.\n\n";
+                     "Type 'burrow help <command>' to get more help for a specific command.\n\n";
         std::vector<std::vector<std::string>> rows;
         for (const auto& command : commands())
             if (command.scoop_command)
@@ -1307,16 +1307,16 @@ static int help_command(const std::vector<std::wstring>& args) {
     const auto name = lowercase(utf8(args.front()));
     for (const auto& command : commands()) {
         if (name != command.name) continue;
-        std::cout << "Usage: coop " << command.name;
+        std::cout << "Usage: burrow " << command.name;
         if (*command.usage) std::cout << ' ' << command.usage;
         std::cout << "\n\n";
         const auto details = command_help(name);
         if (!details.empty()) std::cout << details << '\n';
         else if (!command.scoop_command) std::cout << command.summary << '\n';
         if (const auto limits = command_limitations(name); !limits.empty())
-            std::cout << "\nCoop notes:\n  " << limits << '\n';
+            std::cout << "\nBurrow notes:\n  " << limits << '\n';
         if (command.implemented) return 0;
-        std::cout << "\nWARN  this Scoop command is not implemented in Coop yet.\n";
+        std::cout << "\nWARN  this Scoop command is not implemented in Burrow yet.\n";
         return 1;
     }
     throw UsageError("unknown command; use --help");
@@ -1406,7 +1406,7 @@ static int checkup_command(const Context& context) {
         report("LongPaths support is not enabled.");
         std::cout << "  You can enable it by running:\n"
                      "    sudo Set-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem' -Name 'LongPathsEnabled' -Value 1\n"
-                     "  (Requires 'sudo' command. Run 'coop install sudo' if you don't have it.)\n";
+                     "  (Requires 'sudo' command. Run 'burrow install sudo' if you don't have it.)\n";
     }
     DWORD developer_mode = 0;
     size = sizeof(developer_mode);
@@ -1417,11 +1417,11 @@ static int checkup_command(const Context& context) {
                      "  https://blogs.windows.com/windowsdeveloper/2016/12/02/symlinks-windows-10/\n";
     }
     if (nsis_helper(context).path.empty())
-        report("'7-Zip' is not installed! It's required for unpacking NSIS and some self-extracting archives. Please run 'coop install 7zip'.");
+        report("'7-Zip' is not installed! It's required for unpacking NSIS and some self-extracting archives. Please run 'burrow install 7zip'.");
     if (inno_helper(context).path.empty())
-        report("'Inno Setup Unpacker' is not installed! It's required for unpacking InnoSetup files. Please run 'coop install innounp'.");
-    // WiX extraction is not implemented by Coop. Report Scoop's helper requirement for the
-    // shared root without implying that installing the helper enables this mechanism in Coop.
+        report("'Inno Setup Unpacker' is not installed! It's required for unpacking InnoSetup files. Please run 'burrow install innounp'.");
+    // WiX extraction is not implemented by Burrow. Report Scoop's helper requirement for the
+    // shared root without implying that installing the helper enables this mechanism in Burrow.
     bool dark = false;
     std::vector<fs::path> helper_roots{context.root};
     if (context.global_root) helper_roots.push_back(*context.global_root);
@@ -1430,7 +1430,7 @@ static int checkup_command(const Context& context) {
         if (fs::is_regular_file(root/relative,helper_error)) dark = true;
     }
     if (!dark)
-        report("'dark' is not installed! Scoop requires it for unpacking installers created with the WiX Toolset. Please run 'coop install dark' or 'coop install wixtoolset'.");
+        report("'dark' is not installed! Scoop requires it for unpacking installers created with the WiX Toolset. Please run 'burrow install dark' or 'burrow install wixtoolset'.");
     bool main_bucket = false;
     for (const auto& source : bucket_sources(context)) {
         if (source.value("kind",std::string{}) == "removed") continue;
@@ -1451,7 +1451,7 @@ static int checkup_command(const Context& context) {
         try {
             const auto journal = read_json(journal_path);
             if (journal.value("state",std::string{}) != "pending") continue;
-            report("Package '"+journal.value("package",std::string{})+"' has a pending transaction; run 'coop recover'.");
+            report("Package '"+journal.value("package",std::string{})+"' has a pending transaction; run 'burrow recover'.");
         } catch (const std::exception&) { /* An unreadable journal is reported by `list`, not here. */ }
     }
     // A shim whose target disappeared leaves a broken command on PATH.
@@ -1553,7 +1553,7 @@ int query(const Context& context, const std::wstring& command, const std::vector
     }
     if (!context.json_output) for (const auto& item : result)
         for (const auto& error : item.value("diagnostics",Json::array()))
-            if (error.is_string()) std::cerr << "coop: " << error.get<std::string>() << '\n';
+            if (error.is_string()) std::cerr << "burrow: " << error.get<std::string>() << '\n';
     return 0;
 }
 }

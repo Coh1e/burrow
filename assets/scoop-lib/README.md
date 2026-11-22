@@ -1,7 +1,7 @@
 # Pinned Scoop compatibility library
 
-This directory is a verbatim copy of the Scoop PowerShell library that Coop loads in every
-lifecycle hook host. Coop does not implement its own reduced `ensure`/`info`/`warn` set: the real
+This directory is a verbatim copy of the Scoop PowerShell library that Burrow loads in every
+lifecycle hook host. Burrow does not implement its own reduced `ensure`/`info`/`warn` set: the real
 Scoop helpers (`ensure`, `info`, `warn`, `error`, `abort`, `success`, `appdir`, `env_add_path`,
 `env_set`, `Expand-*Archive`, `Get-EnvVar`, `Set-EnvVar`, `Invoke-ExternalCommand`, `is_admin`, …)
 are the implementation, so a Manifest script that works in Scoop gets the same helper semantics.
@@ -15,13 +15,13 @@ are the implementation, so a Manifest script that works in Scoop gets the same h
 | Modifications | None. Every committed file is byte-identical to the upstream repository blob at that commit (LF line endings); `.gitattributes` marks this directory `-text` so no checkout or commit step rewrites it. |
 
 The files are the union of the library preludes Scoop's own `bin/scoop.ps1`, `scoop-install.ps1`,
-`scoop-update.ps1` and `scoop-uninstall.ps1` load before a lifecycle hook runs. Coop loads them in
+`scoop-update.ps1` and `scoop-uninstall.ps1` load before a lifecycle hook runs. Burrow loads them in
 that order: `bin/scoop.ps1` first (`core`, `buckets`, `commands`, `help`), then the command libraries
 (`getopt`, `json`, `autoupdate`, `manifest`, `system`, `install`, `download`, `decompress`,
 `shortcuts`, `psmodules`, `versions`, `depends`).
 
 Each Git blob below is identical to `git rev-parse e6aa3b3:lib/<name>.ps1`; the SHA256 is computed
-over the committed bytes and is also what the build copies beside `coop.exe`, so an accidental edit
+over the committed bytes and is also what the build copies beside `burrow.exe`, so an accidental edit
 is detectable with either hash.
 
 | File | Git blob at `e6aa3b3` | SHA256 |
@@ -46,14 +46,14 @@ is detectable with either hash.
 
 ## Runtime lookup
 
-Coop looks for this directory in two places, in order:
+Burrow looks for this directory in two places, in order:
 
-1. `COOP_SCOOP_LIB` when set to a directory that contains `core.ps1`; this is a per-subprocess
+1. `BURROW_SCOOP_LIB` when set to a directory that contains `core.ps1`; this is a per-subprocess
    override used by isolated tests and does not change the user or system environment.
-2. `scoop-lib` next to `coop.exe`; the build copies this directory there, and a distribution must
+2. `scoop-lib` next to `burrow.exe`; the build copies this directory there, and a distribution must
    ship it beside the executable.
 
-Coop never reads the library out of a Scoop installation chosen as the management root, so hook
+Burrow never reads the library out of a Scoop installation chosen as the management root, so hook
 semantics stay pinned instead of silently following whatever Scoop version happens to be installed.
-`COOP_POWERSHELL` may pin the PowerShell interpreter; otherwise `pwsh.exe` is preferred and Windows
+`BURROW_POWERSHELL` may pin the PowerShell interpreter; otherwise `pwsh.exe` is preferred and Windows
 PowerShell is the fallback.

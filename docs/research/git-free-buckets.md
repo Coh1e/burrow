@@ -1,12 +1,12 @@
-# Scoop Git 使用与 goop 无 Git 路径：Coop 设计建议
+# Scoop Git 使用与 goop 无 Git 路径：Burrow 设计建议
 
-调查日期：2026-10-25。关联任务：[Coh1e/coop#1](https://github.com/Coh1e/coop/issues/1)。这是源码静态调查与设计建议，不是实现或性能验证。
+调查日期：2026-10-25。关联任务：[Coh1e/burrow#1](https://github.com/Coh1e/burrow/issues/1)。这是源码静态调查与设计建议，不是实现或性能验证。
 
 ## 结论
 
 **2026-10-25 后续决定**：用户明确选择直接使用 C++ 可调用的 Git 库。以下快照建议保留为调研对照，已不作为首选方案。当前首选候选为 libgit2；最小边界为打开/克隆仓库、读取来源与 ref、远端修订发现与 fetch、tree/blob 读取和 diff，历史遍历按兼容范围另行确定。尚未运行构建和性能验证。
 
-Coop 无需强制安装 git.exe。goop 已在源码中给出 GitHub bucket 无 Git 获取路径；但它没有内嵌最小 Git 实现，而是下载仓库归档。应提炼 Coop 需要的仓库操作，而不是照搬 Git CLI 命令集合。是否引入 Git 库，仍取决于增量同步、历史查询和非 GitHub 来源的验收要求。
+Burrow 无需强制安装 git.exe。goop 已在源码中给出 GitHub bucket 无 Git 获取路径；但它没有内嵌最小 Git 实现，而是下载仓库归档。应提炼 Burrow 需要的仓库操作，而不是照搬 Git CLI 命令集合。是否引入 Git 库，仍取决于增量同步、历史查询和非 GitHub 来源的验收要求。
 
 Scoop 的完整命令调用清单见 [审计报告](scoop-git-command-audit.md)。其中历史 Manifest 查询属于终端用户功能，不能与贡献者工具一起排除。
 
@@ -17,18 +17,18 @@ Scoop 的完整命令调用清单见 [审计报告](scoop-git-command-audit.md)�
 
 ## goop 实际做法
 
-| 场景 | 已读到的代码行为 | 对 Coop 的意义 |
+| 场景 | 已读到的代码行为 | 对 Burrow 的意义 |
 | --- | --- | --- |
 | 首次获取 Git bucket | PATH 有 Git 时 `clone --depth 1`；没有时将 GitHub URL 转为 codeload ZIP | 无外部 Git 可行，但并非自行实现 Git |
 | 后续 Git 更新 | `fetch`、`reset --hard FETCH_HEAD`、`clean -fd` | 将 bucket 当作可丢弃上游镜像，会覆盖修改并删除未跟踪内容，不适合直接处理未知迁移目录 |
 | 无 Git 更新 | GitHub archive 下载到 staging，然后删除旧目录并 rename | 每次全量下载；旧目录删除后 rename 失败的恢复仍需额外设计 |
-| 后来安装了 Git | 将原快照重新 shallow clone 一次 | goop 将 Git 当可选加速路径；Coop 是否采用这种环境相关行为尚未决定 |
+| 后来安装了 Git | 将原快照重新 shallow clone 一次 | goop 将 Git 当可选加速路径；Burrow 是否采用这种环境相关行为尚未决定 |
 | 迁移时识别 origin | 直接读取 `.git/config` 的 origin URL，不启动 Git | 可读取常见配置，但该代码不等同完整 Git config/worktree/include 解析 |
 | 历史版本 | README 明确只解析 bucket 当前提供的版本 | 不能拿这一路径宣称完整兼容 Scoop 的历史 Manifest 查找 |
 
 依据：goop [`bucket.go:25–54`](https://github.com/TanguyBaudoin/goop/blob/3f78a1377967e6f080a65a231ed0f18abad63d0e/internal/bucket/bucket.go#L25-L54)、[`169–192`](https://github.com/TanguyBaudoin/goop/blob/3f78a1377967e6f080a65a231ed0f18abad63d0e/internal/bucket/bucket.go#L169-L192)、[`438–540`](https://github.com/TanguyBaudoin/goop/blob/3f78a1377967e6f080a65a231ed0f18abad63d0e/internal/bucket/bucket.go#L438-L540)；[`migrate.go:371–398`](https://github.com/TanguyBaudoin/goop/blob/3f78a1377967e6f080a65a231ed0f18abad63d0e/internal/installer/migrate.go#L371-L398)；[固定版 README](https://github.com/TanguyBaudoin/goop/blob/3f78a1377967e6f080a65a231ed0f18abad63d0e/README.md) 的 “Which bucket you pin against”。README 的速度与测试数字仅为上游自述，本轮未复测。
 
-特别注意：goop 使用 `/zip/HEAD`，只从 URL 得出 owner/repo；这不保留迁移仓库当前分支或固定 revision。Coop 接管时必须将来源、所用分支/固定 revision 与本地目录分开表示，无法确定时停止该来源的更新，而不是猜默认分支。goop 的迁移实现还采用复制到自身目录的方式，不能直接当作 Coop 已确定的原地接管方案。
+特别注意：goop 使用 `/zip/HEAD`，只从 URL 得出 owner/repo；这不保留迁移仓库当前分支或固定 revision。Burrow 接管时必须将来源、所用分支/固定 revision 与本地目录分开表示，无法确定时停止该来源的更新，而不是猜默认分支。goop 的迁移实现还采用复制到自身目录的方式，不能直接当作 Burrow 已确定的原地接管方案。
 
 ## 建议的最小能力
 
@@ -44,13 +44,13 @@ Scoop 的完整命令调用清单见 [审计报告](scoop-git-command-audit.md)�
 
 ### Git 对应关系
 
-| Scoop 使用的能力 | Coop 最小替代建议 |
+| Scoop 使用的能力 | Burrow 最小替代建议 |
 | --- | --- |
 | clone / pull / fetch / checkout 等来源更新 | revision 查询 + 确定 revision 快照获取 + 可恢复发布；需要真增量时另选 Git 库 |
 | config remote URL / branch / rev-parse | 来源记录和 revision 解析；迁移复杂 Git 元数据需要专门支持或拒绝 |
 | diff 更新索引 | 本地内容比较生成变化清单 |
 | log / show 安装历史版本 | 单独的历史 Manifest resolver；当前快照路径无法替代 |
-| Scoop 自更新的 stash / branch / reset / tags | Coop 不更新 Scoop 源码；Coop 自更新应独立设计 |
+| Scoop 自更新的 stash / branch / reset / tags | Burrow 不更新 Scoop 源码；Burrow 自更新应独立设计 |
 | push / add / commit / rebase 等贡献流程 | 不属于首版消费 bucket 的必要能力 |
 
 ### 需要保留的限制
@@ -78,7 +78,7 @@ Scoop 的完整命令调用清单见 [审计报告](scoop-git-command-audit.md)�
 
 - 本轮通过 GitHub connector 读取固定版源文件；只读副本保存在被忽略的 `.local/research/goop/`，未执行上游代码。
 - 已读取 `internal/bucket/bucket.go`、其测试、`internal/installer/migrate.go`、`import.go`、`internal/manifest/resolve.go`、README、ARCHITECTURE、go.mod。ARCHITECTURE 中部分迁移描述与其他源码/README 有版本内差异，因此本报告具体判断以函数实现为准。
-- 本轮运行 `gh issue list --repo Coh1e/coop ...`（成功，最初为空）、create 和 view；最初受限网络调用失败退出 1，获得网络执行后退出 0。
+- 本轮运行 `gh issue list --repo Coh1e/burrow ...`（成功，最初为空）、create 和 view；最初受限网络调用失败退出 1，获得网络执行后退出 0。
 - 工具：GitHub CLI 2.103.2，Git 2.56.0.windows.3（仅查询版本，未用 Git 同步外部仓库）。
 - 未运行：Scoop/goop 功能测试、迁移、安装、Git 命令替代、归档下载/解压、条件请求、性能基准、libgit2 构建。
 - 未决：首版是否支持历史 Manifest 查询，快照或内嵌 Git 的运输选择，非 GitHub 来源范围。研究结论不代替这些产品决定。

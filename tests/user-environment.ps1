@@ -1,9 +1,9 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
         # The observation file is the success signal. On 5.1 a -UseNewEnvironment process can report no
         # exit code and creating one can block before Start-Process returns, so 5.1 goes straight to the
         # inherited-environment launch and says so.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
@@ -11,11 +11,11 @@ $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
 $session = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 $tag = 'R08'+([guid]::NewGuid().ToString('N').Substring(0,8))
-$package = 'coop-r08-'+$tag.ToLowerInvariant()
-$absentName = 'COOP_R08_ABSENT_'+$tag
-$restoreName = 'COOP_R08_RESTORE_'+$tag
-$modifiedName = 'COOP_R08_MODIFIED_'+$tag
-$rollbackName = 'COOP_R08_ROLLBACK_'+$tag
+$package = 'burrow-r08-'+$tag.ToLowerInvariant()
+$absentName = 'BURROW_R08_ABSENT_'+$tag
+$restoreName = 'BURROW_R08_RESTORE_'+$tag
+$modifiedName = 'BURROW_R08_MODIFIED_'+$tag
+$rollbackName = 'BURROW_R08_ROLLBACK_'+$tag
 $observedNames = @('Path',$absentName,$restoreName,$modifiedName,$rollbackName)
 function Assert-True([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
 function Get-UserRaw([string]$name) {
@@ -78,23 +78,23 @@ function New-ZipPackage([string]$path,[System.Collections.IDictionary]$entries) 
         }
     } finally { $zip.Dispose(); $stream.Dispose() }
 }
-function Coop([string]$name,[string[]]$arguments) {
-    $output = Invoke-CoopNative $CoopExe  @arguments | Out-String
+function Burrow([string]$name,[string[]]$arguments) {
+    $output = Invoke-BurrowNative $BurrowExe  @arguments | Out-String
     $exit = $LASTEXITCODE
-    if ($exit -ne 0) { throw "coop $($arguments -join ' ') failed with exit $exit`n$output" }
+    if ($exit -ne 0) { throw "burrow $($arguments -join ' ') failed with exit $exit`n$output" }
     return $output
 }
-function CoopJson([string]$name,[string[]]$arguments) {
-    return ((Coop $name $arguments) | ConvertFrom-Json)
+function BurrowJson([string]$name,[string[]]$arguments) {
+    return ((Burrow $name $arguments) | ConvertFrom-Json)
 }
 $snapshots = @{}
 foreach ($name in $observedNames) { $snapshots[$name] = Get-UserRaw $name }
 $root = Join-Path $session 'root'
 $probe = Join-Path $session 'new-terminal-probe.cmd'
 $probeOutput = Join-Path $session 'new-terminal.txt'
-$coopPath = Join-Path $root "apps/$package/current/bin"
-$userPath = 'C:\coop-r08-user-'+$tag
-$sharedUserPath = 'C:\coop-r08-shared-'+$tag
+$burrowPath = Join-Path $root "apps/$package/current/bin"
+$userPath = 'C:\burrow-r08-user-'+$tag
+$sharedUserPath = 'C:\burrow-r08-shared-'+$tag
 $toolCommand = 'r08tool'+$tag.ToLowerInvariant()
 $toolOutput = Join-Path $session 'tool-new-terminal.txt'
 try {
@@ -187,16 +187,16 @@ try {
         return $observedText
     }
     Write-Manifest '1'
-    $preview = CoopJson 'preview-v1' @('--root',$root,'install',"test/$package",'--dry-run','--json')
+    $preview = BurrowJson 'preview-v1' @('--root',$root,'install',"test/$package",'--dry-run','--json')
     Assert-True ($preview.execution_available -eq $true) "install preview was blocked: $($preview.diagnostics | ConvertTo-Json -Compress)"
     Assert-True ($preview.exposure.environment_scope -match 'HKCU') 'preview did not disclose the persistent user environment scope'
-    Assert-True ((Test-Path $coopPath) -eq $false) 'preview created product state'
-    $install = CoopJson 'install-v1' @('--root',$root,'install',"test/$package",'--json')
+    Assert-True ((Test-Path $burrowPath) -eq $false) 'preview created product state'
+    $install = BurrowJson 'install-v1' @('--root',$root,'install',"test/$package",'--json')
     Assert-True ($install.status -eq 'success') "install did not report success: $install"
-    $record = Get-Content -LiteralPath "$root/.coop/packages/$package.json" -Raw | ConvertFrom-Json
+    $record = Get-Content -LiteralPath "$root/.burrow/packages/$package.json" -Raw | ConvertFrom-Json
     Assert-True ($record.user_environment.scope -eq 'HKCU\Environment') 'management record omitted the user environment scope'
     Assert-True (@($record.user_environment.variables).Count -eq 3) 'management record omitted declared user environment variables'
-    Assert-True ((Path-Has @($record.user_environment.path.added) $coopPath)) 'management record omitted the added PATH entry'
+    Assert-True ((Path-Has @($record.user_environment.path.added) $burrowPath)) 'management record omitted the added PATH entry'
     $journal = Get-Content -LiteralPath $install.journal -Raw | ConvertFrom-Json
     Assert-True ($journal.environment_applied.broadcast.sent -eq $true) 'install did not broadcast the environment change'
     Assert-True (@($journal.environment_applied.writes).Count -ge 4) 'install journal omitted the user environment writes'
@@ -207,7 +207,7 @@ try {
     Assert-True ($absent.value -eq 'package-v1') "install did not persist $absentName"
     Assert-True ($restore.value -eq 'package-v1') "install did not persist $restoreName"
     Assert-True ($modified.value -eq 'package-v1') "install did not persist $modifiedName"
-    Assert-PathHas $path $coopPath 'install did not add the declared PATH entry'
+    Assert-PathHas $path $burrowPath 'install did not add the declared PATH entry'
     foreach ($entry in (Path-Entries $snapshots['Path'].value)) { Assert-PathHas $path $entry 'install removed an existing user PATH entry' }
     $terminalInstall = New-TerminalObservation 'install'
     if (-not $terminalUnavailable) {
@@ -224,7 +224,7 @@ try {
     $changedPath = ((Get-UserRaw 'Path').value).TrimEnd(';')+';'+$userPath
     Set-UserRaw 'Path' $changedPath ((Get-UserRaw 'Path').kind)
     Write-Manifest '2'
-    $update = CoopJson 'update-v2' @('--root',$root,'update',$package,'--json')
+    $update = BurrowJson 'update-v2' @('--root',$root,'update',$package,'--json')
     Assert-True ($update.status -eq 'success') "update did not report success: $update"
     $updateJournal = Get-Content -LiteralPath $update.journal -Raw | ConvertFrom-Json
     Assert-True (@($updateJournal.environment_applied.preserved | Where-Object name -eq $modifiedName).Count -eq 1) 'update did not record the preserved user value'
@@ -232,7 +232,7 @@ try {
     Assert-True ((Get-UserRaw $absentName).value -eq 'package-v2') 'update did not replace an owned environment value'
     Assert-True ((Get-UserRaw $restoreName).value -eq 'package-v2') 'update did not replace an owned environment value'
     $path = (Get-UserRaw 'Path').value
-    Assert-PathHas $path $coopPath 'update removed the declared PATH entry'
+    Assert-PathHas $path $burrowPath 'update removed the declared PATH entry'
     Assert-PathHas $path $userPath 'update removed a user-added PATH entry'
     $terminalUpdate = New-TerminalObservation 'update'
     if (-not $terminalUnavailable) {
@@ -242,15 +242,15 @@ try {
         Assert-True ((Get-Content -LiteralPath $toolOutput -Raw) -match 'package=2') 'a new terminal did not run the updated command from PATH'
     }
 
-    $uninstall = CoopJson 'uninstall' @('--root',$root,'uninstall',$package,'--json')
+    $uninstall = BurrowJson 'uninstall' @('--root',$root,'uninstall',$package,'--json')
     Assert-True ($uninstall.status -eq 'success') "uninstall did not report success: $uninstall"
     $uninstallJournal = Get-Content -LiteralPath $uninstall.journal -Raw | ConvertFrom-Json
     Assert-True (@($uninstallJournal.environment_reverted.writes).Count -ge 2) 'uninstall journal omitted the environment restoration writes'
     Assert-True ((Get-UserRaw $absentName).present -eq $false) 'uninstall did not remove an environment value it had created'
-    Assert-True ((Get-UserRaw $restoreName).value -eq 'restore-original') 'uninstall did not restore the pre-Coop environment value'
+    Assert-True ((Get-UserRaw $restoreName).value -eq 'restore-original') 'uninstall did not restore the pre-Burrow environment value'
     Assert-True ((Get-UserRaw $modifiedName).value -eq 'modified-by-user') 'uninstall removed a user-modified environment value'
     $path = (Get-UserRaw 'Path').value
-    Assert-PathMissing $path $coopPath 'uninstall left the declared PATH entry behind'
+    Assert-PathMissing $path $burrowPath 'uninstall left the declared PATH entry behind'
     Assert-PathHas $path $userPath 'uninstall removed a user-added PATH entry'
     foreach ($entry in (Path-Entries $snapshots['Path'].value)) { Assert-PathHas $path $entry 'uninstall removed an existing user PATH entry' }
     $terminalUninstall = New-TerminalObservation 'uninstall'
@@ -261,18 +261,18 @@ try {
         Assert-True ($terminalUninstall -match [regex]::Escape($userPath)) "a new terminal did not see the user-added PATH entry: $terminalUninstall"
     }
 
-    # The shared seam: a Scoop-created or record-loss installation has no Coop ownership
+    # The shared seam: a Scoop-created or record-loss installation has no Burrow ownership
     # record. The installed Manifest's declared values are the fallback attribution: a matching
     # value can be replaced/removed, a user-changed value must survive update and uninstall, and
     # only declared PATH entries may be removed.
     Write-Manifest '3'
-    $sharedInstall = CoopJson 'shared-install-v3' @('--root',$root,'install',"test/$package",'--json')
+    $sharedInstall = BurrowJson 'shared-install-v3' @('--root',$root,'install',"test/$package",'--json')
     Assert-True ($sharedInstall.status -eq 'success') "shared install did not report success: $sharedInstall"
-    Remove-Item -LiteralPath "$root/.coop/packages/$package.json" -Force
+    Remove-Item -LiteralPath "$root/.burrow/packages/$package.json" -Force
     Set-UserRaw $modifiedName 'shared-user' 'String'
     Set-UserRaw 'Path' (((Get-UserRaw 'Path').value).TrimEnd(';')+';'+$sharedUserPath) ((Get-UserRaw 'Path').kind)
     Write-Manifest '4'
-    $sharedUpdate = CoopJson 'shared-update-v4' @('--root',$root,'update',$package,'--json')
+    $sharedUpdate = BurrowJson 'shared-update-v4' @('--root',$root,'update',$package,'--json')
     Assert-True ($sharedUpdate.status -eq 'success') "shared update did not report success: $sharedUpdate"
     $sharedUpdateJournal = Get-Content -LiteralPath $sharedUpdate.journal -Raw | ConvertFrom-Json
     Assert-True (@($sharedUpdateJournal.environment_applied.preserved | Where-Object name -eq $modifiedName).Count -eq 1) 'shared update did not record the preserved user value'
@@ -287,15 +287,15 @@ try {
         Assert-True ((Get-Content -LiteralPath $toolOutput -Raw) -match 'package=4') 'shared update did not run the updated command from PATH'
     }
 
-    Remove-Item -LiteralPath "$root/.coop/packages/$package.json" -Force
-    $sharedUninstall = CoopJson 'shared-uninstall' @('--root',$root,'uninstall',$package,'--json')
+    Remove-Item -LiteralPath "$root/.burrow/packages/$package.json" -Force
+    $sharedUninstall = BurrowJson 'shared-uninstall' @('--root',$root,'uninstall',$package,'--json')
     Assert-True ($sharedUninstall.status -eq 'success') "shared uninstall did not report success: $sharedUninstall"
     $sharedUninstallJournal = Get-Content -LiteralPath $sharedUninstall.journal -Raw | ConvertFrom-Json
     Assert-True ($sharedUninstallJournal.environment_ownership_source -eq 'installed-declaration') 'shared uninstall did not disclose declaration-derived attribution'
     Assert-True ((Get-UserRaw $absentName).present -eq $false) 'shared uninstall left the declared environment value behind'
     Assert-True ((Get-UserRaw $modifiedName).value -eq 'shared-user') 'shared uninstall removed a user-modified environment value'
     $path = (Get-UserRaw 'Path').value
-    Assert-PathMissing $path $coopPath 'shared uninstall left the declared PATH entry behind'
+    Assert-PathMissing $path $burrowPath 'shared uninstall left the declared PATH entry behind'
     Assert-PathHas $path $userPath 'shared uninstall removed the user PATH entry'
     Assert-PathHas $path $sharedUserPath 'shared uninstall removed the other user PATH entry'
     $sharedTerminalUninstall = New-TerminalObservation 'shared-uninstall'
@@ -307,7 +307,7 @@ try {
     # A later lifecycle step can fail after the environment operation. The transaction must undo
     # the user environment write and journal that rollback, not leave a half-installed package's
     # variable or PATH entry behind.
-    $failPackage = 'coop-r08-fail-'+$tag.ToLowerInvariant()
+    $failPackage = 'burrow-r08-fail-'+$tag.ToLowerInvariant()
     $failArchive = Join-Path $session 'fail-1.zip'
     New-ZipPackage $failArchive ([ordered]@{'bin/marker.txt'='rollback fixture'})
     $failManifest = [ordered]@{
@@ -319,19 +319,19 @@ try {
         post_install=@('Copy-Item "$dir\absent.txt" "$dir\copied.txt"')
     }
     [IO.File]::WriteAllText("$root/buckets/test/bucket/$failPackage.json",($failManifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
-    $failRun = Invoke-CoopNative $CoopExe  --root $root install "test/$failPackage" --json | Out-String
+    $failRun = Invoke-BurrowNative $BurrowExe  --root $root install "test/$failPackage" --json | Out-String
     $failExit = $LASTEXITCODE
     Assert-True ($failExit -ne 0) 'the failing post_install transaction unexpectedly succeeded'
     Assert-True ((Get-UserRaw $rollbackName).present -eq $false) 'failed transaction left its environment variable behind'
     Assert-PathMissing (Get-UserRaw 'Path').value (Join-Path $root "apps/$failPackage/current/bin") 'failed transaction left its PATH entry behind'
     Assert-True (-not (Test-Path "$root/apps/$failPackage/current")) 'failed transaction left the package current link behind'
-    Assert-True (-not (Test-Path "$root/.coop/packages/$failPackage.json")) 'failed transaction published a package record'
-    $failJournal = Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } |
+    Assert-True (-not (Test-Path "$root/.burrow/packages/$failPackage.json")) 'failed transaction published a package record'
+    $failJournal = Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } |
         Where-Object { $_.package -eq $failPackage -and $_.action -eq 'install' } | Sort-Object { $_.stage } | Select-Object -Last 1
     Assert-True ($null -ne $failJournal -and $failJournal.state -eq 'rolled-back') 'failed transaction did not report a rolled-back journal'
     Assert-True (@($failJournal.environment_rollback | Where-Object { $_.status -eq 'restored' }).Count -ge 1) 'failed transaction did not record a successful environment rollback'
 
-    @{package=$package;root=$root;coop_path=$coopPath;user_path=$userPath;shared_user_path=$sharedUserPath;tool_command=$toolCommand;snapshots=$snapshots;
+    @{package=$package;root=$root;burrow_path=$burrowPath;user_path=$userPath;shared_user_path=$sharedUserPath;tool_command=$toolCommand;snapshots=$snapshots;
       install_status=$install.status;update_status=$update.status;uninstall_status=$uninstall.status;
       shared_install_status=$sharedInstall.status;shared_update_status=$sharedUpdate.status;shared_uninstall_status=$sharedUninstall.status;
       fail_package=$failPackage;fail_exit=$failExit;

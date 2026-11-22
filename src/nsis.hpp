@@ -3,11 +3,11 @@
 #include "data.hpp"
 #include <vector>
 
-namespace coop {
-// Coop does not reimplement the NSIS installer format. Scoop's Expand-7zipArchive hands an NSIS
+namespace burrow {
+// Burrow does not reimplement the NSIS installer format. Scoop's Expand-7zipArchive hands an NSIS
 // installer payload to the separately installed 7-Zip helper, because 7-Zip itself understands the
-// NSIS container, and Coop follows the same route: the helper found under apps/7zip/current unpacks
-// the payload with Scoop's arguments, and Coop publishes the extracted tree. The helper is
+// NSIS container, and Burrow follows the same route: the helper found under apps/7zip/current unpacks
+// the payload with Scoop's arguments, and Burrow publishes the extracted tree. The helper is
 // detected, never downloaded, installed or bundled, and the vendor setup.exe is never executed, so
 // its install directory, registry, service, shortcut, [Run] and uninstall-registration effects do
 // not happen.
@@ -52,7 +52,7 @@ struct NsisArguments {
 NsisArguments nsis_arguments(const fs::path& payload, const fs::path& destination,
                              const std::string& extract_directory);
 
-// Unpack the NSIS installer payload into an empty, Coop-owned directory and return the journal
+// Unpack the NSIS installer payload into an empty, Burrow-owned directory and return the journal
 // record. stdout and stderr are kept in the transaction, and a non-zero helper exit fails the
 // operation before any version is published.
 Json extract_nsis_archive(const Context& context, const fs::path& helper, const fs::path& payload,

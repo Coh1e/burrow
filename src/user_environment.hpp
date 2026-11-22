@@ -1,8 +1,8 @@
 #pragma once
 #include "data.hpp"
 
-namespace coop {
-// Current-user environment persistence. Coop writes only HKCU\Environment, records the raw
+namespace burrow {
+// Current-user environment persistence. Burrow writes only HKCU\Environment, records the raw
 // values it replaced, and broadcasts WM_SETTINGCHANGE("Environment") so new terminals and normal
 // shell launches read the same values instead of receiving an injected child environment.
 //
@@ -10,14 +10,14 @@ namespace coop {
 //   ownership  evidence to store in the package record for a later update/uninstall
 //   undo       exact before/expected values for in-process transaction rollback
 //   writes     per-value before/after details
-//   preserved  values a user changed after Coop wrote them and Coop therefore left alone
+//   preserved  values a user changed after Burrow wrote them and Burrow therefore left alone
 //   broadcast  SendMessageTimeout result for the live environment notification
 //
 // `environment` is the already expanded env_set list (name/value objects) and `path_entries` is
 // the already expanded env_add_path list. Declarations the installed package owned but the new
 // manifest no longer declares are reverted during the same reconcile.
 Json apply_user_environment(const Json& environment, const Json& path_entries, const Json& previous_ownership);
-// Shared installs normally have no Coop ownership record. The installed Manifest still states
+// Shared installs normally have no Burrow ownership record. The installed Manifest still states
 // which values/PATH entries the package declared, so an update/uninstall can use the previous
 // declaration as attribution evidence. A matching value is considered package-owned; a different
 // current value is treated as a user change and preserved. No pre-install original value exists
@@ -34,11 +34,11 @@ Json restore_user_environment(const Json& undo);
 Json preview_user_environment_undo(const Json& undo);
 // Path-list variables that a package mechanism owns instead of a Manifest field (currently
 // PSModulePath for psmodule packages). `add_user_path_entry` prepends the entry only when it is
-// absent, keeps the exact previous raw value and the entry list Coop added, and broadcasts the
+// absent, keeps the exact previous raw value and the entry list Burrow added, and broadcasts the
 // change. `prior_ownership` carries an earlier record from the same package so an update keeps the
 // original value and ownership instead of claiming an already-present entry as unowned.
 // `revert_user_path_entry` uses that evidence: it restores the previous value when nothing changed
-// since Coop wrote it, otherwise removes only the entries Coop added so user edits and other
+// since Burrow wrote it, otherwise removes only the entries Burrow added so user edits and other
 // entries survive.
 Json add_user_path_entry(const std::string& variable, const std::string& entry, const Json& prior_ownership);
 Json revert_user_path_entry(const Json& prior);

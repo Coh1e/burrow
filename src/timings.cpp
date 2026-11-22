@@ -1,7 +1,7 @@
 #include "timings.hpp"
 #include <algorithm>
 
-namespace coop {
+namespace burrow {
 namespace {
 Timings* g_timings = nullptr;
 }

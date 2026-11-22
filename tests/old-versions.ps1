@@ -1,15 +1,15 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$fixture1 = Join-Path (Split-Path $CoopExe) 'fixture-1.exe'
-$fixture2 = Join-Path (Split-Path $CoopExe) 'fixture-2.exe'
-$persist1 = Join-Path (Split-Path $CoopExe) 'persist-fixture-1.exe'
-$persist2 = Join-Path (Split-Path $CoopExe) 'persist-fixture-2.exe'
+$fixture1 = Join-Path (Split-Path $BurrowExe) 'fixture-1.exe'
+$fixture2 = Join-Path (Split-Path $BurrowExe) 'fixture-2.exe'
+$persist1 = Join-Path (Split-Path $BurrowExe) 'persist-fixture-1.exe'
+$persist2 = Join-Path (Split-Path $BurrowExe) 'persist-fixture-2.exe'
 function Run-Json([string[]]$Arguments) {
-    $text = Invoke-CoopNative $CoopExe  @Arguments
+    $text = Invoke-BurrowNative $BurrowExe  @Arguments
     $code = $LASTEXITCODE
     $value = $null
     $joined = $text -join "`n"
@@ -28,7 +28,7 @@ function Remove-Junction([string]$Path) {
     if ($LASTEXITCODE -ne 0) { throw "cannot remove junction $Path" }
 }
 function Last-Journal([string]$root,[string]$package,[string]$action) {
-    $entries = @(Get-ChildItem "$root/.coop/transactions" -Directory | Sort-Object LastWriteTime)
+    $entries = @(Get-ChildItem "$root/.burrow/transactions" -Directory | Sort-Object LastWriteTime)
     for ($index = $entries.Count-1; $index -ge 0; --$index) {
         $journal = Get-Content -LiteralPath (Join-Path $entries[$index].FullName 'journal.json') -Raw | ConvertFrom-Json
         if ($journal.package -eq $package -and $journal.action -eq $action) { return $journal }
@@ -183,7 +183,7 @@ if ((Get-Content -LiteralPath "$root4/apps/hookroll/1/hook-ran.txt" -Raw).Trim()
 }
 if ($hookReset.value.lifecycle_hooks -ne 'not-run') { throw 'reset did not state that lifecycle hooks were not run' }
 
-# A local version without any Coop private version record is still usable when its saved
+# A local version without any Burrow private version record is still usable when its saved
 # Manifest, installation record and actual artifact agree. Rollback does not require adoption.
 $root5 = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$root5/buckets/test/bucket" -Force | Out-Null
@@ -195,8 +195,8 @@ Copy-Item -LiteralPath "$root5/apps/localonly/1" -Destination "$root5/apps/local
 $savedManifest = Get-Content -LiteralPath "$root5/apps/localonly/3/scoop-manifest.json" -Raw | ConvertFrom-Json
 $savedManifest.version = '3'
 $savedManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "$root5/apps/localonly/3/scoop-manifest.json" -Encoding utf8
-# Remove Coop's private record: shared installation facts must be enough for a local rollback.
-Remove-Item -LiteralPath "$root5/.coop/packages/localonly.json" -Force
+# Remove Burrow's private record: shared installation facts must be enough for a local rollback.
+Remove-Item -LiteralPath "$root5/.burrow/packages/localonly.json" -Force
 $localOnly = Run-Json @('--root',$root5,'reset','localonly@3','--json')
 if ($localOnly.code -ne 0 -or $localOnly.value.version -ne '3') {
     throw "reset did not accept a reliable unrecorded local version: $($localOnly.text)"
@@ -212,10 +212,10 @@ if (@($localCleanup.value[0].delete_scope | Where-Object version -eq '3').Count 
 }
 
 # Environment declarations are reconciled in one step: rollback applies the retained version's
-# values, while a value the user changed after Coop wrote it is preserved.
+# values, while a value the user changed after Burrow wrote it is preserved.
 $root6 = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$root6/buckets/test/bucket" -Force | Out-Null
-$envName = 'COOP_R15_ENV_'+([guid]::NewGuid().ToString('N').Substring(0,8))
+$envName = 'BURROW_R15_ENV_'+([guid]::NewGuid().ToString('N').Substring(0,8))
 $envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true)
 $envOriginal = $envKey.GetValue($envName,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
 function Set-TestEnvironment([string]$value) { $envKey.SetValue($envName,$value,[Microsoft.Win32.RegistryValueKind]::String) }
@@ -246,11 +246,11 @@ try {
     $envKey.Dispose()
 }
 
-@{rollback_root=$root;refuse_root=$root2;persistence_root=$root3;hook_root=$root4;local_only_root=$root5;environment_root=$root6;coop=$CoopExe} |
+@{rollback_root=$root;refuse_root=$root2;persistence_root=$root3;hook_root=$root4;local_only_root=$root5;environment_root=$root6;burrow=$BurrowExe} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $TestRoot 'old-versions-evidence.json') -Encoding utf8
 Write-Output "PASS local-version rollback, cleanup scope, persisted-link and no-hook behavior: $TestRoot"
 
-# Red when: cleanup trusts a stale Coop current record after another client publishes a valid version.
+# Red when: cleanup trusts a stale Burrow current record after another client publishes a valid version.
 $sharedRoot = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$sharedRoot/buckets/test/bucket" -Force | Out-Null
 Write-Manifest $sharedRoot 'sharedrefresh' '1' $fixture1
@@ -258,14 +258,14 @@ if ((Run-Json @('--root',$sharedRoot,'install','test/sharedrefresh','--json')).c
 Write-Manifest $sharedRoot 'sharedrefresh' '2' $fixture2
 if ((Run-Json @('--root',$sharedRoot,'update','sharedrefresh','--json')).code -ne 0) { throw 'shared refresh update failed' }
 if ((Run-Json @('--root',$sharedRoot,'reset','sharedrefresh@1','--json')).code -ne 0) { throw 'shared refresh reset failed' }
-# Model Scoop replacing current while leaving Coop-private metadata untouched.
+# Model Scoop replacing current while leaving Burrow-private metadata untouched.
 Remove-Junction "$sharedRoot/apps/sharedrefresh/current"
 New-Item -ItemType Junction -Path "$sharedRoot/apps/sharedrefresh/current" -Target "$sharedRoot/apps/sharedrefresh/2" | Out-Null
 $sharedCleanup = Run-Json @('--root',$sharedRoot,'cleanup','sharedrefresh','--dry-run','--json')
 if ($sharedCleanup.code -ne 0 -or $sharedCleanup.value[0].current.version -ne '2') {
     throw "cleanup rejected the valid externally published current version: $($sharedCleanup.text)"
 }
-$recordPath = "$sharedRoot/.coop/packages/sharedrefresh.json"
+$recordPath = "$sharedRoot/.burrow/packages/sharedrefresh.json"
 $recordHash = (Get-FileHash $recordPath).Hash
 $manifestPath = "$sharedRoot/apps/sharedrefresh/2/scoop-manifest.json"
 $manifestText = Get-Content $manifestPath -Raw

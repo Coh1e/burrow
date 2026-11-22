@@ -1,19 +1,19 @@
-# Coop
+# Burrow
 
-Coop 是 Windows 原生的软件包管理器，与现有用户级 Scoop 共用安装根、bucket、软件、入口、持久化数据和安装记录。它不要求迁移或接管：两个客户端可以先后管理同一批软件。Scoop 的 Manifest 与 bucket 生态可直接使用。
+Burrow 是 Windows 原生的软件包管理器，与现有用户级 Scoop 共用安装根、bucket、软件、入口、持久化数据和安装记录。它不要求迁移或接管：两个客户端可以先后管理同一批软件。Scoop 的 Manifest 与 bucket 生态可直接使用。
 
 当前为 `v0.3.5`，支持 Windows x64。与 Scoop 的兼容边界、已验证范围和未运行项见[兼容性盘点](docs/coverage-report.md)与[能力边界](#能力边界)。
 
 ## 安装
 
-发布产物 `coop-v<版本>-x64.zip` 解压后，`coop.exe` 与 `scoop-lib/` 必须同级；压缩包还包含 `LICENSE`、`THIRD_PARTY.md` 和 `licenses/`。也可以从 Scoop bucket 安装：
+发布产物 `burrow-v<版本>-x64.zip` 解压后，`burrow.exe` 与 `scoop-lib/` 必须同级；压缩包还包含 `LICENSE`、`THIRD_PARTY.md` 和 `licenses/`。也可以从 Scoop bucket 安装：
 
 ```powershell
 scoop bucket add coh1e https://github.com/Coh1e/scoop-bucket
-scoop install coh1e/coop
+scoop install coh1e/burrow
 ```
 
-版本记录见 [Releases](https://github.com/Coh1e/coop/releases)。
+版本记录见 [Releases](https://github.com/Coh1e/burrow/releases)。
 
 ## 构建与测试
 
@@ -39,15 +39,15 @@ scoop install coh1e/coop
 ## 常用命令
 
 ```powershell
-coop init
-coop bucket add main https://github.com/ScoopInstaller/Main
-coop install jq
-coop list
-coop search git
-coop info jq
-coop update
-coop uninstall jq
-coop recover
+burrow init
+burrow bucket add main https://github.com/ScoopInstaller/Main
+burrow install jq
+burrow list
+burrow search git
+burrow info jq
+burrow update
+burrow uninstall jq
+burrow recover
 ```
 
 命令分组：
@@ -63,11 +63,11 @@ coop recover
 
 - 共用安装根与状态；不承诺两个客户端同时写入。
 - 系统级根只读：`update`、`uninstall`、`reset` 以 `global-scope-readonly` 拒绝写入；`-g`/`--global` 不写入。
-- 不自动同步 bucket、不自动发布；只有显式 `update`、`update *` 或 `bucket update` 刷新共用 bucket。裸 `status` 检查 Coop 自身及同根已安装 Scoop 的更新，不执行更新；`status -l` 仅检查本地软件。
+- 不自动同步 bucket、不自动发布；只有显式 `update`、`update *` 或 `bucket update` 刷新共用 bucket。裸 `status` 检查 Burrow 自身及同根已安装 Scoop 的更新，不执行更新；`status -l` 仅检查本地软件。
 - 生命周期 Hook、`installer.script` 与安装器程序由真实 PowerShell 执行，需要 PowerShell 与随包的 `scoop-lib/`；脚本不经过文本白名单。
-- MSI 产物按管理镜像提取，不运行 `msiexec`；Inno Setup 与 NSIS 载荷需要已安装在 root 内的 helper，Coop 不下载、不内嵌 helper，厂商安装器不运行。
+- MSI 产物按管理镜像提取，不运行 `msiexec`；Inno Setup 与 NSIS 载荷需要已安装在 root 内的 helper，Burrow 不下载、不内嵌 helper，厂商安装器不运行。
 - 普通卸载保留声明的持久化数据；`uninstall --purge` 才删除，`cleanup` 才清理旧版本。
-- Coop 自己的写事务记录（崩溃恢复的证据，含脚本输出）留在 `%USERPROFILE%\.coop\roots\<根名>-<哈希>/` 下，不随卸载消失；首次运行会把旧的 `<根>\.coop` 迁过去。`cleanup --transactions` 保留最近 10 条、永不删除未完成的事务，并报告释放的字节；不加这个开关时 Coop 不会自动删除它们。
+- Burrow 自己的写事务记录（崩溃恢复的证据，含脚本输出）留在 `%USERPROFILE%\.burrow\roots\<根名>-<哈希>/` 下，不随卸载消失；首次运行会把旧的 `<根>\.burrow` 迁过去。`cleanup --transactions` 保留最近 10 条、永不删除未完成的事务，并报告释放的字节；不加这个开关时 Burrow 不会自动删除它们。
 - arm64 生命周期未验证；32bit 真实包已执行。完整未运行项见[兼容性盘点](docs/coverage-report.md)。
 
 ## 文档
@@ -83,8 +83,8 @@ coop recover
 - 四样本验收：[来源准备、场景断言与报告结构](docs/four-sample-acceptance.md)。
 - 性能与体积：[本地查询与 Git 刷新性能](docs/performance-support.md)、[包体决策](docs/adr/0005-binary-size-build-only.md)。
 - 写作与决策：[写作标准](docs/writing-style.md)、[ADR 目录](docs/adr/)、[研究记录](docs/research/)。
-- 任务与规格：[GitHub Issues](https://github.com/Coh1e/coop/issues)、[正式规格 #21](https://github.com/Coh1e/coop/issues/21)。
+- 任务与规格：[GitHub Issues](https://github.com/Coh1e/burrow/issues)、[正式规格 #21](https://github.com/Coh1e/burrow/issues/21)。
 
 ## 许可证
 
-Coop 以 [MIT 许可证](LICENSE) 发布。随包分发的第三方组件仍按各自许可证分发，来源与全文见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+Burrow 以 [MIT 许可证](LICENSE) 发布。随包分发的第三方组件仍按各自许可证分发，来源与全文见 [THIRD_PARTY.md](THIRD_PARTY.md)。

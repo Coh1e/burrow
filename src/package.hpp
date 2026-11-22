@@ -4,7 +4,7 @@
 #include "update_policy.hpp"
 #include <optional>
 
-namespace coop {
+namespace burrow {
 // A file the plan depends on, bound by the plan builder and rechecked before the first write.
 struct FilePrecondition { fs::path path; std::string sha256; };
 struct LocalFacts { fs::path current; fs::path directory; bool exists = false; };
@@ -82,10 +82,10 @@ void report_no_op(const Context& context, const Plan& plan);
 void announce_success_line(const Context& context, const Plan& plan);
 std::string capability_blocker(const Context& context, const ir::Package& package);
 // Recovery of a package transaction is only automatic when every journaled path is still
-// owned by Coop and can be reverted without guessing. Scripts recorded by the journal are
+// owned by Burrow and can be reverted without guessing. Scripts recorded by the journal are
 // never re-run; their external effects remain unknown.
 Json package_recovery_status(const Context& context, const fs::path& journal_path, bool execute);
-// Query may read the last committed record moved into a transaction, but only from Coop's own
+// Query may read the last committed record moved into a transaction, but only from Burrow's own
 // transaction subtree and after the same path safety checks used by recovery.
 bool recovery_record_path_allowed(const Context& context, const fs::path& path);
 int package_command(const Context& context, const std::wstring& command, const std::vector<std::wstring>& args,

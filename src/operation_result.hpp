@@ -5,7 +5,7 @@
 #include <variant>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 // One request/result vocabulary for inspection and the later update coordinator. The data object
 // carries object-specific facts; state/reason/diagnostics have the same meaning in every group.
 enum class OperationKind { status, update };

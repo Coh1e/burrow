@@ -5,7 +5,7 @@
 
 // The validator only reads normalized IR. It owns the IR contract, the currently honourable digest
 // algorithms and the capability requirements a package implies; it never re-interprets source fields.
-namespace coop::ir {
+namespace burrow::ir {
 namespace {
 bool hexadecimal(const std::string& value) {
     return std::all_of(value.begin(),value.end(),[](unsigned char character) { return std::isxdigit(character) != 0; });
@@ -30,7 +30,7 @@ std::size_t digest_length(DigestAlgorithm algorithm) {
     return 0;
 }
 bool supported_digest(const Digest& digest) {
-    // Coop verifies the digest with the algorithm the Manifest declared. An unknown algorithm or a
+    // Burrow verifies the digest with the algorithm the Manifest declared. An unknown algorithm or a
     // mismatched value length stays an explicit IR gap instead of being read as SHA256.
     const auto length = digest_length(digest.algorithm);
     return length != 0 && digest.value.size() == length && hexadecimal(digest.value);
@@ -71,7 +71,7 @@ void validate(Package& package) {
                 "MSI artifacts are extracted from a read-only Windows Installer database view with the Windows cabinet decompression API: the Directory/Component/File/Media tables give the administrative image layout, no msiexec.exe process runs, no product is registered, no elevation or reboot is requested and no %WINDIR%\\Installer machine cache is written; external, multi-part and vendor installer payloads are reported as unsupported instead of being executed");
         else if (download.format == ArchiveFormat::inno_setup)
             capability(package,"inno-setup",true,
-                "Inno Setup .exe artifacts are unpacked by the separately declared external innounp helper that Scoop's Expand-InnoArchive also uses, found under apps/innounp-unicode/current or apps/innounp/current in the selected root: Coop starts it with Scoop's -x/-d/-y/-c arguments and publishes the selected Inno directory, never runs the vendor installer, and never downloads or installs the helper; the helper is a software dependency of the package mechanism, not a Coop core dependency, and the vendor installer's [Run], [Registry], service, shortcut and uninstall-registration effects are not executed");
+                "Inno Setup .exe artifacts are unpacked by the separately declared external innounp helper that Scoop's Expand-InnoArchive also uses, found under apps/innounp-unicode/current or apps/innounp/current in the selected root: Burrow starts it with Scoop's -x/-d/-y/-c arguments and publishes the selected Inno directory, never runs the vendor installer, and never downloads or installs the helper; the helper is a software dependency of the package mechanism, not a Burrow core dependency, and the vendor installer's [Run], [Registry], service, shortcut and uninstall-registration effects are not executed");
         else if (download.format != ArchiveFormat::file)
             capability(package,"archive-"+std::string(archive_format_name(download.format)),true,
                 "Native libarchive extraction of "+std::string(archive_format_name(download.format))+" with declared extract_dir/extract_to layout");
@@ -132,7 +132,7 @@ void validate(Package& package) {
         capability(package,"start-menu-shortcut",true,"Shortcuts are created under the Scoop Apps Start Menu folder with recorded identity");
     if (package.psmodule) {
         capability(package,"ps-module",true,
-            "A declared psmodule links <root>/modules/<name> to the installed apps/<name>/current directory with a native directory junction and puts <root>/modules on the current user's PSModulePath; the previous PSModulePath value and the entry Coop added are recorded in the package record so uninstall removes only that entry, keeps every other entry and leaves a PSModulePath the user edited afterwards intact");
+            "A declared psmodule links <root>/modules/<name> to the installed apps/<name>/current directory with a native directory junction and puts <root>/modules on the current user's PSModulePath; the previous PSModulePath value and the entry Burrow added are recorded in the package record so uninstall removes only that entry, keeps every other entry and leaves a PSModulePath the user edited afterwards intact");
         // PSModulePath itself is owned by the psmodule mechanism. A package that also declares it as
         // a plain environment value would have two writers for one variable, so it is reported
         // instead of silently letting the env_set step overwrite the module entry.

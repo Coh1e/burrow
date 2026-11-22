@@ -1,14 +1,14 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # #52: durability is owed at the commit points, not to every extracted file. The extraction tree lives
 # in the transaction and is discarded on failure, so flushing each entry buys nothing a rollback cannot
 # already fix. The record now counts the write-through flushes, which makes the claim measurable: an
 # archive with hundreds of files must not produce hundreds of syncs.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not (($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase))) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $curl = Join-Path $archives 'curl-8.23.0_5-win64-mingw.tar.xz'
 if (-not (Test-Path -LiteralPath $curl)) { throw "Missing fixed test input: $curl; run scripts/fetch-deps.ps1" }
@@ -21,8 +21,8 @@ $manifest = [ordered]@{ version='8.23.0_5'; url=([Uri][IO.Path]::GetFullPath($cu
 [IO.File]::WriteAllText("$root/buckets/test/bucket/curl.json",
     ($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 
-function Invoke-Coop([string[]]$arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+function Invoke-Burrow([string[]]$arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -35,20 +35,20 @@ function Invoke-Coop([string[]]$arguments) {
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'coop timed out' }
+    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'burrow timed out' }
     $result = [pscustomobject]@{ exit = $process.ExitCode
         output = $stdout.GetAwaiter().GetResult(); error = $stderr.GetAwaiter().GetResult() }
     $process.Dispose()
     return $result
 }
 
-$install = Invoke-Coop @('--root',$root,'install','test/curl','--json')
+$install = Invoke-Burrow @('--root',$root,'install','test/curl','--json')
 if ($install.exit -ne 0) { throw "the install failed: $($install.error)$($install.output)" }
 
 $files = @(Get-ChildItem -LiteralPath "$root/apps/curl/current" -Recurse -File)
 if ($files.Count -lt 300) { throw "the fixture did not publish enough files to be meaningful: $($files.Count)" }
 
-$records = @(Get-ChildItem -LiteralPath "$root/.coop/timings" -Filter '*.json' -File)
+$records = @(Get-ChildItem -LiteralPath "$root/.burrow/timings" -Filter '*.json' -File)
 if ($records.Count -eq 0) { throw 'no timing record was written' }
 $record = Get-Content -LiteralPath $records[0].FullName -Raw | ConvertFrom-Json
 if ($null -eq $record.durable_syncs) { throw 'the record does not carry the sync count' }

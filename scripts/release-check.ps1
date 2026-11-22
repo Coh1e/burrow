@@ -2,8 +2,8 @@
 # suite, checks that the binary reports the version being released, and holds the installed footprint
 # under the limit recorded in check-size.ps1.
 #
-# A local `ninja coop` is not enough. v0.2.2 was tagged while the release build failed, because the
-# release record had pulled a JSON header into app.hpp and only the `coop` target was ever built
+# A local `ninja burrow` is not enough. v0.2.2 was tagged while the release build failed, because the
+# release record had pulled a JSON header into app.hpp and only the `burrow` target was ever built
 # locally. This script exists so that mistake has to be made twice.
 param(
     [Parameter(Mandatory)][string]$Version,
@@ -17,7 +17,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version '$Version' is not <ma
 Push-Location $projectRoot
 try {
     $cmake = Get-Content -LiteralPath (Join-Path $projectRoot 'CMakeLists.txt') -Raw -Encoding utf8
-    if ($cmake -notmatch 'project\(coop VERSION ([0-9]+\.[0-9]+\.[0-9]+)') { throw 'project version is missing from CMakeLists.txt' }
+    if ($cmake -notmatch 'project\(burrow VERSION ([0-9]+\.[0-9]+\.[0-9]+)') { throw 'project version is missing from CMakeLists.txt' }
     if ($Matches[1] -ne $Version) { throw "CMakeLists.txt says $($Matches[1]); the release is $Version" }
 
     $dirty = @(git status --porcelain)
@@ -42,8 +42,8 @@ try {
         throw 'build or test run failed'
     }
 
-    $reported = (& (Join-Path $projectRoot '.local/build/coop.exe') --version | Out-String).Trim()
-    if ($reported -ne "coop $Version") { throw "the binary reports '$reported', not 'coop $Version'" }
+    $reported = (& (Join-Path $projectRoot '.local/build/burrow.exe') --version | Out-String).Trim()
+    if ($reported -ne "burrow $Version") { throw "the binary reports '$reported', not 'burrow $Version'" }
 
     # Size is a release property: the installed footprint is what a user pays for on disk. CI runs the
     # same script, so a local pass cannot silently accept a bigger binary than the tagged release.
@@ -51,7 +51,7 @@ try {
     $sizeReport | Write-Output
     if ($LASTEXITCODE -ne 0) { throw 'the installed footprint is over the limit' }
 
-    Write-Output "release check passed: coop $Version builds with every target and passes every test"
+    Write-Output "release check passed: burrow $Version builds with every target and passes every test"
 } finally {
     Pop-Location
 }

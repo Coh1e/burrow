@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [string]$ScoopShim = "$env:USERPROFILE\scoop\shims\scoop.ps1",
     [int]$Runs = 5,
     [string]$Output = (Join-Path $PSScriptRoot '../.local/perf-compare')
@@ -8,7 +8,7 @@ param(
 # download share is known for both and what is left is each client's own work. The assertion is a
 # ratio, never an absolute number: machine speed must not turn this red.
 $ErrorActionPreference = 'Stop'
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $Output = [IO.Path]::GetFullPath($Output)
 if (-not (Test-Path -LiteralPath $ScoopShim)) { throw "No Scoop installation at $ScoopShim; this comparison needs a real one." }
 if (Test-Path -LiteralPath $Output) { throw "Output path already exists: $Output. Choose a new path with -Output." }
@@ -65,12 +65,12 @@ while ((Get-Date) -lt $deadline) {
 $url = "http://127.0.0.1:$port/tidy-5.8.0-win64.zip"
 
 try {
-    # --- Coop root -------------------------------------------------------------------------------
-    $coopRoot = Join-Path $Output 'coop-root'
-    New-Item -ItemType Directory -Path "$coopRoot/buckets/test/bucket" -Force | Out-Null
+    # --- Burrow root -------------------------------------------------------------------------------
+    $burrowRoot = Join-Path $Output 'burrow-root'
+    New-Item -ItemType Directory -Path "$burrowRoot/buckets/test/bucket" -Force | Out-Null
     $manifest = [ordered]@{ version='1.0.0'; url=$url; hash=$hash
         extract_dir='tidy-5.8.0-win64\bin'; bin='tidy.exe' }
-    [IO.File]::WriteAllText("$coopRoot/buckets/test/bucket/tidy.json",
+    [IO.File]::WriteAllText("$burrowRoot/buckets/test/bucket/tidy.json",
         ($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 
     # --- Scoop root ------------------------------------------------------------------------------
@@ -81,12 +81,12 @@ try {
 
     function Measure-Run([string]$client) {
         # Every run has to transfer, so both clients pay the same paced download each time.
-        Remove-Item (Join-Path $coopRoot 'cache/*') -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $burrowRoot 'cache/*') -Force -ErrorAction SilentlyContinue
         Remove-Item (Join-Path $scoopRoot 'cache/*') -Force -ErrorAction SilentlyContinue
         $start = [Diagnostics.Stopwatch]::StartNew()
-        if ($client -eq 'coop') {
-            & $CoopExe --root $coopRoot install test/tidy --json | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw 'coop install failed' }
+        if ($client -eq 'burrow') {
+            & $BurrowExe --root $burrowRoot install test/tidy --json | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'burrow install failed' }
         } else {
             $env:SCOOP = $scoopRoot
             $env:SCOOP_GLOBAL = Join-Path $Output 'scoop-global'
@@ -96,8 +96,8 @@ try {
         }
         $start.Stop()
         $total = $start.Elapsed.TotalSeconds
-        if ($client -eq 'coop') {
-            & $CoopExe --root $coopRoot uninstall tidy --json | Out-Null
+        if ($client -eq 'burrow') {
+            & $BurrowExe --root $burrowRoot uninstall tidy --json | Out-Null
         } else {
             $env:SCOOP = $scoopRoot
             & $ScoopShim uninstall tidy *>&1 | Out-Null
@@ -109,9 +109,9 @@ try {
         return [pscustomobject]@{ total=$total; download=$download }
     }
 
-    $results = [ordered]@{ coop = @(); scoop = @() }
+    $results = [ordered]@{ burrow = @(); scoop = @() }
     for ($run = 1; $run -le $Runs; $run++) {
-        foreach ($client in 'coop','scoop') {
+        foreach ($client in 'burrow','scoop') {
             $before = @(Get-Content -LiteralPath $serveLog -ErrorAction SilentlyContinue).Count
             $measured = Measure-Run $client
             $total = $measured.total; $download = $measured.download
@@ -126,23 +126,23 @@ try {
         if ($sorted.Count % 2) { return $sorted[$middle] }
         return ($sorted[$middle-1]+$sorted[$middle])/2
     }
-    $coopMedian = Median ($results.coop | ForEach-Object { $_.local })
+    $burrowMedian = Median ($results.burrow | ForEach-Object { $_.local })
     $scoopMedian = Median ($results.scoop | ForEach-Object { $_.local })
-    $ratio = if ($scoopMedian -gt 0) { $coopMedian/$scoopMedian } else { 0 }
+    $ratio = if ($scoopMedian -gt 0) { $burrowMedian/$scoopMedian } else { 0 }
     $summary = [ordered]@{
         runs = $Runs
-        download_seconds_measured = ($results.coop + $results.scoop | Measure-Object -Property download -Average).Average
-        coop_local_median = $coopMedian
+        download_seconds_measured = ($results.burrow + $results.scoop | Measure-Object -Property download -Average).Average
+        burrow_local_median = $burrowMedian
         scoop_local_median = $scoopMedian
         ratio = $ratio
         machine = "$env:COMPUTERNAME / $([Environment]::OSVersion.VersionString)"
-        coop = (& $CoopExe --version)
+        burrow = (& $BurrowExe --version)
         threshold = 1.2
         verdict = if ($ratio -le 1.2) { 'within 1.2x' } else { 'slower than 1.2x' }
     }
     $summary | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Output 'summary.json') -Encoding utf8
     $summary | ConvertTo-Json
-    if ($ratio -gt 1.2) { throw ("coop local overhead is {0:N2} times Scoop's, above the 1.2 threshold" -f $ratio) }
+    if ($ratio -gt 1.2) { throw ("burrow local overhead is {0:N2} times Scoop's, above the 1.2 threshold" -f $ratio) }
 } finally {
     if ($server -and -not $server.HasExited) { $server.Kill($true) }
     [Environment]::SetEnvironmentVariable('Path',$pathBefore,'User')

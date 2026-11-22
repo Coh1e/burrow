@@ -5,7 +5,7 @@
 // The planner turns validated IR plus the current installation facts into the operation sequence.
 // Preview output and every execution backend consume this one sequence, and each step states the
 // effect it has, so what a user reviews is what will be attempted.
-namespace coop::ir {
+namespace burrow::ir {
 const char* layer_name(Layer layer) {
     switch (layer) {
     case Layer::syntax: return "syntax";
@@ -101,7 +101,7 @@ void add_removal(Plan& plan, const Package& package, bool previous, bool retain_
         plan.steps.push_back({Operation::remove_shortcuts,0,previous,"remove "+count_text(package.shortcuts.size(),"Start Menu shortcut","Start Menu shortcuts")});
     if (package.psmodule)
         plan.steps.push_back({Operation::remove_ps_module,0,previous,"remove the modules/"+package.psmodule->name+
-            " junction and the modules directory entry Coop added to the user PSModulePath, keeping every other entry"});
+            " junction and the modules directory entry Burrow added to the user PSModulePath, keeping every other entry"});
     if (!package.environment.empty())
         plan.steps.push_back({Operation::remove_environment,0,previous,"revert "+count_text(package.environment.size(),"declared environment entry","declared environment entries")+" whose ownership still matches"});
     if (!retain_version) {
@@ -160,7 +160,7 @@ void add_reset(Plan& plan) {
         plan.steps.push_back({Operation::remove_shortcuts,0,true,"remove "+count_text(current.shortcuts.size(),"Start Menu shortcut","Start Menu shortcuts")+" of the replaced version"});
     if (current.psmodule)
         plan.steps.push_back({Operation::remove_ps_module,0,true,"remove the modules/"+current.psmodule->name+
-            " junction and the modules directory entry Coop added to the user PSModulePath, keeping every other entry"});
+            " junction and the modules directory entry Burrow added to the user PSModulePath, keeping every other entry"});
     if (!current.environment.empty())
         plan.steps.push_back({Operation::remove_environment,0,true,"revert "+count_text(current.environment.size(),"declared environment entry","declared environment entries")+" of the replaced version whose ownership still matches"});
     plan.steps.push_back({Operation::publish_current,0,false,"publish current for the retained local version "+retained.version});

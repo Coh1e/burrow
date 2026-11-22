@@ -4,10 +4,10 @@
 #include <iostream>
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 // The shared Scoop layout this client and Scoop both use. Scoop itself creates these directories
-// on demand, but a machine without Scoop has no starting point: `coop init` is that starting point
+// on demand, but a machine without Scoop has no starting point: `burrow init` is that starting point
 // and creates only what is missing.
 constexpr std::array<const wchar_t*,5> standard_layout = {L"apps",L"buckets",L"cache",L"persist",L"shims"};
 std::string filesystem_error(const fs::path& path,const std::error_code& error) {

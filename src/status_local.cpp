@@ -8,7 +8,7 @@
 #include <set>
 #include <git2.h>
 
-namespace coop {
+namespace burrow {
 namespace {
 std::string key(std::string text) {
     for (auto& character : text) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
@@ -50,7 +50,7 @@ Json status_bucket_sources(const Context& context, std::vector<ResultDiagnostic>
         const auto state = state_directory(context);
         if (fs::exists(state) && !fs::is_directory(state)) throw std::runtime_error("Private state path is not a directory");
         auto registry = state/L"buckets.json";
-        if (!fs::exists(registry)) registry = context.root/L".coop"/L"buckets.json";
+        if (!fs::exists(registry)) registry = context.root/L".burrow"/L"buckets.json";
         if (fs::exists(registry)) {
             const auto records = read_json(registry);
             if (!records.is_array()) throw std::runtime_error("Bucket registry must be an array");
@@ -83,10 +83,10 @@ Json status_bucket_sources(const Context& context, std::vector<ResultDiagnostic>
 }
 void read_local_status(const Context& context, const Json& sources, OperationResult& report) {
     report.request.local_only = true;
-    ResultItem coop;
-    coop.name = "coop"; coop.scope = "process"; coop.reason = "local-only";
-    coop.data = {{"running_version",std::string(COOP_VERSION)},{"installed",false},{"installed_version",nullptr},{"local_state",std::string("ok")}};
-    report.clients.push_back(std::move(coop));
+    ResultItem burrow;
+    burrow.name = "burrow"; burrow.scope = "process"; burrow.reason = "local-only";
+    burrow.data = {{"running_version",std::string(BURROW_VERSION)},{"installed",false},{"installed_version",nullptr},{"local_state",std::string("ok")}};
+    report.clients.push_back(std::move(burrow));
     ResultItem scoop;
     scoop.name = "scoop"; scoop.scope = "user"; scoop.state = ResultState::not_applicable; scoop.reason = "not-installed";
     scoop.data = {{"installed",false},{"revision",nullptr},{"branch",nullptr},{"local_state",std::string("absent")}};
@@ -151,7 +151,7 @@ void read_local_status(const Context& context, const Json& sources, OperationRes
             {"deprecated",deprecated.contains(key(fact.name))},{"manifest_removed",false},{"local_state",std::string("ok")}};
         for (const auto& diagnostic : fact.diagnostics) failure(item,diagnostic.code,diagnostic.message);
         if (fact.present && fact.version.empty()) failure(item,"installed-version-empty","Installed manifest version is empty");
-        if (key(fact.name) == "coop" && local.scope == "user") {
+        if (key(fact.name) == "burrow" && local.scope == "user") {
             auto& client = report.clients.front();
             client.data["installed"] = fact.present ? ResultValue(true) : ResultValue(nullptr);
             client.data["installed_version"] = item.data.at("installed_version");

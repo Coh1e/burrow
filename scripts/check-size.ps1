@@ -16,7 +16,7 @@ $BuildRoot = [IO.Path]::GetFullPath($BuildRoot)
 # The release layout from .github/workflows/release.yml. Every entry must exist, so a guard cannot
 # pass on a half-populated build directory.
 $components = [ordered]@{
-    'coop.exe'       = Join-Path $BuildRoot 'coop.exe'
+    'burrow.exe'       = Join-Path $BuildRoot 'burrow.exe'
     'scoop-lib'      = Join-Path $BuildRoot 'scoop-lib'
     'licenses'       = Join-Path $BuildRoot 'licenses'
     'LICENSE'        = Join-Path $projectRoot 'LICENSE'

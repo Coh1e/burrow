@@ -6,9 +6,9 @@
 
 ## 1. 结论
 
-- 最终产品源码为提交 `a4d7ced`（`coop.exe` SHA256 `c6fe0fb2938ca528473f3f8b271ce56e425d867c381d4c797d45f5c89c70fcf1`）。本页提交只增加文档与验收说明，不再改产品源码；二进制与源码的绑定见 §2。
+- 最终产品源码为提交 `a4d7ced`（`burrow.exe` SHA256 `c6fe0fb2938ca528473f3f8b271ce56e425d867c381d4c797d45f5c89c70fcf1`）。本页提交只增加文档与验收说明，不再改产品源码；二进制与源码的绑定见 §2。
 - 从该构建重新执行的整体验收全部通过：默认 CTest 45/45；本机实际安装的 15 个软件逐项共用生命周期 698 项检查 0 失败；共用状态双向单文件流程 25 条命令全部退出 0 且执行序列等于预览计划；无 Scoop/Git/7-Zip 的独立初始化与后续 Scoop 识别通过；真实共用根上的进程崩溃、冲突诊断与恢复通过；性能在本机构建上重新测量。
-- 本轮真实验收发现并修复了一个共享状态缺陷：Scoop 卸载后遗留 Coop 入口元数据，下一次 Coop 安装以 Windows error 183 失败。修复后真实重装、回归用例和完整 15 包重跑均通过（§6）。
+- 本轮真实验收发现并修复了一个共享状态缺陷：Scoop 卸载后遗留 Burrow 入口元数据，下一次 Burrow 安装以 Windows error 183 失败。修复后真实重装、回归用例和完整 15 包重跑均通过（§6）。
 - 完整 Main/Extras 分母仍是 4149 份 Manifest（Main 1701 + Extras 2448）；人类批准的 ARM64 生命周期例外只有 3 个 ARM64-only 包。其余未运行范围按 §5 原样保留，不声称完成。
 - 本轮**未获发布授权**：本页证明的是交付门槛的实际证据，不是正式发布或市场可用性声明。
 
@@ -17,7 +17,7 @@
 | 项 | 值 |
 | --- | --- |
 | 产品源码提交 | `a4d7cedaeb2e56dda6fb7cb35de010cb730288e2` |
-| 二进制 | `.local/build/coop.exe`，`coop 0.1.0`，SHA256 `c6fe0fb2938ca528473f3f8b271ce56e425d867c381d4c797d45f5c89c70fcf1` |
+| 二进制 | `.local/build/burrow.exe`，`burrow 0.1.0`，SHA256 `c6fe0fb2938ca528473f3f8b271ce56e425d867c381d4c797d45f5c89c70fcf1` |
 | 构建 | CMake 4.4.4 / Ninja 1.13.2 / MSVC x64 Build Tools 14.51（Release，`/W4 /WX`） |
 | 脚本运行器 | PowerShell 7.6.5（pwsh）；版本采集壳为 Windows PowerShell 5.1.26100.9711 |
 | 平台 | Windows `10.0.26300.0` x64 |
@@ -40,16 +40,16 @@ ctest --test-dir .local/build --output-on-failure
 
 ### 3.2 共用状态双向流程（最终构建）
 
-`tests/real-scoop-alternating.ps1` 在同一真实 Scoop 根上顺序执行：Scoop 安装 `jq@1.7.1` → Coop 识别且无私有记录前置 → Coop 预览并更新到 1.8.2（`jq` 是单文件产物，实际操作序列为 `download,verify,unlink-current,remove-entries,publish-current,entries,commit-state`，没有解压步骤）→ 旧版本保留 → Scoop `list`/`update` 继续识别 → Coop 卸载 → Coop 安装 → Scoop `reset`/运行 → Coop 卸载。
+`tests/real-scoop-alternating.ps1` 在同一真实 Scoop 根上顺序执行：Scoop 安装 `jq@1.7.1` → Burrow 识别且无私有记录前置 → Burrow 预览并更新到 1.8.2（`jq` 是单文件产物，实际操作序列为 `download,verify,unlink-current,remove-entries,publish-current,entries,commit-state`，没有解压步骤）→ 旧版本保留 → Scoop `list`/`update` 继续识别 → Burrow 卸载 → Burrow 安装 → Scoop `reset`/运行 → Burrow 卸载。
 
 - 25 条命令全部退出 0；预览的 `ir_operations` 与执行的 `observed_steps` 逐项相同：`download,verify,unlink-current,remove-entries,publish-current,entries,commit-state`。
-- Scoop 安装开始时 `management=unadopted` 且 `private_record_before=False`；Coop 更新后标准 `scoop-manifest.json` 版本为 1.8.2，旧版本 1.7.1 保留，反向流程结束后无残留。
+- Scoop 安装开始时 `management=unadopted` 且 `private_record_before=False`；Burrow 更新后标准 `scoop-manifest.json` 版本为 1.8.2，旧版本 1.7.1 保留，反向流程结束后无残留。
 
-证据：`.local/pi/tasks/45/evidence/alternating-a4d7ced-20261027-225311/real-scoop-alternating-evidence.json`（`coop_sha256=c6fe0fb2…`）及同目录逐命令日志。
+证据：`.local/pi/tasks/45/evidence/alternating-a4d7ced-20261027-225311/real-scoop-alternating-evidence.json`（`burrow_sha256=c6fe0fb2…`）及同目录逐命令日志。
 
 ### 3.3 本机实际安装集的逐项验收（15 个包）
 
-`tests/real-scoop-cohort.ps1 -Lifecycle` 在最终构建上重新执行：15 个包逐项核对程序运行、版本、入口、路径、环境、持久化数据、安装记录与双方列表；14 个包由真实 Scoop `reset` 重发入口后由 Coop 重新识别；10 个有本地旧版本的包由 Coop 往返切换并由 Scoop 重新识别；`fastfetch` 由 Coop 卸载并重装；`clink` 由真实 Scoop 卸载后由 Coop 重装。
+`tests/real-scoop-cohort.ps1 -Lifecycle` 在最终构建上重新执行：15 个包逐项核对程序运行、版本、入口、路径、环境、持久化数据、安装记录与双方列表；14 个包由真实 Scoop `reset` 重发入口后由 Burrow 重新识别；10 个有本地旧版本的包由 Burrow 往返切换并由 Scoop 重新识别；`fastfetch` 由 Burrow 卸载并重装；`clink` 由真实 Scoop 卸载后由 Burrow 重装。
 
 - 结果：**698 项检查，0 失败，15/15 包 `status=met`**（`pi-coding-agent` 只读，因为执行器正在使用它，`scoop-reset=not-run`）。
 - 本轮由此发现并修复了 §6 的共享元数据缺陷；第一次运行的唯一失败（clink 重装 exit 1）已定位、修复并在本次完整重跑中转为通过。
@@ -58,23 +58,23 @@ ctest --test-dir .local/build --output-on-failure
 
 ### 3.4 无 Scoop 的独立初始化
 
-`tests/real-scoop-initialization.ps1` 在项目内全新 root 上以不含 `git`/`7z`/`scoop` 的 PATH 初始化、克隆真实 bucket、安装并运行真实 Main/jq；随后复制本机真实 Scoop 程序树到同一 root，顺序执行 Scoop 识别、`reset`、卸载，Coop 重装与卸载，并恢复、核对用户 PATH。
+`tests/real-scoop-initialization.ps1` 在项目内全新 root 上以不含 `git`/`7z`/`scoop` 的 PATH 初始化、克隆真实 bucket、安装并运行真实 Main/jq；随后复制本机真实 Scoop 程序树到同一 root，顺序执行 Scoop 识别、`reset`、卸载，Burrow 重装与卸载，并恢复、核对用户 PATH。
 
 - 全部命令退出 0（未初始化 root 上的 Scoop 探测按预期退出 1）；`freshness`、`restricted_path`、`init_directories`、标准记录与用户 PATH 快照均写入证据 JSON。
 - 未运行边界与之前一致：真实的“之后再安装 Scoop”是用运维者现有程序树复制，不是运行 Scoop 安装器；Scoop 发起的**版本更新**仍未在该 root 执行。
 
-证据：`.local/pi/tasks/45/evidence/initialization-a4d7ced-20261027-230628/initialization-evidence.json`（`coop_sha256=c6fe0fb2…`）。
+证据：`.local/pi/tasks/45/evidence/initialization-a4d7ced-20261027-230628/initialization-evidence.json`（`burrow_sha256=c6fe0fb2…`）。
 
 ### 3.5 失败、中断与恢复
 
 - CTest `recovery`、`recovery_matrix`、`lifecycle_interrupt`、`lifecycle_race` 在最终构建上全部通过。
-- `tests/real-scoop-recovery.ps1` 在同一真实根上创建临时 bucket/包，执行 Coop 安装 → Scoop `reset` → 真实进程崩溃（`0xC0000409`）→ 查询/恢复 → 与 Scoop 交替 → 冲突注入。`created-path-replaced` 冲突退出 1 且不删除外部对象，恢复后双方继续识别；运行前后 15 个既有安装清单一致，测试对象全部清理。
+- `tests/real-scoop-recovery.ps1` 在同一真实根上创建临时 bucket/包，执行 Burrow 安装 → Scoop `reset` → 真实进程崩溃（`0xC0000409`）→ 查询/恢复 → 与 Scoop 交替 → 冲突注入。`created-path-replaced` 冲突退出 1 且不删除外部对象，恢复后双方继续识别；运行前后 15 个既有安装清单一致，测试对象全部清理。
 
-证据：`.local/pi/tasks/45/evidence/recovery-a4d7ced-20261027-231015/summary.json`（`status=pass`，`coop_sha256=c6fe0fb2…`）。
+证据：`.local/pi/tasks/45/evidence/recovery-a4d7ced-20261027-231015/summary.json`（`status=pass`，`burrow_sha256=c6fe0fb2…`）。
 
 ### 3.6 性能（最终构建）
 
-`tests/perf-real.ps1` 在最终二进制（`coop_sha256=c6fe0fb2…`、`git_head=a4d7ced`）上重新测量完整进程；机器为 AMD Ryzen 7 8845HS / 16 逻辑处理器 / 64 GB / KIOXIA NVMe / Windows 11。真实根输入：Main 1702 份 Manifest、15 个已安装包；本地副本 1705 份。
+`tests/perf-real.ps1` 在最终二进制（`burrow_sha256=c6fe0fb2…`、`git_head=a4d7ced`）上重新测量完整进程；机器为 AMD Ryzen 7 8845HS / 16 逻辑处理器 / 64 GB / KIOXIA NVMe / Windows 11。真实根输入：Main 1702 份 Manifest、15 个已安装包；本地副本 1705 份。
 
 | 场景 | 样本 | p50 / p95 ms | 结果与载荷 |
 | --- | ---: | --- | --- |
@@ -135,26 +135,26 @@ ctest --test-dir .local/build --output-on-failure
 - **各机制的真机脚本没有在最终构建上逐个重跑**：归档/多产物、MSI/Inno/NSIS、Hook/installer 程序、持久化、入口/环境/快捷方式和依赖的真实样本运行仍是各自票的历史证据（本页 §4.2 链接）；它们在最终构建的默认套件中有对应夹具，且本轮 15 包真实生命周期覆盖了入口/环境/持久化/版本的通用路径。不把这两类证据混为一谈，也不声称每个机制的每个真实样本都在本轮重新运行。
 - 4136 个 Main/Extras 包（闭合计数：4149 − 13 已验证；含 2 个安装副本与分母不一致的包）只有只读读取与规划，没有逐包生命周期；Extras 软件没有在本机真实根实际运行（本机 Scoop 根未注册 Extras）。
 - 2 个 32bit/arm64 以外的架构边界：32bit 只执行了真实 `air` 包；arm64 只有批准例外中的规划与静态证据，没有生命周期。
-- `psmodule`：Scoop 自己卸载 Coop 安装的模块包（`uninstall_psmodule` 会递归删除 junction 目标）仍未运行；系统级模块与机器级 `PSModulePath` 未实现；这些在[psmodule 支持](../psmodule-support.md)中保持未运行。
+- `psmodule`：Scoop 自己卸载 Burrow 安装的模块包（`uninstall_psmodule` 会递归删除 junction 目标）仍未运行；系统级模块与机器级 `PSModulePath` 未实现；这些在[psmodule 支持](../psmodule-support.md)中保持未运行。
 - MSI 的外部/多段 cabinet、WiX/Dark 等厂商安装器结构仍明确拒绝；没有真实样本。Inno/NSIS 依赖 root 内已安装的 helper，helper 缺失时在执行阶段具名失败。
 - `pi-coding-agent` 是本轮执行器自身，只做只读事实记录，不重写入口或切换版本。
-- 最终构建上没有可用的真实 Scoop 发起**版本更新**样本：`scoop update jq` 报告 1.7.1 已是其当前最新（未发生版本变化），因此“Scoop 真实更新 → Coop 识别”在本轮只有 Scoop `reset` 与之前构建上的 `uv 0.13.5→0.13.6` 证据；后者是历史结果，不冒充最终构建运行。
+- 最终构建上没有可用的真实 Scoop 发起**版本更新**样本：`scoop update jq` 报告 1.7.1 已是其当前最新（未发生版本变化），因此“Scoop 真实更新 → Burrow 识别”在本轮只有 Scoop `reset` 与之前构建上的 `uv 0.13.5→0.13.6` 证据；后者是历史结果，不冒充最终构建运行。
 - 历史 verifier 的 P3 精度/证据标注条目未逐项重跑或改写；状态与原因逐条见[清单](../verifier-findings-inventory.md)。它们不构成产品能力通过，也不阻塞本次验收。
 - 真实共用根上的操作只限本轮声明的包与范围：没有强杀用户程序、没有卸载用户的 Git/7-Zip/Scoop、没有改无关用户配置或系统环境；新的真实副作用仅为正常的软件更新（紧邻的上一构建上的 `gh 2.103.2→2.103.3`、`uv 0.13.5→0.13.6`）与最终构建上已验证的版本往返切换。
 
 ## 6. 本轮发现并修复的共享状态缺陷
 
-**现象（红）**：第一次 15 包重跑中，`scoop uninstall clink` 只删除了 Scoop 自己的 `.shim/.exe/.cmd`，留下了 Coop 的 `shims/clink.coop-shim.json` 与旧版 `clink.coop-shim`；随后 `coop install clink` 退出 1：
+**现象（红）**：第一次 15 包重跑中，`scoop uninstall clink` 只删除了 Scoop 自己的 `.shim/.exe/.cmd`，留下了 Burrow 的 `shims/clink.burrow-shim.json` 与旧版 `clink.burrow-shim`；随后 `burrow install clink` 退出 1：
 
 ```
-coop: Destination cannot be published (Windows error 183); close the program and retry
+burrow: Destination cannot be published (Windows error 183); close the program and retry
 ```
 
-证据：`.local/pi/tasks/45/evidence/cohort-9b7e65e/cohort-20261027-092136/lifecycle/scoop-remove/coop-install.log`、`summary.json`（唯一失败项 `coop-reinstall-after-scoop-removal exit=1`）。
+证据：`.local/pi/tasks/45/evidence/cohort-9b7e65e/cohort-20261027-092136/lifecycle/scoop-remove/burrow-install.log`、`summary.json`（唯一失败项 `burrow-reinstall-after-scoop-removal exit=1`）。
 
-**修复**：在发布入口前，把仍然命名本包、且目标位于本包 `apps/<包>/current` 下的残留 Coop 元数据移入当前事务（可由恢复还原），再发布完整入口；同一别名在一次 entries 步骤中只准备一次，跨 `.exe`/脚本家族的第二个声明不会移走刚发布的元数据。外来包或异常目标仍然冲突。提交 `9e4560e`、`a4d7ced`。
+**修复**：在发布入口前，把仍然命名本包、且目标位于本包 `apps/<包>/current` 下的残留 Burrow 元数据移入当前事务（可由恢复还原），再发布完整入口；同一别名在一次 entries 步骤中只准备一次，跨 `.exe`/脚本家族的第二个声明不会移走刚发布的元数据。外来包或异常目标仍然冲突。提交 `9e4560e`、`a4d7ced`。
 
-**绿**：真实根上 `coop install clink` 退出 0，`clink --version` 输出 `1.9.35.fa48d0`，Scoop `list clink` 显示 1.9.35；新增 `scoop_interop` 回归（Coop 安装 → 模拟 Scoop 删除 → 保留 Coop 元数据 → Coop 重装成功且清理旧 `.coop-shim` → 卸载无残留）；最终 15 包重跑 698/0。
+**绿**：真实根上 `burrow install clink` 退出 0，`clink --version` 输出 `1.9.35.fa48d0`，Scoop `list clink` 显示 1.9.35；新增 `scoop_interop` 回归（Burrow 安装 → 模拟 Scoop 删除 → 保留 Burrow 元数据 → Burrow 重装成功且清理旧 `.burrow-shim` → 卸载无残留）；最终 15 包重跑 698/0。
 
 证据：`.local/pi/tasks/45/evidence/clink-reinstall-fix-20261027-092910/clink-install.log`、`.local/pi/tasks/45/evidence/ctest-scoop-interop-fix2.log`、`.local/pi/tasks/45/evidence/ctest-full-a4d7ced.log`。
 
@@ -169,33 +169,33 @@ coop: Destination cannot be published (Windows error 183); close the program and
 ctest --test-dir .local/build --output-on-failure
 
 # 2. 只读查看真实根，不做写入
-.local/build/coop.exe --root C:\Users\Neo\scoop list --json
-.local/build/coop.exe --root C:\Users\Neo\scoop info main/jq --json
-.local/build/coop.exe --root C:\Users\Neo\scoop update git --dry-run --json
+.local/build/burrow.exe --root C:\Users\Neo\scoop list --json
+.local/build/burrow.exe --root C:\Users\Neo\scoop info main/jq --json
+.local/build/burrow.exe --root C:\Users\Neo\scoop update git --dry-run --json
 
 # 3. 双向单文件流程（要求 jq 当前未安装；会临时安装、更新、卸载 jq）
 pwsh -NoProfile -File tests/real-scoop-alternating.ps1 `
-  -CoopExe .local/build/coop.exe `
+  -BurrowExe .local/build/burrow.exe `
   -EvidenceDir .local/pi/tasks/manual/alternating-<UTC>
 
 # 4. 无 Scoop 的独立初始化（项目内全新 root）
 pwsh -NoProfile -File tests/real-scoop-initialization.ps1 `
-  -CoopExe .local/build/coop.exe -TestRoot .local/tests/manual-init `
+  -BurrowExe .local/build/burrow.exe -TestRoot .local/tests/manual-init `
   -EvidenceDir .local/pi/tasks/manual/init-<UTC>
 
-# 5. 本机实际安装集逐项验收（会切换旧版本、重装 fastfetch、Scoop 卸载并由 Coop 重装 clink）
+# 5. 本机实际安装集逐项验收（会切换旧版本、重装 fastfetch、Scoop 卸载并由 Burrow 重装 clink）
 pwsh -NoProfile -File tests/real-scoop-cohort.ps1 `
-  -CoopExe .local/build/coop.exe -EvidenceDir .local/pi/tasks/manual/cohort-<UTC> `
-  -Lifecycle -CoopResetPackages 7zip,uv,git,innounp,fastfetch,fd,fzf,ripgrep,starship,zoxide `
+  -BurrowExe .local/build/burrow.exe -EvidenceDir .local/pi/tasks/manual/cohort-<UTC> `
+  -Lifecycle -BurrowResetPackages 7zip,uv,git,innounp,fastfetch,fd,fzf,ripgrep,starship,zoxide `
   -ReinstallPackage fastfetch -ScoopRemovePackage clink
 
 # 6. 真实中断与恢复
 pwsh -NoProfile -File tests/real-scoop-recovery.ps1 `
-  -CoopExe .local/build/coop.exe -EvidenceDir .local/pi/tasks/manual/recovery-<UTC>
+  -BurrowExe .local/build/burrow.exe -EvidenceDir .local/pi/tasks/manual/recovery-<UTC>
 
 # 7. 性能（真实根查询/刷新 + 项目内真实规模副本）
 pwsh -NoProfile -File tests/perf-real.ps1 `
-  -CoopExe .local/build/coop.exe -ScoopRoot C:\Users\Neo\scoop `
+  -BurrowExe .local/build/burrow.exe -ScoopRoot C:\Users\Neo\scoop `
   -TestRoot .local/tests/manual-perf -EvidenceDir .local/pi/tasks/manual/perf-<UTC> `
   -Runs 3 -FirstRefreshRuns 1
 ```

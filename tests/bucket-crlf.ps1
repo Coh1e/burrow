@@ -1,8 +1,8 @@
 # Red when: a bucket whose working tree only differs by CRLF line endings stops refreshing, or a real
 # local edit starts being discarded instead of stopping the refresh.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -25,7 +25,7 @@ New-Item -ItemType Directory -Path "$repo/bucket" -Force | Out-Null
 & git -C $repo -c user.email=fixture@example.invalid -c user.name=Fixture add -A | Out-Null
 & git -C $repo -c user.email=fixture@example.invalid -c user.name=Fixture commit -qm 'first' | Out-Null
 $installed = Join-Path $root 'install-root'
-Invoke-CoopNative $CoopExe  --root $installed bucket add probe ('file:///' + ($repo -replace '\\','/')) | Out-Null
+Invoke-BurrowNative $BurrowExe  --root $installed bucket add probe ('file:///' + ($repo -replace '\\','/')) | Out-Null
 if ($LASTEXITCODE -cne 0) { throw 'the fixture bucket did not register' }
 $clone = Join-Path $installed 'buckets/probe'
 
@@ -50,16 +50,16 @@ Remove-Item (Join-Path $clone 'bucket/*.json') -Force
 $target = Join-Path $clone 'bucket/x.json'
 $bytes = [IO.File]::ReadAllBytes($target)
 if (@($bytes | Where-Object { $_ -eq 13 }).Count -eq 0) { throw 'the fixture did not materialise CRLF' }
-if ((Invoke-CoopNative git -C $clone status --porcelain) -join '' -ne '') { throw 'the fixture is not clean for Git' }
-$refresh = Invoke-CoopNative $CoopExe  --root $installed bucket update probe
+if ((Invoke-BurrowNative git -C $clone status --porcelain) -join '' -ne '') { throw 'the fixture is not clean for Git' }
+$refresh = Invoke-BurrowNative $BurrowExe  --root $installed bucket update probe
 if ($LASTEXITCODE -cne 0) { throw "a CRLF-only difference stopped the refresh: $($refresh -join ' | ')" }
-$index = Join-Path $installed '.coop/cache/index/probe.json'
+$index = Join-Path $installed '.burrow/cache/index/probe.json'
 if (-not (Test-Path $index)) { throw 'the refresh did not rebuild the index' }
 if ((Get-Content $index -Raw | ConvertFrom-Json).entries.Count -cne 2) { throw 'the refresh did not pick up the new package' }
 
 # A real edit is still preserved: the refresh must stop and say which file.
 Set-Content $target -Value '{ "version": "9.9" }' -Encoding utf8 -NoNewline
-$blocked = Invoke-CoopNative $CoopExe  --root $installed bucket update probe
+$blocked = Invoke-BurrowNative $BurrowExe  --root $installed bucket update probe
 if ($LASTEXITCODE -ceq 0) { throw 'a local edit did not stop the refresh' }
 if (($blocked -join "`n") -cnotmatch 'must be preserved.*bucket[/\\]x\.json') { throw "the refusal did not name the file: $($blocked -join ' | ')" }
 if ((Get-Content $target -Raw) -cnotmatch '9\.9') { throw 'the local edit was overwritten' }

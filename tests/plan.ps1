@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
@@ -10,7 +10,7 @@ Copy-Item "$PSScriptRoot/corpus/main/rclone.json" "$root/buckets/main/bucket/rcl
 Copy-Item "$PSScriptRoot/corpus/main/jq.json" "$root/apps/jq/current/scoop-manifest.json"
 '{"bucket":"main","architecture":"64bit"}' | Set-Content "$root/apps/jq/current/scoop-install.json" -Encoding utf8
 $before = @(Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object { $_.FullName+':'+(Get-FileHash -LiteralPath $_.FullName).Hash })
-$text = & $CoopExe --root $root install main/jq --arch 64bit --dry-run --json
+$text = & $BurrowExe --root $root install main/jq --arch 64bit --dry-run --json
 if ($LASTEXITCODE -ne 0) { throw 'install preview failed' }
 $plan = ($text -join "`n") | ConvertFrom-Json
 if ($plan.action -ne 'install' -or $plan.package.name -ne 'jq' -or $plan.package.version -ne '1.8.2' -or $plan.package.architecture -ne '64bit') { throw 'wrong target identity' }
@@ -21,52 +21,52 @@ if ('download' -notin $operations -or 'verify' -notin $operations -or 'commit-st
 $verifyOperation = @($plan.ir_operations | Where-Object operation -eq 'verify')[0]
 if ($verifyOperation.effect -notmatch 'sha256') { throw 'the operation effect lost the declared digest algorithm' }
 $after = @(Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object { $_.FullName+':'+(Get-FileHash -LiteralPath $_.FullName).Hash })
-if (@(Compare-Object $before $after).Count -or (Test-Path "$root/.coop")) { throw 'preview changed state' }
+if (@(Compare-Object $before $after).Count -or (Test-Path "$root/.burrow")) { throw 'preview changed state' }
 # An installation the other client created is managed from shared facts only: the preview binds
-# the current installation directory and its inputs without any Coop private record.
-$text = & $CoopExe --root $root update jq --dry-run --json
+# the current installation directory and its inputs without any Burrow private record.
+$text = & $BurrowExe --root $root update jq --dry-run --json
 $sharedPlan = ($text -join "`n") | ConvertFrom-Json
 if ($sharedPlan.preconditions.Count -lt 3 -or $sharedPlan.local_facts.current_directory -ne [IO.Path]::GetFullPath("$root/apps/jq/current")) { throw 'installation facts not bound' }
-if (Test-Path "$root/.coop") { throw 'a shared installation preview wrote a private record' }
-$text = & $CoopExe --root $root uninstall jq --dry-run --json
+if (Test-Path "$root/.burrow") { throw 'a shared installation preview wrote a private record' }
+$text = & $BurrowExe --root $root uninstall jq --dry-run --json
 $remove = ($text -join "`n") | ConvertFrom-Json
 $removeOperations = @($remove.ir_operations | ForEach-Object { $_.operation })
 if ('unlink-current' -notin $removeOperations -or 'remove-entries' -notin $removeOperations -or 'remove-version' -notin $removeOperations) { throw 'uninstall operations incomplete' }
-$text = & $CoopExe --root $root update jq --dry-run --json
+$text = & $BurrowExe --root $root update jq --dry-run --json
 if ($LASTEXITCODE -ne 0) { throw 'update preview failed' }
 $update = ($text -join "`n") | ConvertFrom-Json
 if ($update.previous_package.version -ne '1.8.2' -or 'remove-version' -in @($update.ir_operations | ForEach-Object { $_.operation })) { throw 'update must retain previous version' }
-$text = & $CoopExe --root $root install rclone --dry-run --json
+$text = & $BurrowExe --root $root install rclone --dry-run --json
 if ($LASTEXITCODE -ne 0) { throw 'script preview failed' }
 $script = ($text -join "`n") | ConvertFrom-Json
 if ($script.package.persistence[0].source -ne 'rclone.conf' -or $script.package.scripts.Count -lt 2 -or -not $script.package.scripts[0].side_effects) { throw 'script/persist disclosure missing' }
 if (Test-Path "$root/persist") { throw 'preview ran rclone script' }
-$text = & $CoopExe --root $root install jq@0.0.0 --dry-run --json
+$text = & $BurrowExe --root $root install jq@0.0.0 --dry-run --json
 if ($LASTEXITCODE -eq 0 -or 'version-unavailable' -notin (($text -join "`n") | ConvertFrom-Json).diagnostics.code) { throw 'missing version was guessed' }
 '{"version":"1","url":"https://invalid.example/test.exe","hash":"bad","unsupported_option":true}' | Set-Content "$root/buckets/main/bucket/bad.json" -Encoding utf8
-$text = & $CoopExe --root $root install bad --dry-run --json
+$text = & $BurrowExe --root $root install bad --dry-run --json
 $bad = ($text -join "`n") | ConvertFrom-Json
 if ($LASTEXITCODE -eq 0 -or 'unsupported-field' -notin $bad.diagnostics.code -or 'unsupported-hash' -notin $bad.diagnostics.code) { throw 'validation did not distinguish known unsupported and invalid IR' }
 '{' | Set-Content "$root/buckets/main/bucket/syntax.json" -Encoding utf8
-$text = & $CoopExe --root $root install syntax --dry-run --json
+$text = & $BurrowExe --root $root install syntax --dry-run --json
 if ($LASTEXITCODE -eq 0 -or 'syntax' -notin (($text -join "`n") | ConvertFrom-Json).diagnostics.category) { throw 'missing syntax diagnostic' }
-$query = & $CoopExe --root $root info bad --json
+$query = & $BurrowExe --root $root info bad --json
 if ($LASTEXITCODE -ne 0 -or ($query | ConvertFrom-Json)[0].name -ne 'bad') { throw 'execution validation hid query result' }
-if (Test-Path "$root/.coop") { throw 'preview wrote management state' }
+if (Test-Path "$root/.burrow") { throw 'preview wrote management state' }
 '{"bucket":"main","architecture":"32bit"}' | Set-Content "$root/apps/jq/current/scoop-install.json" -Encoding utf8
 New-Item -ItemType Directory -Path "$root/buckets/other/bucket" | Out-Null
 Copy-Item "$root/buckets/main/bucket/jq.json" "$root/buckets/other/bucket/jq.json"
-$text = & $CoopExe --root $root update jq --dry-run --json
+$text = & $BurrowExe --root $root update jq --dry-run --json
 if ($LASTEXITCODE -ne 0) { throw 'update failed to inherit installed source' }
 $update32 = ($text -join "`n") | ConvertFrom-Json
 if ($update32.package.architecture -ne '32bit' -or $update32.package.bucket -ne 'main' -or $update32.artifacts[0].url -notlike '*i386*') { throw 'update changed installed architecture or source' }
 $processManifest = @{version='1';url='https://invalid.example/test.exe';hash=('0'*64);depends='main/jq';installer=@{file='setup.exe';args=@('/silent','value with spaces');keep=$true};uninstaller=@{file='remove.exe';args='/quiet'}} | ConvertTo-Json -Depth 5
 $processManifest | Set-Content "$root/buckets/main/bucket/process.json" -Encoding utf8
-$text = & $CoopExe --root $root install main/process --dry-run --json
+$text = & $BurrowExe --root $root install main/process --dry-run --json
 $processPlan = ($text -join "`n") | ConvertFrom-Json
 if ($processPlan.package.installer.file -ne 'setup.exe' -or $processPlan.package.installer.arguments[1] -ne 'value with spaces' -or $processPlan.package.uninstaller.file -ne 'remove.exe' -or 'main/jq' -notin $processPlan.package.dependencies) { throw 'missing installer/ dependency disclosure' }
-$guard = Join-Path (Split-Path $CoopExe) 'process_guard.exe'
-$guardOutput = & $guard $CoopExe --root $root install rclone --dry-run --json
+$guard = Join-Path (Split-Path $BurrowExe) 'process_guard.exe'
+$guardOutput = & $guard $BurrowExe --root $root install rclone --dry-run --json
 if ($LASTEXITCODE -ne 0) { throw 'preview launched a script or helper process' }
 $guardOutput | Set-Content "$root/preview-process-evidence.txt" -Encoding utf8
 Write-Output 'PASS read-only package IR, artifact selection, plan and input digest'

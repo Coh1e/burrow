@@ -34,7 +34,7 @@ namespace {
 // steps that throw: a failed run still says where the time went.
 struct StepScope {
     explicit StepScope(std::string operation) : operation_(std::move(operation)) {}
-    ~StepScope() { coop::timings_add(operation_,std::chrono::duration<double>(std::chrono::steady_clock::now()-started_).count()); }
+    ~StepScope() { burrow::timings_add(operation_,std::chrono::duration<double>(std::chrono::steady_clock::now()-started_).count()); }
     StepScope(const StepScope&) = delete;
     StepScope& operator=(const StepScope&) = delete;
 private:
@@ -42,7 +42,7 @@ private:
     std::string operation_;
 };
 }
-namespace coop {
+namespace burrow {
 namespace {
 Json dependency_sources(const ir::Package& package) {
     Json result = Json::array();
@@ -92,7 +92,7 @@ void require_capabilities(const Context& context, const ir::Package& package, bo
             break;
         case ir::ArchiveFormat::msi:
             if (!msi_database_api() || !cabinet_api())
-                throw std::runtime_error("MSI extraction requires the Windows Installer database API (msi.dll) and the Windows cabinet decompression API (cabinet.dll), Windows system components that were not found; Coop never downloads or installs external tools, and it never falls back to msiexec.exe");
+                throw std::runtime_error("MSI extraction requires the Windows Installer database API (msi.dll) and the Windows cabinet decompression API (cabinet.dll), Windows system components that were not found; Burrow never downloads or installs external tools, and it never falls back to msiexec.exe");
             break;
         case ir::ArchiveFormat::inno_setup: {
             const auto helper = inno_helper(context);
@@ -147,7 +147,7 @@ void verify_installed_files(const Json& managed, const fs::path& directory, cons
 bool verify_shortcut_ownership(const Context& context, const ir::Package& installed, const Json& managed,
                                const ir::Shortcut& shortcut, const fs::path& link,
                                const fs::path& installed_directory) {
-    // A shortcut removed outside Coop is already revoked: there is nothing left to own or
+    // A shortcut removed outside Burrow is already revoked: there is nothing left to own or
     // protect, so update/uninstall records the observation and continues. A shortcut that is
     // still present but changed is still refused below.
     if (!fs::is_regular_file(link)) return false;
@@ -187,7 +187,7 @@ bool verify_shortcut_ownership(const Context& context, const ir::Package& instal
         }
         return true;
     }
-    // A shared Scoop installation has no Coop record. Its shortcut is still owned only when the
+    // A shared Scoop installation has no Burrow record. Its shortcut is still owned only when the
     // current identity matches the package manifest exactly; otherwise it is left untouched.
     const auto identity = read_shortcut(link);
     if (!identity) throw std::runtime_error("Shared shortcut cannot be read: "+path_text(link));
@@ -236,7 +236,7 @@ void publish_new(const fs::path& source, const fs::path& destination) {
     throw std::runtime_error("Destination cannot be published (Windows error "+std::to_string(error)+") after "+
         std::to_string(attempts/2)+"s: "+path_text(destination)+"; close the program that holds it and retry");
 }
-// A shared Scoop installation has no Coop record. Its direct-file artifacts are still verifiable
+// A shared Scoop installation has no Burrow record. Its direct-file artifacts are still verifiable
 // from the saved Manifest: each declared file must exist in the version directory and match the
 // declared algorithm. An archive installation is an extracted tree, and Scoop records no digest
 // for that tree. For it, the installation facts are the standard apps/<name>/current layout, the
@@ -281,7 +281,7 @@ bool path_is_under(const fs::path& path, const fs::path& base) {
     }
     return entry != normalized.end();
 }
-// Journal paths are absolute. Recovery accepts only Coop's root and the isolated shortcut
+// Journal paths are absolute. Recovery accepts only Burrow's root and the isolated shortcut
 // directory, rejects parent reparse points, and permits a reparse point only as the final
 // managed junction (for example apps/<package>/current).
 bool recovery_path_allowed(const Context& context, const fs::path& path) {
@@ -323,7 +323,7 @@ bool recovery_path_allowed(const Context& context, const fs::path& path) {
     }
     return true;
 }
-// Creation evidence. Recovery may only delete an object that is still the one Coop created.
+// Creation evidence. Recovery may only delete an object that is still the one Burrow created.
 // The file identity (volume serial + file index) survives content changes and detects a replaced
 // object; a created regular file also records its digest, and a created reparse point records its
 // target so a later repoint is visible. Directory contents legitimately change after creation
@@ -374,7 +374,7 @@ std::string ownership_conflict(const Json& evidence, const fs::path& path, std::
             const auto& recorded = evidence.at("file_identity");
             if (recorded.value("volume",std::uint64_t{0}) != current.volume ||
                 recorded.value("index",std::uint64_t{0}) != current.index) {
-                detail = "The created path is a different object than the one Coop recorded: "+path_text(path);
+                detail = "The created path is a different object than the one Burrow recorded: "+path_text(path);
                 return "created-path-replaced";
             }
         } else {
@@ -389,7 +389,7 @@ std::string ownership_conflict(const Json& evidence, const fs::path& path, std::
             return "created-path-replaced";
         }
         if (sha256_file(path) != evidence.at("sha256").get<std::string>()) {
-            detail = "The created file was modified after Coop created it: "+path_text(path);
+            detail = "The created file was modified after Burrow created it: "+path_text(path);
             return "created-file-modified";
         }
     }
@@ -397,7 +397,7 @@ std::string ownership_conflict(const Json& evidence, const fs::path& path, std::
         std::error_code error;
         const auto target = fs::read_symlink(path,error);
         if (error || path_text(target) != evidence.at("target").get<std::string>()) {
-            detail = "The created link now points somewhere else than Coop recorded: "+path_text(path);
+            detail = "The created link now points somewhere else than Burrow recorded: "+path_text(path);
             return "created-link-repointed";
         }
     }
@@ -408,7 +408,7 @@ bool same_path_text(const fs::path& a, const fs::path& b) {
     const auto right = b.lexically_normal().wstring();
     return CompareStringOrdinal(left.c_str(),-1,right.c_str(),-1,TRUE) == CSTR_EQUAL;
 }
-std::string coop_launcher_hash() {
+std::string burrow_launcher_hash() {
     std::array<wchar_t,32768> module{};
     const auto length = GetModuleFileNameW(nullptr,module.data(),static_cast<DWORD>(module.size()));
     if (!length || length >= module.size()) throw std::runtime_error("Cannot find native command launcher");
@@ -453,13 +453,13 @@ struct InstalledEntry {
     std::string executable_hash;
     std::string metadata_hash;
     // Both clients can publish the same command: Scoop's .shim view stays after a scoop reset and
-    // Coop's .coop-shim.json view stays after a Coop write. The validated other view is recorded
+    // Burrow's .burrow-shim.json view stays after a Burrow write. The validated other view is recorded
     // here so removal takes both metadata files instead of leaving an orphan behind.
     fs::path extra_metadata;
     std::string extra_metadata_hash;
 };
-// The two clients name the same command differently (Scoop writes <name>.shim, Coop writes
-// <name>.coop-shim.json). When both are present they describe the same shared entry only if the
+// The two clients name the same command differently (Scoop writes <name>.shim, Burrow writes
+// <name>.burrow-shim.json). When both are present they describe the same shared entry only if the
 // Scoop view still targets this package's command with the same arguments; anything else remains
 // a real conflict.
 bool compatible_scoop_view(const Context& context, const ir::Package& installed, const ir::Entry& command,
@@ -472,12 +472,12 @@ bool compatible_scoop_view(const Context& context, const ir::Package& installed,
     if (!expected_arguments.empty() && metadata.arguments != expected_arguments) return false;
     return true;
 }
-// Coop writes <name>.coop-shim.json; Scoop writes <name>.shim. A Coop metadata file still describes
+// Burrow writes <name>.burrow-shim.json; Scoop writes <name>.shim. A Burrow metadata file still describes
 // this shared entry when it names the same package, target, arguments and host kind.
-bool coop_view_matches(const ir::Package& installed, const fs::path& base, const ir::Entry& command,
-                       const std::string& expected_arguments, const fs::path& coop_metadata) {
+bool burrow_view_matches(const ir::Package& installed, const fs::path& base, const ir::Entry& command,
+                       const std::string& expected_arguments, const fs::path& burrow_metadata) {
     Json metadata;
-    try { metadata = read_json(coop_metadata); }
+    try { metadata = read_json(burrow_metadata); }
     catch (const std::exception&) { return false; }
     return equal_name(metadata.value("package",std::string{}),installed.name) &&
         same_identity(fs::path(wide(metadata.value("target",std::string{}))),base/wide(command.target)) &&
@@ -485,8 +485,8 @@ bool coop_view_matches(const ir::Package& installed, const fs::path& base, const
         metadata.value("launcher",std::string{}) == command_launcher_name(fs::path(wide(command.target)));
 }
 // Either client's launcher executable may be in place after the other client republished the
-// shared entry. Accept Coop's own binary, a recognized Scoop shim, or the exact launcher recorded
-// by Coop; a foreign replacement is still refused.
+// shared entry. Accept Burrow's own binary, a recognized Scoop shim, or the exact launcher recorded
+// by Burrow; a foreign replacement is still refused.
 bool trusted_shared_launcher(const Context& context, const Json& record, const std::string& name,
                              const fs::path& executable, const std::string& digest,
                              const std::string& module_hash, const std::string& target = {}) {
@@ -503,11 +503,11 @@ bool trusted_shared_launcher(const Context& context, const Json& record, const s
     return false;
 }
 // Preview and execution must agree on whether an existing shared entry can be replaced/removed.
-// The .shim target/arguments are the ownership evidence; the launcher must either be Coop's own
-// binary, the exact launcher recorded by Coop, or a Scoop shim identified by its program markers.
+// The .shim target/arguments are the ownership evidence; the launcher must either be Burrow's own
+// binary, the exact launcher recorded by Burrow, or a Scoop shim identified by its program markers.
 std::string command_entry_blocker(const Context& context, const ir::Package& installed) {
     const auto shims = context.root/L"shims";
-    const auto module_hash = coop_launcher_hash();
+    const auto module_hash = burrow_launcher_hash();
     Json record = Json::object();
     const auto record_path = state_directory(context)/L"packages"/(wide(installed.name)+L".json");
     if (fs::is_regular_file(record_path)) {
@@ -518,7 +518,7 @@ std::string command_entry_blocker(const Context& context, const ir::Package& ins
         const auto expected_arguments = expand_exposure_arguments(context,installed.name,
             context.root/L"apps"/wide(installed.name)/L"current",command.arguments);
         const auto exe = shims/(wide(command.alias)+L".exe");
-        const auto coop_metadata = shims/(wide(command.alias)+L".coop-shim.json");
+        const auto burrow_metadata = shims/(wide(command.alias)+L".burrow-shim.json");
         const auto scoop_metadata = shims/(wide(command.alias)+L".shim");
         if (launcher_kind(fs::path(wide(command.target))) != LauncherKind::direct &&
             has_direct_alias(installed.entries,command.alias,command.target)) {
@@ -536,36 +536,36 @@ std::string command_entry_blocker(const Context& context, const ir::Package& ins
             if (fs::exists(scoop_metadata) &&
                 !compatible_scoop_view(context,installed,command,expected_arguments,scoop_metadata))
                 return "Scoop command entry points to a different package or arguments: "+command.alias;
-            // A <alias>.coop-shim.json left by an older Coop build is stale evidence, not a
+            // A <alias>.burrow-shim.json left by an older Burrow build is stale evidence, not a
             // conflict: the entry is still removable/updatable and the file is cleaned with it.
             continue;
         }
         if (!fs::is_regular_file(exe)) {
-            if (fs::exists(coop_metadata) || fs::exists(scoop_metadata)) return "Managed command entry is missing: "+command.alias;
+            if (fs::exists(burrow_metadata) || fs::exists(scoop_metadata)) return "Managed command entry is missing: "+command.alias;
             if (!scoop_entry_wrappers(context,installed.name,{command.alias}).empty()) continue;
             return "Managed command entry is missing: "+command.alias;
         }
         const auto base = context.root/L"apps"/wide(installed.name)/L"current";
-        const bool has_coop = fs::exists(coop_metadata);
+        const bool has_burrow = fs::exists(burrow_metadata);
         const bool has_scoop = fs::exists(scoop_metadata);
-        const bool coop_valid = has_coop &&
-            coop_view_matches(installed,base,command,expected_arguments,coop_metadata);
+        const bool burrow_valid = has_burrow &&
+            burrow_view_matches(installed,base,command,expected_arguments,burrow_metadata);
         const bool scoop_valid = has_scoop &&
             compatible_scoop_view(context,installed,command,expected_arguments,scoop_metadata);
-        if (has_coop && has_scoop) {
+        if (has_burrow && has_scoop) {
             // Both clients published this entry. The shared view is usable when at least one side
             // still describes the installed command; an unusable pair is a real conflict.
-            if (!coop_valid && !scoop_valid)
-                return "Command entry has conflicting Coop and Scoop metadata: "+command.alias;
-        } else if (!has_coop && !has_scoop) {
+            if (!burrow_valid && !scoop_valid)
+                return "Command entry has conflicting Burrow and Scoop metadata: "+command.alias;
+        } else if (!has_burrow && !has_scoop) {
             return "Managed command entry metadata is missing: "+command.alias;
-        } else if (has_coop) {
-            if (!coop_valid) return "Managed command entry ownership changed: "+command.alias;
+        } else if (has_burrow) {
+            if (!burrow_valid) return "Managed command entry ownership changed: "+command.alias;
         } else if (!scoop_valid) {
             return "Scoop command entry points to a different package or arguments: "+command.alias;
         }
         if (!trusted_shared_launcher(context,record,command.alias,exe,sha256_file(exe),module_hash,command.target))
-            return "Shared command launcher is not recognized and is not recorded by Coop: "+command.alias;
+            return "Shared command launcher is not recognized and is not recorded by Burrow: "+command.alias;
     }
     return {};
 }
@@ -623,7 +623,7 @@ std::string execution_blocker(const Context& context, const Plan& plan) {
     if (plan.purge) {
         if (plan.action != ir::Action::uninstall) return "--purge is only supported by uninstall";
         // Purge scope is the installed package's own declarations plus the verified link identities;
-        // a Coop private record is not a precondition for deleting declared data.
+        // a Burrow private record is not a precondition for deleting declared data.
         try {
             purge_scope(context,plan.package,plan.local.directory);
         } catch (const std::exception& error) {
@@ -652,10 +652,10 @@ std::string execution_blocker(const Context& context, const Plan& plan) {
     // directory is created beside the old one and `current` is repointed; cleanup retires the old one.
     if ((plan.action == ir::Action::uninstall || plan.action == ir::Action::update || plan.action == ir::Action::reset) && !plan.local.exists)
         return "No usable current installation exists for this package";
-    // Shared Scoop installations have no Coop private record. Direct-file artifacts (including
+    // Shared Scoop installations have no Burrow private record. Direct-file artifacts (including
     // multiple downloads) are verified from the saved Manifest and actual files. Archive layouts
     // are verified from the standard apps/<name>/current tree, the saved records and every declared
-    // entry target; no private Coop record is a precondition.
+    // entry target; no private Burrow record is a precondition.
     if ((plan.action == ir::Action::uninstall || plan.action == ir::Action::update || plan.action == ir::Action::reset) &&
         !fs::exists(state_directory(context)/L"packages"/(wide(plan.package.name)+L".json"))) {
         const auto& facts = (plan.action == ir::Action::update || plan.action == ir::Action::reset) && plan.previous ? *plan.previous : plan.package;
@@ -737,9 +737,9 @@ int execute_plan(const Context& context, const Plan& plan) {
     }
     if (partial) {
         std::cout << plan.package.name << ": partial\n";
-        std::cerr << "coop: " << result.value("reason",std::string("Operation did not fully complete")) << '\n';
+        std::cerr << "burrow: " << result.value("reason",std::string("Operation did not fully complete")) << '\n';
         for (const auto& entry : result.value("purge",Json::object()).value("failed",Json::array()))
-            std::cerr << "coop: " << entry.value("store",std::string{}) << ": " << entry.value("reason",std::string{}) << '\n';
+            std::cerr << "burrow: " << entry.value("store",std::string{}) << ": " << entry.value("reason",std::string{}) << '\n';
         return 1;
     }
     // Scoop's closing line differs per command: an uninstall names what went away, a reset says
@@ -879,7 +879,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
             return Json{{"package",package.name},{"version",package.version},{"status","already-installed"}};
         if (fs::exists(version)) throw std::runtime_error("Target version already exists; it will not be overwritten");
     } else {
-        // Shared Scoop state is the authority. A Coop record is optional evidence: when it is
+        // Shared Scoop state is the authority. A Burrow record is optional evidence: when it is
         // missing or stale, the current installation records and actual files are re-read instead
         // of refusing management or demanding an adoption step.
         if (has_managed_record) managed = read_json(record_path);
@@ -932,37 +932,37 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
         }
     }
     std::vector<InstalledEntry> installed_entries;
-    const auto module_hash = coop_launcher_hash();
+    const auto module_hash = burrow_launcher_hash();
     for (const auto& command : installed.entries) {
         const auto expected_arguments = expand_exposure_arguments(context,installed.name,
             context.root/L"apps"/wide(installed.name)/L"current",command.arguments);
         const auto exe = shims/(wide(command.alias)+L".exe");
-        const auto coop_metadata = shims/(wide(command.alias)+L".coop-shim.json");
+        const auto burrow_metadata = shims/(wide(command.alias)+L".burrow-shim.json");
         const auto scoop_metadata = shims/(wide(command.alias)+L".shim");
         const auto kind = launcher_kind(fs::path(wide(command.target)));
         if (plan.action == ir::Action::install && plan.retain_previous && fs::exists(version))
         throw std::runtime_error("Target version already exists; it will not be overwritten");
     if (plan.action == ir::Action::install && !plan.retain_previous) {
-            if (fs::exists(exe) || fs::exists(coop_metadata) || fs::exists(scoop_metadata)) {
-                // A package installation that Scoop removed can leave Coop's own entry files behind
-                // (Scoop's rm_shim removes the launcher and its .shim, not .coop-shim.json). Files
-                // that are provably Coop's own and whose recorded target no longer exists are stale
+            if (fs::exists(exe) || fs::exists(burrow_metadata) || fs::exists(scoop_metadata)) {
+                // A package installation that Scoop removed can leave Burrow's own entry files behind
+                // (Scoop's rm_shim removes the launcher and its .shim, not .burrow-shim.json). Files
+                // that are provably Burrow's own and whose recorded target no longer exists are stale
                 // evidence from that removal, so a fresh install replaces them instead of refusing.
-                bool stale_coop_entry = false;
+                bool stale_burrow_entry = false;
                 if (!fs::exists(scoop_metadata)) {
-                    if (fs::exists(coop_metadata)) {
+                    if (fs::exists(burrow_metadata)) {
                         try {
-                            const auto metadata = read_json(coop_metadata);
+                            const auto metadata = read_json(burrow_metadata);
                             const auto recorded_target = fs::path(wide(metadata.value("target",std::string{})));
-                            stale_coop_entry = equal_name(metadata.value("package",std::string{}),package.name) &&
+                            stale_burrow_entry = equal_name(metadata.value("package",std::string{}),package.name) &&
                                 !recorded_target.empty() && !fs::exists(recorded_target);
                         } catch (const std::exception&) { /* Unreadable metadata stays a conflict. */ }
                     }
                     if (kind != LauncherKind::direct && fs::exists(exe) &&
-                        sha256_file(exe) == coop_launcher_hash())
-                        stale_coop_entry = true;
+                        sha256_file(exe) == burrow_launcher_hash())
+                        stale_burrow_entry = true;
                 }
-                if (!stale_coop_entry) throw std::runtime_error("Command entry conflicts with an existing file");
+                if (!stale_burrow_entry) throw std::runtime_error("Command entry conflicts with an existing file");
             }
             if (kind != LauncherKind::direct) {
                 const auto cmd_wrapper = shims/(wide(command.alias)+L".cmd");
@@ -987,43 +987,43 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
             if (fs::exists(scoop_metadata) &&
                 !compatible_scoop_view(context,installed,command,expected_arguments,scoop_metadata))
                 throw std::runtime_error("Scoop command entry points to a different package or arguments: "+command.alias);
-            // Leftover <alias>.coop-shim.json from an older build is cleaned by the plan's entry
+            // Leftover <alias>.burrow-shim.json from an older build is cleaned by the plan's entry
             // removal instead of blocking the operation.
             continue;
         }
         if (!fs::exists(exe)) {
-            if (fs::exists(coop_metadata) || fs::exists(scoop_metadata)) throw std::runtime_error("Managed command entry is missing");
+            if (fs::exists(burrow_metadata) || fs::exists(scoop_metadata)) throw std::runtime_error("Managed command entry is missing");
             // Scoop's script-host entries are .cmd/.ps1/sh wrappers without an .exe. They are
             // removed through plan.scoop_entry_wrappers after the content check above.
             if (!scoop_entry_wrappers(context,installed.name,{command.alias}).empty()) continue;
             throw std::runtime_error("Managed command entry is missing");
         }
-        const bool has_coop = fs::exists(coop_metadata);
+        const bool has_burrow = fs::exists(burrow_metadata);
         const bool has_scoop = fs::exists(scoop_metadata);
-        const bool coop_valid = has_coop &&
-            coop_view_matches(installed,plan.local.directory,command,expected_arguments,coop_metadata);
+        const bool burrow_valid = has_burrow &&
+            burrow_view_matches(installed,plan.local.directory,command,expected_arguments,burrow_metadata);
         const bool scoop_valid = has_scoop &&
             compatible_scoop_view(context,installed,command,expected_arguments,scoop_metadata);
-        if (has_coop && has_scoop) {
-            if (!coop_valid && !scoop_valid)
-                throw std::runtime_error("Command entry has conflicting Coop and Scoop metadata");
-        } else if (!has_coop && !has_scoop) {
+        if (has_burrow && has_scoop) {
+            if (!burrow_valid && !scoop_valid)
+                throw std::runtime_error("Command entry has conflicting Burrow and Scoop metadata");
+        } else if (!has_burrow && !has_scoop) {
             throw std::runtime_error("Managed command entry metadata is missing");
-        } else if (has_coop && !coop_valid) {
+        } else if (has_burrow && !burrow_valid) {
             throw std::runtime_error("Managed command entry ownership changed");
-        } else if (!has_coop && !scoop_valid) {
+        } else if (!has_burrow && !scoop_valid) {
             throw std::runtime_error("Scoop command entry points to a different package or arguments");
         }
         InstalledEntry entry{command.alias,{},exe,{},sha256_file(exe),{}, {}, {}};
         if (!trusted_shared_launcher(context,managed,command.alias,entry.executable,entry.executable_hash,module_hash,command.target))
             throw std::runtime_error("Shared command launcher changed");
-        if (has_coop && coop_valid) {
-            entry.format = "coop";
-            entry.metadata = coop_metadata;
-            entry.metadata_hash = sha256_file(coop_metadata);
+        if (has_burrow && burrow_valid) {
+            entry.format = "burrow";
+            entry.metadata = burrow_metadata;
+            entry.metadata_hash = sha256_file(burrow_metadata);
             if (has_scoop) {
                 // Both views describe this command. The Scoop view stays on disk as the other
-                // client's evidence and is removed together with Coop's own metadata.
+                // client's evidence and is removed together with Burrow's own metadata.
                 entry.extra_metadata = scoop_metadata;
                 entry.extra_metadata_hash = sha256_file(scoop_metadata);
             }
@@ -1042,16 +1042,16 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                     throw std::runtime_error("Managed command metadata changed");
             }
         } else if (has_scoop) {
-            // Either Coop never published this command in the Coop format, or its own view is stale
+            // Either Burrow never published this command in the Burrow format, or its own view is stale
             // after the other client published a different version. The shared Scoop view is
-            // authoritative until Coop republishes, and a stale Coop metadata file is removed with
+            // authoritative until Burrow republishes, and a stale Burrow metadata file is removed with
             // the entry instead of blocking alternation.
             entry.format = "scoop";
             entry.metadata = scoop_metadata;
             entry.metadata_hash = sha256_file(scoop_metadata);
-            if (has_coop) {
-                entry.extra_metadata = coop_metadata;
-                entry.extra_metadata_hash = sha256_file(coop_metadata);
+            if (has_burrow) {
+                entry.extra_metadata = burrow_metadata;
+                entry.extra_metadata_hash = sha256_file(burrow_metadata);
             }
         } else {
             throw std::runtime_error("Managed command entry metadata is missing");
@@ -1084,7 +1084,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
             throw std::runtime_error("Target version already exists; it will not be overwritten");
         for (const auto& command : package.entries) {
             if (std::any_of(installed.entries.begin(),installed.entries.end(),[&](const ir::Entry& old) { return equal_name(old.alias,command.alias); })) continue;
-            if (fs::exists(shims/(wide(command.alias)+L".exe")) || fs::exists(shims/(wide(command.alias)+L".coop-shim.json")) ||
+            if (fs::exists(shims/(wide(command.alias)+L".exe")) || fs::exists(shims/(wide(command.alias)+L".burrow-shim.json")) ||
                 fs::exists(shims/(wide(command.alias)+L".shim")))
                 throw std::runtime_error("New command entry conflicts with an existing file");
         }
@@ -1128,14 +1128,14 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
         {"created",Json::array()},{"moves",Json::array()},{"scripts",Json::array()},{"installers",Json::array()},
         {"shortcuts_already_absent",absent_shortcuts}};
     if (plan.update) journal["source_revisions"] = update_source_evidence(plan);
-    // A shared Scoop installation has no Coop ownership record. The installed Manifest still
+    // A shared Scoop installation has no Burrow ownership record. The installed Manifest still
     // declares the values this package previously wrote, so use those declarations as attribution
     // evidence before deciding whether a current value is package-owned or a later user edit.
     Json user_environment_prior = managed.value("user_environment",Json(nullptr));
-    std::string user_environment_source = user_environment_prior.is_null() ? "none" : "coop-record";
+    std::string user_environment_source = user_environment_prior.is_null() ? "none" : "burrow-record";
     if (user_environment_prior.is_null() && (updating || resetting || plan.action == ir::Action::uninstall) &&
         (!installed.environment.empty())) {
-        // Coop publishes environment and PATH declarations against the stable current path, so
+        // Burrow publishes environment and PATH declarations against the stable current path, so
         // previous declarations must be expanded the same way rather than against the concrete
         // apps/<package>/<version> target of the junction.
         auto previous_environment = expanded_environment(context,installed,app/L"current");
@@ -1162,7 +1162,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
         }
         owned.push_back(path);
         journal["created"].back()["owned"] = true;
-        // Creation evidence lets recovery distinguish the object Coop created from a later
+        // Creation evidence lets recovery distinguish the object Burrow created from a later
         // replacement or edit by the user or another client.
         journal["created"].back()["evidence"] = ownership_evidence(path);
         save();
@@ -1302,7 +1302,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
     Json user_environment = Json(nullptr);
     Json environment_undo = Json::array();
     // PowerShell module exposure evidence written to the package record: module name, junction,
-    // linked target and the PSModulePath entry Coop added with its previous raw value.
+    // linked target and the PSModulePath entry Burrow added with its previous raw value.
     Json psmodule_record = Json(nullptr);
     try {
         const auto stage = transaction/L"payload";
@@ -1379,7 +1379,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
         // the execution backend for each operation, never a second source of package ordering.
         for (const auto& step : plan.steps) {
             const StepScope step_scope{ir::operation_name(step.operation)};
-            // An update runs two visible phases. Scoop prints their headers; coop extracts before the
+            // An update runs two visible phases. Scoop prints their headers; burrow extracts before the
             // old version is unpublished, which is why the extract lines appear above the uninstall
             // block (see #57: a failed extract must leave `current` on the old version).
             if (plan.action == ir::Action::update && step.previous != previous_phase) {
@@ -1404,7 +1404,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                 // <root>/cache is shared with Scoop: a file whose declared digest still matches is
                 // reused instead of downloaded again (GLOSSARY: Download Cache).
                 const auto cache_directory = context.root/L"cache";
-                // Scoop names a cached artifact `<app>#<version>#<sha256(url)[0..7]><extension>`; Coop
+                // Scoop names a cached artifact `<app>#<version>#<sha256(url)[0..7]><extension>`; Burrow
                 // writes the same name so either client can find and clean the other's cache, and it
                 // still reads the older `<filename>` layout it wrote before this change.
                 const auto cache_suffix = wide(sha256_text(artifact.url).substr(0,7))+
@@ -1425,7 +1425,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                 // so a cached update announces the new version too.
                 // Test seam: a long silent window is otherwise hard to produce without a slow server.
                 wchar_t stall[32]{};
-                const auto stall_length = GetEnvironmentVariableW(L"COOP_TEST_STALL_MS",stall,32);
+                const auto stall_length = GetEnvironmentVariableW(L"BURROW_TEST_STALL_MS",stall,32);
                 if (stall_length && stall_length < 32)
                     std::this_thread::sleep_for(std::chrono::milliseconds(std::stoi(stall)));
                 if (plan.action == ir::Action::update || plan.retain_previous) progress_stage("Downloading new version");
@@ -1609,7 +1609,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                     journal["scoop_entry_wrappers"].push_back(path_text(wrapper));
                     move(wrapper,transaction/((step.previous ? L"old-scoop-wrapper-" : L"scoop-wrapper-")+std::to_wstring(wrapper_index++)+wrapper.extension().wstring()));
                 }
-                // Legacy Coop-only entry files are carried in plan.scoop_entry_wrappers, so the
+                // Legacy Burrow-only entry files are carried in plan.scoop_entry_wrappers, so the
                 // preview lists them and they are moved aside with the wrappers above.
                 break;
             }
@@ -1622,8 +1622,8 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                 break;
             }
             case ir::Operation::remove_ps_module: {
-                // Remove the module junction this package declared and, only when Coop's own record
-                // says Coop added the shared modules directory to PSModulePath and no other module
+                // Remove the module junction this package declared and, only when Burrow's own record
+                // says Burrow added the shared modules directory to PSModulePath and no other module
                 // link still needs it, remove exactly that entry. Everything else is preserved.
                 ensure_preparation();
                 const auto& module_package = (step.previous || plan.action == ir::Action::uninstall) ? installed : package;
@@ -1652,7 +1652,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                 if (fs::is_directory(modules,error) && !error) {
                     // Only another module junction keeps the entry; a stray file or empty directory
                     // (Scoop leftovers, editor metadata) is not a module link and must not turn a
-                    // Coop-owned PSModulePath entry into a permanent one.
+                    // Burrow-owned PSModulePath entry into a permanent one.
                     for (fs::directory_iterator entry(modules,error), end; !error && entry != end; entry.increment(error)) {
                         const auto entry_attributes = GetFileAttributesW(entry->path().c_str());
                         if (entry_attributes != INVALID_FILE_ATTRIBUTES && (entry_attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
@@ -1673,7 +1673,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                         {"reason","another PowerShell module link still uses the modules directory"}};
                 } else if (!prior.is_object() || !prior.contains("ownership")) {
                     record["user_environment"] = {{"status","not-owned"},
-                        {"reason","no Coop ownership evidence for the modules directory entry; it is left unchanged"}};
+                        {"reason","no Burrow ownership evidence for the modules directory entry; it is left unchanged"}};
                 } else {
                     auto reverted = revert_user_path_entry(prior.at("ownership"));
                     environment_undo.push_back(reverted.value("undo",Json::object()));
@@ -1746,16 +1746,16 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                     const auto target = version/wide(command.target);
                     ordinary_parents(version,target);
                     if (!fs::is_regular_file(target)) throw std::runtime_error("Command entry target is missing after extraction: "+command.target);
-                    // A package that Scoop removed can leave Coop's own metadata behind (Scoop's
+                    // A package that Scoop removed can leave Burrow's own metadata behind (Scoop's
                     // rm_shim only removes its own files). On a fresh install, metadata that still
                     // names this package and targets its current entry is the stale evidence of
                     // that removal, so it is moved aside for the fresh publish; a foreign package
                     // or an unexpected target stays a conflict. An alias declared for both the
                     // executable and script families is only prepared once: the later declaration
-                    // publishes its wrappers while the first keeps the Coop metadata.
+                    // publishes its wrappers while the first keeps the Burrow metadata.
                     if (prepared_aliases.insert(wide(command.alias)).second) {
-                        for (const auto& stale : {shims/(wide(command.alias)+L".coop-shim.json"),
-                                                  shims/(wide(command.alias)+L".coop-shim")}) {
+                        for (const auto& stale : {shims/(wide(command.alias)+L".burrow-shim.json"),
+                                                  shims/(wide(command.alias)+L".burrow-shim")}) {
                             std::error_code stale_error;
                             if (!fs::exists(stale,stale_error) || stale_error) continue;
                             bool ours = false;
@@ -1769,11 +1769,11 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                                     !relative.empty() && !relative.is_absolute() && *relative.begin() != L"..";
                             } catch (const std::exception&) { ours = false; }
                             if (!ours)
-                                throw std::runtime_error("Command entry conflicts with existing Coop metadata: "+path_text(stale));
+                                throw std::runtime_error("Command entry conflicts with existing Burrow metadata: "+path_text(stale));
                             move(stale,transaction/(stale.filename().wstring()+L".stale"));
                         }
-                        // Older Coop versions copied <alias>.exe for script hosts, which wins PATH
-                        // resolution over <alias>.cmd. Retire that launcher when it is Coop's own
+                        // Older Burrow versions copied <alias>.exe for script hosts, which wins PATH
+                        // resolution over <alias>.cmd. Retire that launcher when it is Burrow's own
                         // binary; a Scoop shim or a foreign executable stays untouched.
                         const auto legacy_exe = shims/(wide(command.alias)+L".exe");
                         if (launcher_kind(fs::path(wide(command.target))) != LauncherKind::direct &&
@@ -1789,7 +1789,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                     const auto ps1_wrapper = shims/(wide(command.alias)+L".ps1");
                     const bool script_family = kind != LauncherKind::direct;
                     // Scoop's script branches always publish .cmd plus an extensionless shell wrapper
-                    // (PS1 also gets .ps1). Coop publishes that view for every script family so a
+                    // (PS1 also gets .ps1). Burrow publishes that view for every script family so a
                     // Scoop shortcut target such as shims/mqtt-spy.cmd exists, and so an alias declared
                     // for both the executable and the script family keeps both file sets like Scoop.
                     Json wrapper_hashes = Json::object();
@@ -1886,7 +1886,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                     // that still exists.
                     if (plan.retain_previous && fs::exists(link))
                         move(link,transaction/(link.filename().wstring()+L".old"));
-                    const auto temporary = link.parent_path()/(link.filename().wstring()+L".coop-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(shortcut_records.size()));
+                    const auto temporary = link.parent_path()/(link.filename().wstring()+L".burrow-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(shortcut_records.size()));
                     write_shortcut(temporary,target,shortcut_arguments,icon);
                     try { create(link,[&]() { publish_new(temporary,link); }); }
                     catch (...) { DeleteFileW(temporary.c_str()); throw; }
@@ -1938,8 +1938,8 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                 } else {
                     record["junction"] = "reused";
                 }
-                // An earlier Coop record for this package keeps the original PSModulePath value and
-                // the ownership of the entry, so an update does not turn Coop's own entry into an
+                // An earlier Burrow record for this package keeps the original PSModulePath value and
+                // the ownership of the entry, so an update does not turn Burrow's own entry into an
                 // unowned one that a later uninstall must leave behind.
                 Json prior_entry = Json(nullptr);
                 if (has_managed_record && managed.contains("psmodule") && managed.at("psmodule").is_object()) {
@@ -1964,7 +1964,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                 user_environment = applied.value("ownership",Json(nullptr));
                 journal["environment_applied"] = std::move(applied);
                 // Persist the undo record before the next write so an interrupted process can
-                // restore exactly the values Coop changed.
+                // restore exactly the values Burrow changed.
                 if (!journal.contains("environment_undo")) journal["environment_undo"] = Json::array();
                 journal["environment_undo"].push_back(journal["environment_applied"].value("undo",Json::object()));
                 save();
@@ -2018,7 +2018,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                         {"manifest_digest",package.manifest_digest},
                         {"install_record_sha256",fs::is_regular_file(installed_record_path) ? sha256_file(installed_record_path) : std::string{}},
                         {"tree_stamp",version_tree_stamp(version)},
-                        {"provenance",resetting ? "coop-reset" : updating ? "coop-update" : "coop-install"}});
+                        {"provenance",resetting ? "burrow-reset" : updating ? "burrow-update" : "burrow-install"}});
                     publish_json(record_path,{{"name",package.name},{"version",package.version},{"architecture",package.architecture},
                         {"bucket",package.bucket},{"directory",path_text(operating_path(fs::canonical(version)))},{"manifest_digest",package.manifest_digest},
                         {"status","ready"},{"shim_format","scoop"},
@@ -2027,7 +2027,7 @@ Json execute_plan_result(const Context& context, const Plan& plan) {
                         {"user_environment",user_environment},
                         {"psmodule",psmodule_record},
                         {"dependencies",dependency_sources(package)},{"persistence",persistence},{"versions",version_history},
-                        {"origin",(updating || resetting) ? (has_managed_record ? managed.value("origin",std::string("coop")) : std::string("scoop")) : std::string("coop")}});
+                        {"origin",(updating || resetting) ? (has_managed_record ? managed.value("origin",std::string("burrow")) : std::string("scoop")) : std::string("burrow")}});
                 }
                 test_fault_point(context,"before-commit");
                 break;
@@ -2193,13 +2193,13 @@ Json package_recovery_status(const Context& context, const fs::path& journal_pat
         const auto installers = journal.contains("installers") && journal.at("installers").is_array() ? journal.at("installers") : Json::array();
         const bool scripts_started = !scripts.empty();
         // Installer/uninstaller programs are as unrollbackable as script text: recovery restores
-        // Coop-owned paths, keeps the logs as evidence and never re-runs the program.
+        // Burrow-owned paths, keeps the logs as evidence and never re-runs the program.
         const bool programs_started = !installers.empty();
         const bool external_effects_started = scripts_started || programs_started;
         result["scripts_started"] = scripts_started;
         result["installer_programs_started"] = programs_started;
         if (external_effects_started) result["external_side_effects"] =
-            "unknown; recovered state does not roll back effects outside Coop's managed paths, and journaled scripts or installer programs are not re-run";
+            "unknown; recovered state does not roll back effects outside Burrow's managed paths, and journaled scripts or installer programs are not re-run";
         Json actions = Json::array();
         std::vector<fs::path> removals;
         std::vector<std::pair<fs::path,fs::path>> restores;
@@ -2209,7 +2209,7 @@ Json package_recovery_status(const Context& context, const fs::path& journal_pat
             const fs::path path(wide(entry.at("path").get<std::string>()));
             if (!recovery_path_allowed(context,path))
                 fail("created-path-outside-root",
-                    "Created path is outside Coop's managed locations or crosses a reparse point: "+path_text(path),path_text(path));
+                    "Created path is outside Burrow's managed locations or crosses a reparse point: "+path_text(path),path_text(path));
             const bool exists = GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
             const bool owned = entry.value("owned",false);
             if (exists && !owned)
@@ -2235,7 +2235,7 @@ Json package_recovery_status(const Context& context, const fs::path& journal_pat
             const fs::path to(wide(entry.at("to").get<std::string>()));
             if (!recovery_path_allowed(context,from) || !recovery_path_allowed(context,to))
                 fail("moved-path-outside-root",
-                    "Moved path is outside Coop's managed locations or crosses a reparse point: "+path_text(from));
+                    "Moved path is outside Burrow's managed locations or crosses a reparse point: "+path_text(from));
             bool from_exists = GetFileAttributesW(from.c_str()) != INVALID_FILE_ATTRIBUTES;
             const bool to_exists = GetFileAttributesW(to.c_str()) != INVALID_FILE_ATTRIBUTES;
             // A created destination at the original path (for example a newly published current
@@ -2282,7 +2282,7 @@ Json package_recovery_status(const Context& context, const fs::path& journal_pat
         result["status"] = execute ? "pending" : "recoverable";
         result["reason"] = restores.empty() && removals.empty() ?
             "No published state was changed; the interrupted preparation can be discarded" :
-            "Journaled Coop-owned paths and moves can be reverted without guessing";
+            "Journaled Burrow-owned paths and moves can be reverted without guessing";
         if (!execute) return result;
         mutating = true;
         for (auto entry = removals.rbegin(); entry != removals.rend(); ++entry) erase_tree(*entry);
@@ -2297,7 +2297,7 @@ Json package_recovery_status(const Context& context, const fs::path& journal_pat
         resolved["state"] = "rolled-back";
         resolved["recovered"] = true;
         if (external_effects_started) resolved["recovery_external_side_effects"] =
-            "unknown; journaled scripts and installer programs were not re-run and their effects outside Coop's managed paths were not rolled back";
+            "unknown; journaled scripts and installer programs were not re-run and their effects outside Burrow's managed paths were not rolled back";
         if (!environment_undo.empty()) resolved["recovery_environment"] = environment_rollback;
         if (!diagnostics.empty()) resolved["recovery_diagnostics"] = diagnostics;
         write_json(journal_path,resolved);
@@ -2316,10 +2316,10 @@ Json package_recovery_status(const Context& context, const fs::path& journal_pat
         result["status"] = external_effects_started ? "recovered-with-unknown-script-effects" :
             environment_conflict ? "recovered-with-user-changes" : "recovered";
         result["reason"] = external_effects_started ?
-            "Interrupted Coop state was reverted; script and installer-program side effects outside managed paths remain unknown" :
+            "Interrupted Burrow state was reverted; script and installer-program side effects outside managed paths remain unknown" :
             environment_conflict ?
-            "Interrupted Coop state was reverted; user environment values changed after the transaction were kept" :
-            "Interrupted Coop state was reverted";
+            "Interrupted Burrow state was reverted; user environment values changed after the transaction were kept" :
+            "Interrupted Burrow state was reverted";
         return result;
     } catch (const std::exception& error) {
         result["mode"] = "manual";

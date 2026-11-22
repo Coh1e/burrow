@@ -1,12 +1,12 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
 $sessionRoot = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
-$fixture1 = Join-Path (Split-Path $CoopExe) 'fixture-1.exe'
-$fixture2 = Join-Path (Split-Path $CoopExe) 'fixture-2.exe'
+$fixture1 = Join-Path (Split-Path $BurrowExe) 'fixture-1.exe'
+$fixture2 = Join-Path (Split-Path $BurrowExe) 'fixture-2.exe'
 foreach ($case in @('manifest','entry','revision')) {
     $root = "$sessionRoot/$case"
     $source = "$root/buckets/test"
@@ -26,7 +26,7 @@ foreach ($case in @('manifest','entry','revision')) {
         & git clone -q ([Uri][IO.Path]::GetFullPath($source)).AbsoluteUri "$root/buckets/test"
         if ($LASTEXITCODE -ne 0) { throw 'Git fixture clone failed' }
     }
-    $installed = & $CoopExe --root $root install test/fixture --json
+    $installed = & $BurrowExe --root $root install test/fixture --json
     if ($LASTEXITCODE -ne 0) { throw 'fixture installation failed' }
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
     $listener.Start()
@@ -41,7 +41,7 @@ foreach ($case in @('manifest','entry','revision')) {
             if ($LASTEXITCODE -ne 0) { throw 'Git fixture update failed' }
         }
         $connection = $listener.AcceptTcpClientAsync()
-        $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+        $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
         $start.UseShellExecute = $false; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
         foreach ($argument in @('--root',$root,'update','fixture','--json')) { Add-ProcessArgument $start ($argument) }
         $process = [Diagnostics.Process]::Start($start)

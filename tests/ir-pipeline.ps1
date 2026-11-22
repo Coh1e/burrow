@@ -1,6 +1,6 @@
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
@@ -17,36 +17,36 @@ function Get-Snapshot([string]$Path) {
         $_.FullName.Substring($Path.Length) + ':' + $_.Length + ':' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
     })
 }
-function Invoke-Coop([string[]]$Arguments) {
-    $output = Invoke-CoopNative $CoopExe  @Arguments
+function Invoke-Burrow([string[]]$Arguments) {
+    $output = Invoke-BurrowNative $BurrowExe  @Arguments
     [pscustomobject]@{ code = $LASTEXITCODE; text = ($output -join "`n") }
 }
-function Read-CoopJson([string[]]$Arguments) {
-    $result = Invoke-Coop $Arguments
-    if ($result.code -ne 0) { throw "coop $($Arguments -join ' ') failed ($($result.code)): $($result.text)" }
+function Read-BurrowJson([string[]]$Arguments) {
+    $result = Invoke-Burrow $Arguments
+    if ($result.code -ne 0) { throw "burrow $($Arguments -join ' ') failed ($($result.code)): $($result.text)" }
     return ($result.text | ConvertFrom-Json)
 }
 
-# --- Shared installation facts need no Coop-owned record -------------------------------
-$items = @(Read-CoopJson @('--root',$root,'list','--json'))
+# --- Shared installation facts need no Burrow-owned record -------------------------------
+$items = @(Read-BurrowJson @('--root',$root,'list','--json'))
 if ($items.Count -ne 1 -or $items[0].name -ne 'jq' -or $items[0].version -ne '1.8.2') { throw "installed facts missing: $($items | ConvertTo-Json -Depth 4)" }
 if ($items[0].management -ne 'unadopted') { throw 'an installed package without a private record was not reported as shared/unadopted' }
-if (Test-Path "$root/.coop") { throw 'a read-only query created Coop management state' }
+if (Test-Path "$root/.burrow") { throw 'a read-only query created Burrow management state' }
 
 # --- Stale and corrupt private records cannot hide or block the installation -----------
-New-Item -ItemType Directory -Path "$root/.coop/packages" -Force | Out-Null
-'{"name":"jq","origin":"coop","status":"uninstalled","version":"0.0.0"}' | Set-Content "$root/.coop/packages/jq.json" -Encoding utf8
-$stale = @(Read-CoopJson @('--root',$root,'list','--json'))
-if ($stale[0].version -ne '1.8.2') { throw 'a stale Coop record overrode the shared installation facts' }
-$stalePreview = Read-CoopJson @('--root',$root,'update','jq','--dry-run','--json')
+New-Item -ItemType Directory -Path "$root/.burrow/packages" -Force | Out-Null
+'{"name":"jq","origin":"burrow","status":"uninstalled","version":"0.0.0"}' | Set-Content "$root/.burrow/packages/jq.json" -Encoding utf8
+$stale = @(Read-BurrowJson @('--root',$root,'list','--json'))
+if ($stale[0].version -ne '1.8.2') { throw 'a stale Burrow record overrode the shared installation facts' }
+$stalePreview = Read-BurrowJson @('--root',$root,'update','jq','--dry-run','--json')
 if ($stalePreview.package.version -ne '1.8.2' -or $stalePreview.action -ne 'update') { throw 'stale private record changed the update target' }
-'not JSON' | Set-Content "$root/.coop/packages/jq.json" -Encoding utf8
-$corrupt = @(Read-CoopJson @('--root',$root,'list','--json'))
+'not JSON' | Set-Content "$root/.burrow/packages/jq.json" -Encoding utf8
+$corrupt = @(Read-BurrowJson @('--root',$root,'list','--json'))
 if ($corrupt[0].version -ne '1.8.2' -or @($corrupt[0].diagnostics).Count -eq 0) { throw 'a corrupt private record hid the installation or its diagnostics' }
-if (@($corrupt[0].diagnostic_details | Where-Object code -eq 'coop-record-unreadable').Count -ne 1) { throw 'corrupt private record was not reported as a management-record diagnostic' }
-$corruptPreview = Invoke-Coop @('--root',$root,'update','jq','--dry-run','--json')
+if (@($corrupt[0].diagnostic_details | Where-Object code -eq 'burrow-record-unreadable').Count -ne 1) { throw 'corrupt private record was not reported as a management-record diagnostic' }
+$corruptPreview = Invoke-Burrow @('--root',$root,'update','jq','--dry-run','--json')
 if ($corruptPreview.code -ne 0) { throw "a corrupt private record blocked the preview: $($corruptPreview.text)" }
-Remove-Item -LiteralPath "$root/.coop" -Recurse -Force
+Remove-Item -LiteralPath "$root/.burrow" -Recurse -Force
 
 # --- Query and preview run through the IR pipeline without side effects ----------------
 # A higher target exercises the actual update sequence; a current target now has no write steps.
@@ -54,13 +54,13 @@ $targetManifest = Get-Content "$root/buckets/main/bucket/jq.json" -Raw | Convert
 $targetManifest.version = '1.8.3'
 $targetManifest | ConvertTo-Json -Depth 12 | Set-Content "$root/buckets/main/bucket/jq.json" -Encoding utf8
 $before = Get-Snapshot $root
-$list = Invoke-Coop @('--root',$root,'list','--json')
-$info = Invoke-Coop @('--root',$root,'info','main/jq','--json')
-$preview = Invoke-Coop @('--root',$root,'update','jq','--dry-run','--json')
+$list = Invoke-Burrow @('--root',$root,'list','--json')
+$info = Invoke-Burrow @('--root',$root,'info','main/jq','--json')
+$preview = Invoke-Burrow @('--root',$root,'update','jq','--dry-run','--json')
 if ($list.code -ne 0 -or $info.code -ne 0 -or $preview.code -ne 0) { throw "read-only pipeline failed: $($list.text) $($info.text) $($preview.text)" }
 $after = Get-Snapshot $root
 if (@(Compare-Object $before $after).Count) { throw 'query or preview changed shared state' }
-if (Test-Path "$root/.coop") { throw 'query or preview wrote management state' }
+if (Test-Path "$root/.burrow") { throw 'query or preview wrote management state' }
 
 $plan = ($preview.text | ConvertFrom-Json)
 if ($plan.action -ne 'update' -or $plan.package.version -ne '1.8.3') { throw 'update preview lost the higher target' }
@@ -76,7 +76,7 @@ if ($verify -ge $firstPublish) { throw 'verification is not planned before publi
 $capability = @($plan.capabilities | Where-Object id -eq 'native-download')
 if ($capability.Count -ne 1 -or $capability[0].supported -ne $true) { throw 'the IR capabilities of a native download package are missing' }
 
-$uninstall = Read-CoopJson @('--root',$root,'uninstall','jq','--dry-run','--json')
+$uninstall = Read-BurrowJson @('--root',$root,'uninstall','jq','--dry-run','--json')
 $removeKinds = @($uninstall.ir_operations | ForEach-Object { $_.operation })
 if ('unlink-current' -notin $removeKinds -or 'remove-version' -notin $removeKinds) { throw "uninstall preview is incomplete: $removeKinds" }
 if (@($uninstall.ir_operations | Where-Object operation -eq 'remove-version').Count -ne 1) { throw 'uninstall IR plan omitted the version removal it reports' }
@@ -94,7 +94,7 @@ $only64 | Set-Content "$archRoot/buckets/main/bucket/jq.json" -Encoding utf8
 $only64 | Set-Content "$archRoot/apps/jq/1.8.2/scoop-manifest.json" -Encoding utf8
 '{"bucket":"main","architecture":"32bit"}' | Set-Content "$archRoot/apps/jq/1.8.2/scoop-install.json" -Encoding utf8
 New-Item -ItemType Junction -Path "$archRoot/apps/jq/current" -Target "$archRoot/apps/jq/1.8.2" | Out-Null
-$archInfo = Read-CoopJson @('--root',$archRoot,'info','main/jq','--json')
+$archInfo = Read-BurrowJson @('--root',$archRoot,'info','main/jq','--json')
 $archValidation = @($archInfo)[0].validation
 if ($archValidation.architecture -ne '32bit') { throw "info did not use the installed architecture: $($archValidation.architecture)" }
 if ($archValidation.downloads -ne 0) { throw 'a 32bit installation resolved a 64bit-only manifest' }
@@ -104,25 +104,25 @@ if (@($archValidation.diagnostics | Where-Object code -eq 'missing-artifact').Co
 $sha512 = '0' * 128
 $sha512Manifest = @{version='1.0.0';url='https://invalid.example/tool.zip#/renamed.zip';hash="sha512:$sha512"} | ConvertTo-Json -Compress
 $sha512Manifest | Set-Content "$root/buckets/main/bucket/algo.json" -Encoding utf8
-$algoPreview = Invoke-Coop @('--root',$root,'install','algo','--dry-run','--json')
+$algoPreview = Invoke-Burrow @('--root',$root,'install','algo','--dry-run','--json')
 $algoPlan = ($algoPreview.text | ConvertFrom-Json)
 if ($algoPreview.code -ne 0 -or $algoPlan.execution_available -ne $true) { throw "a declared SHA512 digest was not honoured: $($algoPreview.text)" }
 if (@($algoPlan.artifacts).Count -ne 1 -or @($algoPlan.artifacts | Where-Object { $_.algorithm -ne 'sha512' -or $_.digest -ne $sha512 -or $_.filename -ne 'renamed.zip' -or $_.renamed -ne $true }).Count -ne 0) { throw 'the SHA512 artifact declaration or rename was not preserved' }
 if (@($algoPlan.diagnostics | Where-Object { $_.code -eq 'unsupported-hash' }).Count -ne 0) { throw 'a supported SHA512 digest was reported as unsupported' }
-$algoInfoResult = Invoke-Coop @('--root',$root,'info','main/algo','--json')
+$algoInfoResult = Invoke-Burrow @('--root',$root,'info','main/algo','--json')
 if ($algoInfoResult.code -ne 0) { throw "info failed for a supported digest package: $($algoInfoResult.text)" }
 $algoInfo = @($algoInfoResult.text | ConvertFrom-Json)
 if (@($algoInfo[0].validation.diagnostics | Where-Object { $_.code -eq 'unsupported-hash' }).Count -ne 0) { throw 'info reported a supported digest as a gap' }
 if ($algoInfo[0].validation.artifacts[0].algorithm -ne 'sha512' -or $algoInfo[0].validation.artifacts[0].renamed -ne $true) { throw 'info did not preserve the declared digest algorithm and rename' }
 $sha3Manifest = @{version='1.0.0';url='https://invalid.example/tool.zip';hash=('sha3:'+('0'*128))} | ConvertTo-Json -Compress
 $sha3Manifest | Set-Content "$root/buckets/main/bucket/algo3.json" -Encoding utf8
-$sha3Preview = Invoke-Coop @('--root',$root,'install','algo3','--dry-run','--json')
+$sha3Preview = Invoke-Burrow @('--root',$root,'install','algo3','--dry-run','--json')
 $sha3Plan = ($sha3Preview.text | ConvertFrom-Json)
 if ($sha3Preview.code -eq 0 -or 'unsupported-hash' -notin @($sha3Plan.diagnostics | ForEach-Object { $_.code })) { throw 'an unknown digest algorithm was silently accepted' }
 
 $msiManifest = @{version='1.0.0';url='https://invalid.example/setup.msi';hash=('a' * 64)} | ConvertTo-Json -Compress
 $msiManifest | Set-Content "$root/buckets/main/bucket/msipkg.json" -Encoding utf8
-$msiPreview = Invoke-Coop @('--root',$root,'install','msipkg','--dry-run','--json')
+$msiPreview = Invoke-Burrow @('--root',$root,'install','msipkg','--dry-run','--json')
 $msiPlan = ($msiPreview.text | ConvertFrom-Json)
 if ($msiPlan.execution_available -ne $true) { throw "an MSI package preview stayed blocked: $(@($msiPlan.diagnostics) | ConvertTo-Json -Compress)" }
 if ($msiPlan.package.msi_extraction.msiexec_started -ne $false -or $msiPlan.package.msi_extraction.administrative_install -ne $false) {
@@ -134,11 +134,11 @@ if ($msiPreview.code -ne 0) { throw 'a readable package preview did not report a
 if (Test-Path "$root/apps/msipkg") { throw 'a preview installed an MSI package' }
 
 # --- Read-only pipeline starts no helper process --------------------------------------
-$guard = Join-Path (Split-Path $CoopExe) 'process_guard.exe'
-$guarded = & $guard $CoopExe --root $root update jq --dry-run --json
+$guard = Join-Path (Split-Path $BurrowExe) 'process_guard.exe'
+$guarded = & $guard $BurrowExe --root $root update jq --dry-run --json
 if ($LASTEXITCODE -ne 0) { throw 'the read-only preview started a script or helper process' }
 $guarded | Set-Content "$TestRoot/ir-pipeline-process-evidence.txt" -Encoding utf8
-$guardedList = & $guard $CoopExe --root $root list --json
+$guardedList = & $guard $BurrowExe --root $root list --json
 if ($LASTEXITCODE -ne 0) { throw 'the query started a helper process' }
 $guardedList | Set-Content "$TestRoot/ir-pipeline-list-process-evidence.txt" -Encoding utf8
 

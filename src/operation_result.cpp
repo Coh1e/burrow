@@ -1,7 +1,7 @@
 #include "operation_result.hpp"
 #include "data.hpp"
 
-namespace coop {
+namespace burrow {
 const char* result_state_name(ResultState state) {
     switch (state) {
     case ResultState::ok: return "ok";

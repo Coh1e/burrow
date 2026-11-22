@@ -1,9 +1,9 @@
 #include "commands.hpp"
 
-namespace coop {
+namespace burrow {
 namespace {
-// Order is the order `coop help` prints: Scoop lists its commands alphabetically, and the two
-// Coop-only commands take their alphabetical place so the dispatch lookup stays linear and obvious.
+// Order is the order `burrow help` prints: Scoop lists its commands alphabetically, and the two
+// Burrow-only commands take their alphabetical place so the dispatch lookup stays linear and obvious.
 constexpr Command kCommands[] = {
     {"alias","<subcommand> [options] [<args>]","Manage scoop aliases",true,true},
     {"bucket","add|list|known|rm [<args>]","Manage Scoop buckets",true,true},
@@ -54,16 +54,16 @@ std::string_view command_limitations(std::string_view name) {
     if (name == "cat") return "The manifest is printed as stored; cat_style and bat are not used.";
     if (name == "checkup") return "Checks system settings, extraction helpers, buckets, pending transactions and broken shims. Defender exclusions are not inspected or changed.";
     if (name == "cleanup") return "With no app, cleans all apps. --transactions also trims completed transaction records. Global installations are read-only.";
-    if (name == "config") return "The settings below describe the shared Scoop configuration. Coop only writes ALIAS and virustotal_api_key; other settings are preserved. Coop does not implement every Scoop setting.";
+    if (name == "config") return "The settings below describe the shared Scoop configuration. Burrow only writes ALIAS and virustotal_api_key; other settings are preserved. Burrow does not implement every Scoop setting.";
     if (name == "create") return "Prints an offline manifest skeleton to stdout; no download is made and the hash must be filled in.";
     if (name == "export") return "Exports user apps and buckets. -c/--config is not supported.";
     if (name == "import") return "Imports user apps and buckets. Configuration settings and global installations are not imported.";
     if (name == "install" || name == "uninstall") return "Global installations are read-only. --dry-run previews the operation; --json returns machine-readable output.";
     if (name == "reset") return "Use <app>@<installed-version> to switch to a retained local version. The current version is rejected; no download or installation hook is run.";
-    if (name == "status") return "Checks Coop and same-root Scoop updates unless -l is used. Does not update clients or buckets. --json preserves the local package array. -l --json=2 reports local clients, buckets and all apps; remote checks are explicitly not performed.";
-    if (name == "update") return "Without an app, refreshes buckets only; Coop does not self-update. Package options require app names or */-a/--all. --dry-run is read-only; bare and manifest-URL previews are not available yet. Global installations are read-only.";
+    if (name == "status") return "Checks Burrow and same-root Scoop updates unless -l is used. Does not update clients or buckets. --json preserves the local package array. -l --json=2 reports local clients, buckets and all apps; remote checks are explicitly not performed.";
+    if (name == "update") return "Without an app, refreshes buckets only; Burrow does not self-update. Package options require app names or */-a/--all. --dry-run is read-only; bare and manifest-URL previews are not available yet. Global installations are read-only.";
     if (name == "shim") return "Lists local native shims; info also shows Target and Arguments. alter changes saved arguments; interactive source selection is not supported.";
-    if (name == "virustotal") return "Requires virustotal_api_key or COOP_VIRUSTOTAL_KEY. Uploading for analysis (-s/--scan) is not supported. Uses Coop exit codes 0/1/2, not Scoop's bitmask codes.";
+    if (name == "virustotal") return "Requires virustotal_api_key or BURROW_VIRUSTOTAL_KEY. Uploading for analysis (-s/--scan) is not supported. Uses Burrow exit codes 0/1/2, not Scoop's bitmask codes.";
     return {};
 }
 }

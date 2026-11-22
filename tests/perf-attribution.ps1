@@ -1,13 +1,13 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # #61: the point of the record is attribution. A loopback server hands the same archive over at a
 # known pace, so the download share is measurable and the local share is what is left. The identity
 # total = download + local is what makes the two numbers comparable with another client later.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not (($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase))) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $tidy = Join-Path $archives 'tidy-5.8.0-win64.zip'
 if (-not (Test-Path -LiteralPath $tidy)) { throw "Missing fixed test input: $tidy; run scripts/fetch-deps.ps1" }
@@ -54,8 +54,8 @@ $deadline = (Get-Date).AddSeconds(15)
 while ((Get-Date) -lt $deadline) {
     try { $probe = [Net.Sockets.TcpClient]::new('127.0.0.1',$port); $probe.Close(); break } catch { Start-Sleep -Milliseconds 100 }
 }
-function Invoke-Coop([string[]]$arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+function Invoke-Burrow([string[]]$arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -68,7 +68,7 @@ function Invoke-Coop([string[]]$arguments) {
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'coop timed out' }
+    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'burrow timed out' }
     $result = [pscustomobject]@{ exit = $process.ExitCode
         output = $stdout.GetAwaiter().GetResult(); error = $stderr.GetAwaiter().GetResult() }
     $process.Dispose()
@@ -84,7 +84,7 @@ try {
     [IO.File]::WriteAllText("$root/buckets/test/bucket/slow.json",
         ($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    $install = Invoke-Coop @('--root',$root,'install','test/slow','--json','--timings')
+    $install = Invoke-Burrow @('--root',$root,'install','test/slow','--json','--timings')
     $clock.Stop()
     if ($install.exit -ne 0) { throw "the install failed: $($install.error)$($install.output)" }
 } finally {
@@ -95,7 +95,7 @@ try {
 $parsed = $install.output | ConvertFrom-Json
 if (-not $parsed.timings) { throw "the --json result did not carry the timing fields: $($install.output)" }
 
-$records = @(Get-ChildItem -LiteralPath "$root/.coop/timings" -Filter '*.json' -File)
+$records = @(Get-ChildItem -LiteralPath "$root/.burrow/timings" -Filter '*.json' -File)
 if ($records.Count -eq 0) { throw 'no timing record was written' }
 $record = Get-Content -LiteralPath $records[0].FullName -Raw | ConvertFrom-Json
 
@@ -118,9 +118,9 @@ foreach ($operation in 'download','verify','extract','entries') {
 }
 
 # The human summary prints the same split.
-$second = Invoke-Coop @('--root',$root,'uninstall','slow','--json')
+$second = Invoke-Burrow @('--root',$root,'uninstall','slow','--json')
 if ($second.exit -ne 0) { throw "the uninstall failed: $($second.error)" }
-$text = Invoke-Coop @('--root',$root,'install','test/slow','--timings')
+$text = Invoke-Burrow @('--root',$root,'install','test/slow','--timings')
 if ($text.exit -ne 0) { throw "the second install failed: $($text.error)" }
 foreach ($line in 'Timings','-------') {
     if (($text.output -split "`r?`n") -notcontains $line) { throw "the timings summary is incomplete: $($text.output)" }

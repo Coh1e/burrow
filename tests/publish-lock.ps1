@@ -1,8 +1,8 @@
 # Red when: publishing a replacement stops waiting for a short-lived file lock, so a forced reinstall
 # fails while an antivirus-style handle is still open on the tree being replaced.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -24,7 +24,7 @@ New-Item -ItemType Directory -Path "$root/buckets/probe/bucket" -Force | Out-Nul
   "bin": [ [ "rg.exe", "rglock" ] ]
 }
 "@ | Set-Content "$root/buckets/probe/bucket/held.json" -Encoding utf8 -NoNewline
-& $CoopExe --root $root install probe/held | Out-Null
+& $BurrowExe --root $root install probe/held | Out-Null
 if ($LASTEXITCODE -cne 0) { throw 'the fixture package did not install' }
 
 # Hold a file inside the installed version for six seconds: longer than the old three-second window,
@@ -49,7 +49,7 @@ while (-not (Test-Path -LiteralPath (Join-Path $root 'lock-ready'))) {
     Start-Sleep -Milliseconds 20
 }
 
-$install = Invoke-CoopNative $CoopExe  --root $root update held -f
+$install = Invoke-BurrowNative $BurrowExe  --root $root update held -f
 $code = $LASTEXITCODE
 Wait-Job $holder -Timeout 30 | Out-Null
 Receive-Job $holder

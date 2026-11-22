@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$ScoopRoot,
     [Parameter(Mandatory)][string]$TestRoot,
     [Parameter(Mandatory)][string]$EvidenceDir,
@@ -12,24 +12,24 @@ param(
 # (Main-sized) project-local copy. The only write against the real root is an explicit `bucket
 # update`, which is the product operation this ticket measures; queries must leave it untouched.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Real-scale performance data must stay within the project test directory'
 }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-if (-not (Test-Path -LiteralPath $CoopExe)) { throw 'Coop executable is missing' }
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+if (-not (Test-Path -LiteralPath $BurrowExe)) { throw 'Burrow executable is missing' }
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot)
 if (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot 'buckets/main'))) { throw 'A real main bucket is required' }
-if (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot '.coop/buckets.json'))) { throw 'The real root has no Coop bucket registry' }
+if (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot '.burrow/buckets.json'))) { throw 'The real root has no Burrow bucket registry' }
 New-Item -ItemType Directory -Path $TestRoot,$EvidenceDir -Force | Out-Null
 
 function Assert([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "real performance test failed: $Message" }
 }
 function Invoke-Measured([string[]]$Arguments) {
-    $startInfo = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+    $startInfo = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
@@ -67,7 +67,7 @@ function Summary([string]$Name, [string]$Target, [double[]]$Samples, [string]$Co
         runs = @($Samples).Count
     }
 }
-function Measure-Coop([string]$Name, [string]$Target, [string[]]$Arguments) {
+function Measure-Burrow([string]$Name, [string]$Target, [string[]]$Arguments) {
     $samples = [System.Collections.Generic.List[double]]::new()
     for ($index = 0; $index -lt $Runs; $index++) {
         $result = Invoke-Measured $Arguments
@@ -76,9 +76,9 @@ function Measure-Coop([string]$Name, [string]$Target, [string[]]$Arguments) {
     }
     Summary $Name $Target $samples.ToArray() ($Arguments -join ' ')
 }
-function Coop-Json([string[]]$Arguments) {
+function Burrow-Json([string[]]$Arguments) {
     $result = Invoke-Measured $Arguments
-    Assert ($result.exit -eq 0) "coop $($Arguments -join ' ') exited $($result.exit): $($result.error)"
+    Assert ($result.exit -eq 0) "burrow $($Arguments -join ' ') exited $($result.exit): $($result.error)"
     return ($result.output | ConvertFrom-Json)
 }
 function File-HashOrNull([string]$Path) {
@@ -110,8 +110,8 @@ function Invoke-FixtureGit([string[]]$Arguments) {
 }
 $mainBucket = Join-Path $ScoopRoot 'buckets/main'
 $mainManifests = @(Get-ChildItem -LiteralPath (Join-Path $mainBucket 'bucket') -File -Filter '*.json')
-$registryPath = Join-Path $ScoopRoot '.coop/buckets.json'
-$indexPath = Join-Path $ScoopRoot '.coop/cache/index/main.json'
+$registryPath = Join-Path $ScoopRoot '.burrow/buckets.json'
+$indexPath = Join-Path $ScoopRoot '.burrow/cache/index/main.json'
 $registryBefore = Get-Content -LiteralPath $registryPath -Raw
 $registry = @($registryBefore | ConvertFrom-Json) | Where-Object name -eq 'main'
 $revisionBefore = Invoke-FixtureGit @('-C', $mainBucket, 'rev-parse', 'HEAD')
@@ -131,8 +131,8 @@ for ($index = 0; $index -lt $Runs; $index++) {
 $installed = @($listSamples)
 $queries.Add((Summary 'list' 50 $installed @('--root', $ScoopRoot, 'list', '--json')))
 $installedCount = @((Invoke-Measured @('--root', $ScoopRoot, 'list', '--json')).output | ConvertFrom-Json).Count
-$queries.Add((Measure-Coop "info-$infoName" 50 @('--root', $ScoopRoot, 'info', "main/$infoName", '--json')))
-$queries.Add((Measure-Coop "search-$searchNeedle" 100 @('--root', $ScoopRoot, 'search', $searchNeedle, '--json')))
+$queries.Add((Measure-Burrow "info-$infoName" 50 @('--root', $ScoopRoot, 'info', "main/$infoName", '--json')))
+$queries.Add((Measure-Burrow "search-$searchNeedle" 100 @('--root', $ScoopRoot, 'search', $searchNeedle, '--json')))
 $otherBucket = @($registryBefore | ConvertFrom-Json) | Where-Object { $_.name -ne 'main' -and $_.kind -ne 'removed' } | Select-Object -First 1
 $otherInfo = $null
 if ($null -ne $otherBucket) {
@@ -140,7 +140,7 @@ if ($null -ne $otherBucket) {
     if (-not (Test-Path -LiteralPath $otherBucketPath)) { $otherBucketPath = $otherBucket.path }
     $otherManifest = @(Get-ChildItem -LiteralPath $otherBucketPath -File -Filter '*.json' | Sort-Object Name | Select-Object -First 1)
     if ($otherManifest.Count -eq 1) {
-        $otherInfo = Measure-Coop "info-$($otherBucket.name)/$($otherManifest[0].BaseName)" 50 @('--root', $ScoopRoot, 'info', "$($otherBucket.name)/$($otherManifest[0].BaseName)", '--json')
+        $otherInfo = Measure-Burrow "info-$($otherBucket.name)/$($otherManifest[0].BaseName)" 50 @('--root', $ScoopRoot, 'info', "$($otherBucket.name)/$($otherManifest[0].BaseName)", '--json')
         $queries.Add($otherInfo)
     }
 }
@@ -226,7 +226,7 @@ Assert ($null -ne $unrelatedManifest) 'real-scale fixture has no unrelated manif
 $unrelatedName = [IO.Path]::GetFileName($unrelatedManifest)
 $unrelatedSourceHash = (Get-FileHash -LiteralPath $unrelatedManifest -Algorithm SHA256).Hash
 # The property under test is the refreshed shared worktree, so the hash must come from
-# <root>/buckets/main/bucket, not from the file:// upstream copy that Coop only reads.
+# <root>/buckets/main/bucket, not from the file:// upstream copy that Burrow only reads.
 $worktreeUnrelated = Join-Path $scaleRoot ('buckets/main/bucket/' + $unrelatedName)
 Assert (Test-Path -LiteralPath $worktreeUnrelated) "real-scale worktree is missing $unrelatedName after the first refresh"
 $unrelatedWorktreeHash = (Get-FileHash -LiteralPath $worktreeUnrelated -Algorithm SHA256).Hash
@@ -241,9 +241,9 @@ for ($index = 0; $index -lt $Runs; $index++) {
     } | ConvertTo-Json -Depth 5
     [IO.File]::WriteAllText($manifest, $json)
     Invoke-FixtureGit @('-C', $upstream, 'add', ('bucket/' + $manifestName + '.json')) | Out-Null
-    Invoke-FixtureGit @('-C', $upstream, '-c', 'user.name=CoopPerf', '-c', 'user.email=coop@example.invalid', 'commit', '-m', ("bench change " + $index)) | Out-Null
+    Invoke-FixtureGit @('-C', $upstream, '-c', 'user.name=BurrowPerf', '-c', 'user.email=burrow@example.invalid', 'commit', '-m', ("bench change " + $index)) | Out-Null
     $target = Invoke-FixtureGit @('-C', $upstream, 'rev-parse', 'HEAD')
-    $scaleIndex = Join-Path $scaleRoot '.coop/cache/index/main.json'
+    $scaleIndex = Join-Path $scaleRoot '.burrow/cache/index/main.json'
     $indexHashBefore = File-HashOrNull $scaleIndex
     Assert ($null -ne $indexHashBefore) 'real-scale changed refresh started without a query index'
     $worktreeHashBefore = (Get-FileHash -LiteralPath $worktreeUnrelated -Algorithm SHA256).Hash
@@ -329,9 +329,9 @@ $environment = [ordered]@{
     memory_bytes = (Get-CimInstance Win32_ComputerSystem | ForEach-Object { $_.TotalPhysicalMemory })
     disk = $disk
     powershell = $PSVersionTable.PSVersion.ToString()
-    coop_version = (& $CoopExe --version)
-    coop_sha256 = (Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash.ToLower()
-    coop_built = (Get-Item -LiteralPath $CoopExe).LastWriteTimeUtc.ToString('o')
+    burrow_version = (& $BurrowExe --version)
+    burrow_sha256 = (Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash.ToLower()
+    burrow_built = (Get-Item -LiteralPath $BurrowExe).LastWriteTimeUtc.ToString('o')
     git = (& $git --version)
     git_head = (Invoke-FixtureGit @('-C', (Split-Path $PSScriptRoot -Parent), 'rev-parse', 'HEAD'))
     cmake = $cmakeVersion

@@ -12,9 +12,9 @@
 
 ## Revisit
 
-若目标改为“去掉 Coop 自有工具层的 PowerShell”或“减少每次 Hook 的一次子进程启动”，应另立 ADR；后者需要进程内 PowerShell 宿主，而不是 QuickJS。若坚持 PS 子集解释器，验收必须按真实 Manifest 通过率给出明确覆盖目标，而不是按库文件行数。
+若目标改为“去掉 Burrow 自有工具层的 PowerShell”或“减少每次 Hook 的一次子进程启动”，应另立 ADR；后者需要进程内 PowerShell 宿主，而不是 QuickJS。若坚持 PS 子集解释器，验收必须按真实 Manifest 通过率给出明确覆盖目标，而不是按库文件行数。
 
 ## Consequences
 
-- PowerShell 仍是产品运行时依赖；缺少 PowerShell 时，Coop 在执行 Hook 前诊断并以稳定原因失败。
+- PowerShell 仍是产品运行时依赖；缺少 PowerShell 时，Burrow 在执行 Hook 前诊断并以稳定原因失败。
 - 运行时依赖需在 README、`THIRD_PARTY.md` 与 `docs/script-support.md` 中保持一致表述。

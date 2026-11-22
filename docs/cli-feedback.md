@@ -26,17 +26,17 @@ Creating shim for 'rg'.
 
 - **逐字**：引号、括号、句点、行尾空格、`... ` 与 `OK.` / `Done.` 分成两行，都按实录照排。
 - 阶段行在阶段开始或完成时打印，不攒到结束。
-- 下载在终端上显示行内进度；**非终端（管道、CI）没有进度条**——这不是 Coop 的选择，Scoop 的进度条被 `lib/download.ps1:73` 的 `isoutputredirected` 锁在 TTY 内。非终端只保留阶段行（`Installing`、`Checking hash of …`、`Extracting …` 等）与结束行；Scoop 在管道里连这些也会省略，Coop 不会——这是刻意保留的差异，便于 CI 日志定位。
+- 下载在终端上显示行内进度；**非终端（管道、CI）没有进度条**——这不是 Burrow 的选择，Scoop 的进度条被 `lib/download.ps1:73` 的 `isoutputredirected` 锁在 TTY 内。非终端只保留阶段行（`Installing`、`Checking hash of …`、`Extracting …` 等）与结束行；Scoop 在管道里连这些也会省略，Burrow 不会——这是刻意保留的差异，便于 CI 日志定位。
 - 失败在出错的那一步立刻出现，形状见实录的「失败：hash 不符」段落：`ERROR …` 加字段块和引导语，退出码 1。
 - 批量：每包完整走一遍，**没有批级结尾汇总**；`update a b` 在第一个块之前打**一次**表头，只数真正过期的包（`Updating one outdated app:` 或 `Updating N outdated apps:`），已是最新的包在自己的位置报 `<包>: up-to-date`。
-- 重复安装同一版本：`WARN  '<包>' (<版本>) is already installed.` 加 `Use 'coop update <包>' to install a new version.`，退出码 **0**，不下载、不读缓存、不写任何东西；批量里遇到已装的包打同一对 WARN，不报成功行。第二行是本期唯一故意偏离逐字的地方：Scoop 写 `Use 'scoop update …'`，而 Coop 不该让正在用它的用户去敲另一个客户端；凡是句子里出现客户端名字、命令提示或 issue 链接，都按当前客户端与真来源生成，阶段行仍逐字。
+- 重复安装同一版本：`WARN  '<包>' (<版本>) is already installed.` 加 `Use 'burrow update <包>' to install a new version.`，退出码 **0**，不下载、不读缓存、不写任何东西；批量里遇到已装的包打同一对 WARN，不报成功行。第二行是本期唯一故意偏离逐字的地方：Scoop 写 `Use 'scoop update …'`，而 Burrow 不该让正在用它的用户去敲另一个客户端；凡是句子里出现客户端名字、命令提示或 issue 链接，都按当前客户端与真来源生成，阶段行仍逐字。
 - 装**另一个版本**（已装 1.0，再 `install` 2.0）：按 Scoop 的语义走正常安装——新版本目录建在旧版本旁边，`current` 重新指向新版本，旧版本保留到 `cleanup` 才删除；输出与普通安装相同，`--json` 的 `retained_versions` 列出旧版本。
 - 安装与更新的开始行**不带**结尾句点，卸载与重置**带**。
 - 安装完成后，Manifest 的 `suggest`（每个候选都未安装的 feature 一行）与 `notes`（`Notes` / `-----` 块，原文保留换行）依次打印。
 
 ## 性能归因
 
-每次写命令都把分阶段耗时写进 `<根>/.coop/timings/`：`steps`（每步的名字、次数、秒数）、`download_seconds`、`local_seconds`、`total_seconds`。只有 `download` 步骤算网络，其余都算本机开销。
+每次写命令都把分阶段耗时写进 `<根>/.burrow/timings/`：`steps`（每步的名字、次数、秒数）、`download_seconds`、`local_seconds`、`total_seconds`。只有 `download` 步骤算网络，其余都算本机开销。
 
 `--timings` 在命令结束时追加三行摘要：
 
@@ -73,13 +73,13 @@ total    1.690 s
 | 更新 | `<包>: <旧> -> <新>` / `Updating one outdated app:` / `Updating '<包>' (<旧> -> <新>)` / `Downloading new version` / `Uninstalling '<包>' (<旧>)` / `Installing '<包>' (<新>) [<架构>] from '<bucket>' bucket` |
 | 建议 | `'<包>' suggests installing '<bucket>/<包>'.`（来自 Manifest 的 `suggest`，DarkYellow；同一 feature 有多个候选用 `' or '` 连接，只在候选全部未安装时打印） |
 | 尾注 | 成功行之后按 Manifest 的 `notes` 回显 `Notes` / `-----` 块 |
-| 重复安装 | `WARN  '<包>' (<版本>) is already installed.` 换行 `Use 'coop update <包>' to install a new version.`（Scoop 这里写 `scoop`，见上文的有意偏离） |
+| 重复安装 | `WARN  '<包>' (<版本>) is already installed.` 换行 `Use 'burrow update <包>' to install a new version.`（Scoop 这里写 `scoop`，见上文的有意偏离） |
 
-更新的一处**刻意偏离**：coop 在解链旧版本之前完成校验与解压，所以 `Checking hash` / `Extracting` 两行出现在 `Uninstalling` 之前。按 Scoop 的顺序（下载 → 卸载 → 从缓存安装），解压失败会把旧版本一起弄没；coop 的顺序保证失败时 `current` 仍指向可用版本。这一条由 `tests/update-lines.ps1` 的失败用例守着。
+更新的一处**刻意偏离**：burrow 在解链旧版本之前完成校验与解压，所以 `Checking hash` / `Extracting` 两行出现在 `Uninstalling` 之前。按 Scoop 的顺序（下载 → 卸载 → 从缓存安装），解压失败会把旧版本一起弄没；burrow 的顺序保证失败时 `current` 仍指向可用版本。这一条由 `tests/update-lines.ps1` 的失败用例守着。
 
 ## 颜色
 
-Scoop 在文件名两侧硬编码 ANSI 青色（`lib/download.ps1:735` 直接写 `[char]0x1b[36m`），与终端无关，管道里也照写。`suggests` 行用 DarkYellow。Coop 对齐就照写控制字符，不按 TTY 判断——这是"逐字对齐"的直接后果，不是疏漏。
+Scoop 在文件名两侧硬编码 ANSI 青色（`lib/download.ps1:735` 直接写 `[char]0x1b[36m`），与终端无关，管道里也照写。`suggests` 行用 DarkYellow。Burrow 对齐就照写控制字符，不按 TTY 判断——这是"逐字对齐"的直接后果，不是疏漏。
 
 ## 下载缓存
 
@@ -133,11 +133,11 @@ pkg: install: recovered
 
 ## 实测记录
 
-2026-10-28 的旧记录（冷装 31.4 s → 40.0 s 并注明"网络波动"）**不能作为证据**：那次没有把下载时间与本地开销分开，且"再装 1.2 s 对比 Scoop 1.9 s"比的是两种不同行为（Coop 真重装、Scoop 直接拒绝）。可归因的测量方法由性能归因票建立，在此之前本文件不记录耗时数字。
+2026-10-28 的旧记录（冷装 31.4 s → 40.0 s 并注明"网络波动"）**不能作为证据**：那次没有把下载时间与本地开销分开，且"再装 1.2 s 对比 Scoop 1.9 s"比的是两种不同行为（Burrow 真重装、Scoop 直接拒绝）。可归因的测量方法由性能归因票建立，在此之前本文件不记录耗时数字。
 
 ## 尚未完成
 
 - 解压已不再逐文件写穿（#52）：写穿只发生在提交点，单次安装的写穿次数记录在计时记录的 `durable_syncs` 里。启动器共享（#53）尝试后撤回——硬链接破坏逐入口的所有权证据。
 - 依赖安装、批量与单包的逐包输出已由 `tests/progress-coverage.ps1` 覆盖（#54）。
 - `cleanup` 的**文本**只打印被删除的版本（Scoop 也只打印这些）；保留范围在 `--json` 里完整给出（`current`、`keep_scope`、`scope_summary.keep`），所以 #54 的"保留范围"在机读输出中满足，文本模式按逐字契约刻意不打印。
-- 写穿收敛（#52）：369 个文件的归档由 369 次写穿降到 23 次。时间证据来自一次手工 A/B（同一台机器、同一夹具、各 3 次，读 `--timings` 的 `local_seconds`）：把逐文件写穿临时加回后为 0.563 / 0.543 / 0.584 s，去掉后为 0.360 / 0.445 / 0.354 s，中位数 **0.563 → 0.360 s**。复现步骤是：在 `src/archive.cpp` 的 `CloseHandle(handle)` 前加一行 `durable_flush(handle)`，重新构建，对同一归档跑三次 `coop --root <新根> install <包> --timings` 并读 `.coop/timings/*.json` 的 `local_seconds`；删掉该行再跑三次。该对照没有随仓库脚本，因为脚本无法在不改源码的前提下切换两臂；`source_hygiene` 禁止在 `src/data.cpp` 之外直接调用 `FlushFileBuffers`，所以重新引入的逐文件写穿必须走 `durable_flush()`（被 `durable_syncs` 计数，`sync_points` 会红）。`src/data.cpp` 是计数所在的文件，规则对它豁免。该规则只扫 `*.cpp`。
+- 写穿收敛（#52）：369 个文件的归档由 369 次写穿降到 23 次。时间证据来自一次手工 A/B（同一台机器、同一夹具、各 3 次，读 `--timings` 的 `local_seconds`）：把逐文件写穿临时加回后为 0.563 / 0.543 / 0.584 s，去掉后为 0.360 / 0.445 / 0.354 s，中位数 **0.563 → 0.360 s**。复现步骤是：在 `src/archive.cpp` 的 `CloseHandle(handle)` 前加一行 `durable_flush(handle)`，重新构建，对同一归档跑三次 `burrow --root <新根> install <包> --timings` 并读 `.burrow/timings/*.json` 的 `local_seconds`；删掉该行再跑三次。该对照没有随仓库脚本，因为脚本无法在不改源码的前提下切换两臂；`source_hygiene` 禁止在 `src/data.cpp` 之外直接调用 `FlushFileBuffers`，所以重新引入的逐文件写穿必须走 `durable_flush()`（被 `durable_syncs` 计数，`sync_points` 会红）。`src/data.cpp` 是计数所在的文件，规则对它豁免。该规则只扫 `*.cpp`。

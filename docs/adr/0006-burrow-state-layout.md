@@ -1,33 +1,33 @@
-# ADR 0006：Coop 私有状态放在 `%USERPROFILE%\.coop`
+# ADR 0006：Burrow 私有状态放在 `%USERPROFILE%\.burrow`
 
 状态：已接受（2026-10-31 实现并验证，见 issue #89）
 日期：2026-10-30
 
 ## 背景
 
-Coop 需要保存 Scoop 格式里没有的东西：写入期间的事务日志（崩溃恢复）、Coop 创建的入口/快捷方式/环境值/持久化的归属证据、搜索索引、诊断日志。
+Burrow 需要保存 Scoop 格式里没有的东西：写入期间的事务日志（崩溃恢复）、Burrow 创建的入口/快捷方式/环境值/持久化的归属证据、搜索索引、诊断日志。
 
-当前实现把它们全部放在 `<Scoop 根>\.coop` 下。后果：
+当前实现把它们全部放在 `<Scoop 根>\.burrow` 下。后果：
 
 1. 根的目录里多出一个隐藏目录，Scoop 看不到它，但使用者第一反应是"这是什么脏东西"。
 2. 失败运行的事务目录没有保留策略。真实根上曾累积 **25 个目录 / 1341 MB**（含 407 MB 的下载产物）。
-3. `Scoop 的根` 与 `Coop 的私有状态` 生命周期不同：根可能被整体移动、复制或备份，状态跟着走没有意义。
+3. `Scoop 的根` 与 `Burrow 的私有状态` 生命周期不同：根可能被整体移动、复制或备份，状态跟着走没有意义。
 
-Scoop 自己不需要这样的目录，因为它的全部事实都能从根的布局推导（`apps/<包>/<版本>`、`buckets/<名>/.git`），而且它在失败时不恢复。Coop 存在的理由之一正是"失败时能恢复"，那就必须有一个持久、可核对的地方放事务证据。
+Scoop 自己不需要这样的目录，因为它的全部事实都能从根的布局推导（`apps/<包>/<版本>`、`buckets/<名>/.git`），而且它在失败时不恢复。Burrow 存在的理由之一正是"失败时能恢复"，那就必须有一个持久、可核对的地方放事务证据。
 
 ## 决策（2026-10-30 人类定稿）
 
-**Coop 相关的数据全部放在 `%USERPROFILE%\.coop` 一个目录里**，不使用 LOCALAPPDATA、不使用 `%TEMP%`、不在 Scoop 根里留任何东西、也不引入 XDG 变量。理由：一个位置，用户想清就清、想备份就备份，不需要先理解平台惯例。
+**Burrow 相关的数据全部放在 `%USERPROFILE%\.burrow` 一个目录里**，不使用 LOCALAPPDATA、不使用 `%TEMP%`、不在 Scoop 根里留任何东西、也不引入 XDG 变量。理由：一个位置，用户想清就清、想备份就备份，不需要先理解平台惯例。
 
 ```
-%USERPROFILE%\.coop\
+%USERPROFILE%\.burrow\
 └── roots\<根目录名>-<根路径 SHA256 前 8 位>\
     ├── buckets.json  packages\  retained\  runs\  logs\  timings\
     ├── cache\index\        ← 纯缓存，可随时删
     └── transactions\       ← 写入期间的事务日志与暂存树
 ```
 
-每个根一份子目录（根名 + 路径哈希），所以用户级根与测试根互不干扰。`COOP_STATE_DIR` 可把整个目录钉到别处（测试、便携用法）。
+每个根一份子目录（根名 + 路径哈希），所以用户级根与测试根互不干扰。`BURROW_STATE_DIR` 可把整个目录钉到别处（测试、便携用法）。
 
 ### 一个必须处理的后果：跨卷发布
 
@@ -39,9 +39,9 @@ Scoop 自己不需要这样的目录，因为它的全部事实都能从根的�
 
 | 层 | 位置 | 内容 | 生命周期 |
 | --- | --- | --- | --- |
-| 状态 | `$XDG_STATE_HOME/coop/roots/<根名>-<哈希>`，默认 `~/.local/state/coop/...` | bucket 注册表、包归属记录、保留版本清单、运行记录、日志、计时、清单缓存 | 持久；可从根与 Scoop 记录重建 |
-| 缓存 | `$XDG_CACHE_HOME/coop/roots/<根名>-<哈希>`，默认 `~/.cache/coop/...` | 搜索索引、bucket 刷新暂存 | 持久但可随时删除 |
-| 进行中 | `<根>\.coop` | 暂存树、事务日志、写锁、测试故障文件 | **只在写操作期间存在** |
+| 状态 | `$XDG_STATE_HOME/burrow/roots/<根名>-<哈希>`，默认 `~/.local/state/burrow/...` | bucket 注册表、包归属记录、保留版本清单、运行记录、日志、计时、清单缓存 | 持久；可从根与 Scoop 记录重建 |
+| 缓存 | `$XDG_CACHE_HOME/burrow/roots/<根名>-<哈希>`，默认 `~/.cache/burrow/...` | 搜索索引、bucket 刷新暂存 | 持久但可随时删除 |
+| 进行中 | `<根>\.burrow` | 暂存树、事务日志、写锁、测试故障文件 | **只在写操作期间存在** |
 
 三条硬约束决定了这个划分：
 
@@ -51,18 +51,18 @@ Scoop 自己不需要这样的目录，因为它的全部事实都能从根的�
 
 ## 结果
 
-- 日常状态下 `<Scoop 根>` 里没有 `.coop`：事务、暂存、写锁与持久记录都在状态目录；`RootLock` 退出时删除锁文件和空事务目录。
+- 日常状态下 `<Scoop 根>` 里没有 `.burrow`：事务、暂存、写锁与持久记录都在状态目录；`RootLock` 退出时删除锁文件和空事务目录。
 - 进程被杀时事务日志仍在状态目录，`recover` 读它；处理完删除暂存树，保留 journal 与脚本日志作为证据。
-- `COOP_STATE_DIR` 精确覆盖状态目录，并支持 `%ROOT%` 占位（测试一次设置、每个调用按自己的根展开）；缓存固定为 `<状态目录>\cache`，不单独引入 `COOP_CACHE_DIR`。
-- 首次运行把旧的 `<根>\.coop` 中的持久部分搬到状态层、索引搬到 `cache\index`；迁移失败只报警，不删旧目录。
+- `BURROW_STATE_DIR` 精确覆盖状态目录，并支持 `%ROOT%` 占位（测试一次设置、每个调用按自己的根展开）；缓存固定为 `<状态目录>\cache`，不单独引入 `BURROW_CACHE_DIR`。
+- 首次运行把旧的 `<根>\.burrow` 中的持久部分搬到状态层、索引搬到 `cache\index`；迁移失败只报警，不删旧目录。
 
 ## 实现要点（三次尝试的结论）
 
-1. `RootLock` 直接用状态目录（`state_directory(root)`），锁文件与事务都落在 `%USERPROFILE%\.coop\roots\<slug>`，根里不再出现 `.coop`。
+1. `RootLock` 直接用状态目录（`state_directory(root)`），锁文件与事务都落在 `%USERPROFILE%\.burrow\roots\<slug>`，根里不再出现 `.burrow`。
 2. `ordinary_parents` 的 base 必须与路径同层：包记录、保留版本、事务全部用 `state_root(context)`；根内只保留 `apps`、`shims`、`modules`、快捷方式目录。
 3. `recovery_path_allowed` 的允许前缀要同时包含根内的 apps/shims 与状态层的 packages/retained，事务仍在根内。
 4. 提交路径要把 `transaction` 目录中的 journal 与日志搬到 `state/transactions/<id>` 后再删暂存。
-5. 测试用 `COOP_STATE_DIR`/`COOP_CACHE_DIR` 钉在各自沙箱；多根测试（`exposure`、`acceptance`、`path-batch`）要在每个根的命令块前重设环境变量。
+5. 测试用 `BURROW_STATE_DIR`/`BURROW_CACHE_DIR` 钉在各自沙箱；多根测试（`exposure`、`acceptance`、`path-batch`）要在每个根的命令块前重设环境变量。
 
 ## 未采用
 

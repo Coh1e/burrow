@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 // Establishes the standard Scoop-compatible directory layout in the selected root. It only creates
 // missing standard directories, never modifies existing content, never touches the user
 // environment and never starts an external process.

@@ -1,14 +1,14 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # #57: an update is a visible two-phase operation. The block below is the recorded Scoop shape, with
-# one deliberate difference: coop extracts and verifies before it unpublishes the old version, so the
+# one deliberate difference: burrow extracts and verifies before it unpublishes the old version, so the
 # extract lines appear above the Uninstalling header. That order is what keeps `current` on the old
 # version when the new payload cannot be extracted, which the same ticket requires.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not (($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase))) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $tidy = Join-Path $archives 'tidy-5.8.0-win64.zip'
 if (-not (Test-Path -LiteralPath $tidy)) { throw "Missing fixed test input: $tidy; run scripts/fetch-deps.ps1" }
@@ -24,8 +24,8 @@ function Write-Manifest([string]$version,[string]$file = $tidy) {
     [IO.File]::WriteAllText("$root/buckets/test/bucket/tidy.json",
         ($ordered | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 }
-function Invoke-Coop([string[]]$arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+function Invoke-Burrow([string[]]$arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -38,7 +38,7 @@ function Invoke-Coop([string[]]$arguments) {
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'coop timed out' }
+    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'burrow timed out' }
     $result = [pscustomobject]@{ exit = $process.ExitCode
         output = $stdout.GetAwaiter().GetResult(); error = $stderr.GetAwaiter().GetResult() }
     $process.Dispose()
@@ -46,12 +46,12 @@ function Invoke-Coop([string[]]$arguments) {
 }
 
 Write-Manifest '5.8.0'
-if ((Invoke-Coop @('--root',$root,'install','test/tidy','--json')).exit -ne 0) { throw 'the first install failed' }
+if ((Invoke-Burrow @('--root',$root,'install','test/tidy','--json')).exit -ne 0) { throw 'the first install failed' }
 
 $esc = [string][char]27
 $cyan = "$esc[36mtidy-5.8.0-win64.zip$esc[0m"
 Write-Manifest '5.8.1'
-$update = Invoke-Coop @('--root',$root,'update','tidy')
+$update = Invoke-Burrow @('--root',$root,'update','tidy')
 if ($update.exit -ne 0) { throw "the update failed: $($update.error)$($update.output)" }
 $expected = @(
     'tidy: 5.8.0 -> 5.8.1'
@@ -84,7 +84,7 @@ $brokenManifest = [ordered]@{ version='5.8.2'; url=([Uri][IO.Path]::GetFullPath(
     extract_dir='mingw64'; bin='bin\luajit.exe' }
 [IO.File]::WriteAllText("$root/buckets/test/bucket/tidy.json",
     ($brokenManifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
-$failed = Invoke-Coop @('--root',$root,'update','tidy','--json')
+$failed = Invoke-Burrow @('--root',$root,'update','tidy','--json')
 if ($failed.exit -eq 0) { throw 'a corrupt update unexpectedly succeeded' }
 if (-not (Test-Path -LiteralPath "$root/apps/tidy/5.8.1/tidy.exe")) { throw 'the working version was disturbed by the failed update' }
 $target = Get-LinkTarget "$root/apps/tidy/current"

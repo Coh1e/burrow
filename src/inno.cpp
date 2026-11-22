@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 std::string lower(std::string text) {
     for (auto& character : text) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
@@ -19,7 +19,7 @@ Json tree_totals(const fs::path& root) {
     if (!fs::is_directory(root)) return {{"files",files},{"bytes",bytes}};
     for (const auto& entry : fs::recursive_directory_iterator(root)) {
         const auto status = entry.symlink_status();
-        if (fs::is_symlink(status)) throw std::runtime_error("innounp extracted a link, which Coop does not publish");
+        if (fs::is_symlink(status)) throw std::runtime_error("innounp extracted a link, which Burrow does not publish");
         if (fs::is_regular_file(status)) {
             ++files;
             bytes += fs::file_size(entry.path());
@@ -37,10 +37,10 @@ InnoHelper inno_helper(const Context& context) {
             if (fs::is_regular_file(candidate)) return {candidate,{}};
         }
     }
-    return {{},"Inno Setup extraction requires the external innounp helper; Coop looked for "
+    return {{},"Inno Setup extraction requires the external innounp helper; Burrow looked for "
         "apps/innounp-unicode/current/innounp.exe and apps/innounp/current/innounp.exe under the "
         "selected root (and the global root) and never downloads or installs it. Install the Scoop "
-        "package innounp first, or convert the Manifest to an archive that Coop can unpack natively"};
+        "package innounp first, or convert the Manifest to an archive that Burrow can unpack natively"};
 }
 std::string inno_selection(const std::string& extract_directory) {
     if (extract_directory.empty()) return "{app}";
@@ -59,7 +59,7 @@ Json extract_inno_archive(const Context& context, const fs::path& helper, const 
                           const fs::path& destination, const std::string& extract_directory,
                           const fs::path& transaction, std::size_t index) {
     if (helper.empty() || !fs::is_regular_file(helper))
-        throw std::runtime_error("The declared external innounp helper is missing; Coop does not download or install it");
+        throw std::runtime_error("The declared external innounp helper is missing; Burrow does not download or install it");
     if (!fs::is_regular_file(setup)) throw std::runtime_error("The Inno Setup artifact is missing: "+path_text(setup));
     fs::create_directories(destination);
     const auto request = inno_arguments(setup,destination,extract_directory);
@@ -74,7 +74,7 @@ Json extract_inno_archive(const Context& context, const fs::path& helper, const 
     Json record = {{"mechanism","external innounp helper using Scoop's Expand-InnoArchive arguments"},
         {"helper",path_text(helper)},
         {"helper_sha256",fs::exists(helper) ? sha256_file(helper) : std::string{}},
-        {"helper_policy","separate declared software dependency installed in the selected root; Coop detects it, never downloads or installs it, and never substitutes a bundled unpacker"},
+        {"helper_policy","separate declared software dependency installed in the selected root; Burrow detects it, never downloads or installs it, and never substitutes a bundled unpacker"},
         {"arguments",request.arguments},
         {"selection","-c"+request.selection},
         {"exit_code",run.exit_code},
@@ -87,7 +87,7 @@ Json extract_inno_archive(const Context& context, const fs::path& helper, const 
         {"files",totals.at("files")},
         {"bytes",totals.at("bytes")},
         {"installer_executed",false},
-        {"elevation","not requested by Coop; innounp only unpacks the installer payload into the selected root"},
+        {"elevation","not requested by Burrow; innounp only unpacks the installer payload into the selected root"},
         {"reboot","not scheduled; the vendor installer is never started"},
         {"installer_effects","not executed: the vendor installer's [Run], [Registry], services, Start Menu entries and uninstall registration are outside this extraction"},
         {"differences","the extracted tree is the declared Inno directory only, with the file contents and timestamps innounp writes; no vendor installation state is created or registered"}};

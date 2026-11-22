@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [string]$Root = 'C:\Users\Neo\scoop')
 # Real shared-root evidence for #32: declare-and-run installer/uninstaller programs.
@@ -9,8 +9,8 @@ param(
 # whose bin entries only exist after that program has run. Only state this run creates is removed
 # afterwards; pre-existing installations and stores are never touched.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 New-Item -ItemType Directory -Path $EvidenceDir -Force | Out-Null
 $script:runs = 0
@@ -38,8 +38,8 @@ function Run([string]$label,[string]$file,[string[]]$arguments) {
     return $result
 }
 function Get-Json($result) { return ($result.output | ConvertFrom-Json) }
-function Test-Coop([string]$label,[string[]]$arguments) {
-    return Run $label $CoopExe (@('--root',$Root)+$arguments)
+function Test-Burrow([string]$label,[string[]]$arguments) {
+    return Run $label $BurrowExe (@('--root',$Root)+$arguments)
 }
 function Assert([bool]$condition,[string]$message) { if (-not $condition) { throw "real-root check failed: $message" } }
 $pwshPath = (Get-Process -Id $PID).Path
@@ -65,17 +65,17 @@ function Snapshot([string]$name) {
 }
 
 $scoopVersion = Run-Scoop 'scoop-version' @('--version')
-$coopVersion = Run 'coop-version' $CoopExe @('--version')
+$burrowVersion = Run 'burrow-version' $BurrowExe @('--version')
 $mainRevision = Run 'main-bucket-revision' 'git' @('-C',"$Root/buckets/main",'rev-parse','HEAD')
-Write-Text '00-versions.txt' ("coop: "+$coopVersion.output.Trim()+"`nscoop: "+($scoopVersion.output -replace "`r?`n",' / ').Trim()+
+Write-Text '00-versions.txt' ("burrow: "+$burrowVersion.output.Trim()+"`nscoop: "+($scoopVersion.output -replace "`r?`n",' / ').Trim()+
     "`nmain bucket: "+$mainRevision.output.Trim())
 $before = [ordered]@{
     platform = (Get-CimInstance Win32_OperatingSystem).Caption
     ps_version = $PSVersionTable.PSVersion.ToString()
-    coop_sha256 = (([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($CoopExe))) -replace '-','').ToLower())
+    burrow_sha256 = (([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($BurrowExe))) -replace '-','').ToLower())
     groovyserv_installed = Test-Path -LiteralPath "$Root/apps/groovyserv"
     groovyserv_shim = Test-Path -LiteralPath "$Root/shims/groovyclient.exe"
-    groovyserv_record = Test-Path -LiteralPath "$Root/.coop/packages/groovyserv.json"
+    groovyserv_record = Test-Path -LiteralPath "$Root/.burrow/packages/groovyserv.json"
 }
 $appsBefore = Snapshot '00-apps-before.json'
 Write-Text '00-before.json' ($before | ConvertTo-Json -Depth 5)
@@ -83,7 +83,7 @@ Assert (-not $before.groovyserv_installed -and -not $before.groovyserv_shim -and
 Write-Text '00-scoop-list-before.log' (Run-Scoop 'scoop-list-before' @('list')).output
 
 # 1. Read-only: the real Main/vcpkg declaration combines an installer program with multiple stages.
-$vcpkgPreview = Test-Coop 'vcpkg-install-preview' @('install','main/vcpkg','--dry-run','--json')
+$vcpkgPreview = Test-Burrow 'vcpkg-install-preview' @('install','main/vcpkg','--dry-run','--json')
 Assert ($vcpkgPreview.exit -eq 0) "vcpkg preview failed: $($vcpkgPreview.error)"
 $vcpkgPlan = Get-Json $vcpkgPreview
 Write-Text '01-vcpkg-plan.json' ($vcpkgPlan | ConvertTo-Json -Depth 8)
@@ -102,7 +102,7 @@ Assert (-not (Test-Path -LiteralPath "$Root/apps/vcpkg")) 'the vcpkg preview cre
 $groovyManifest = Run 'groovyserv-manifest' $pwshPath @('-NoProfile','-NonInteractive','-Command',
     "Get-Content -Raw -LiteralPath '$Root/buckets/main/bucket/groovyserv.json'")
 Write-Text '02-groovyserv-manifest.json' $groovyManifest.output
-$groovyPreview = Test-Coop 'groovyserv-install-preview' @('install','main/groovyserv','--dry-run','--json')
+$groovyPreview = Test-Burrow 'groovyserv-install-preview' @('install','main/groovyserv','--dry-run','--json')
 Assert ($groovyPreview.exit -eq 0) "groovyserv preview failed: $($groovyPreview.error)"
 $groovyPlan = Get-Json $groovyPreview
 Write-Text '03-groovyserv-plan.json' ($groovyPlan | ConvertTo-Json -Depth 8)
@@ -115,7 +115,7 @@ Assert (@($groovyPlan.package.commands).Count -eq 2 -and
     (@($groovyPlan.package.commands | ForEach-Object { $_.target }) -join ',') -eq 'bin\groovyclient.exe,bin\groovyserver.exe') 'real groovyserv entry targets are not the files the installer program produces'
 
 # 3. Bounded real lifecycle: install, observe the program effect, Scoop reads the installation.
-$groovyInstall = Test-Coop 'groovyserv-install' @('install','main/groovyserv','--json')
+$groovyInstall = Test-Burrow 'groovyserv-install' @('install','main/groovyserv','--json')
 Assert ($groovyInstall.exit -eq 0) "real groovyserv install failed: $($groovyInstall.error)"
 $groovyInstallResult = Get-Json $groovyInstall
 Write-Text '04-groovyserv-install-result.json' ($groovyInstallResult | ConvertTo-Json -Depth 8)
@@ -138,9 +138,9 @@ $shimTarget = (Get-Item -LiteralPath "$Root/shims/groovyclient.exe").LinkTarget
 Write-Text '06-groovyserv-shim.txt' ("linktarget="+$shimTarget)
 $scoopList = Run-Scoop 'scoop-list-installed' @('list')
 Write-Text '07-scoop-list-installed.log' $scoopList.output
-Assert ($scoopList.output -match 'groovyserv') 'Scoop did not list the Coop-installed groovyserv'
-$coopList = Test-Coop 'coop-list-installed' @('list','--json')
-Assert ($coopList.exit -eq 0 -and $coopList.output -match 'groovyserv') 'Coop did not list the installed groovyserv'
+Assert ($scoopList.output -match 'groovyserv') 'Scoop did not list the Burrow-installed groovyserv'
+$burrowList = Test-Burrow 'burrow-list-installed' @('list','--json')
+Assert ($burrowList.exit -eq 0 -and $burrowList.output -match 'groovyserv') 'Burrow did not list the installed groovyserv'
 $journal = Run 'groovyserv-journal' $pwshPath @('-NoProfile','-NonInteractive','-Command',
     "Get-Content -Raw -LiteralPath '$($groovyInstallResult.journal)'")
 $journalObject = $journal.output | ConvertFrom-Json
@@ -153,29 +153,29 @@ $currentIndex = [array]::IndexOf($observed,'publish-current')
 $entriesIndex = [array]::IndexOf($observed,'entries')
 Assert ($installerIndex -ge 0 -and $currentIndex -gt $installerIndex -and $entriesIndex -gt $currentIndex) "journal does not place the installer program before current and entries: $($observed -join ',')"
 
-# 4. Coop uninstall removes the installation; Scoop then sees it gone. No persist data is declared.
-$groovyUninstall = Test-Coop 'groovyserv-uninstall' @('uninstall','groovyserv','--json')
+# 4. Burrow uninstall removes the installation; Scoop then sees it gone. No persist data is declared.
+$groovyUninstall = Test-Burrow 'groovyserv-uninstall' @('uninstall','groovyserv','--json')
 Assert ($groovyUninstall.exit -eq 0) "real groovyserv uninstall failed: $($groovyUninstall.error)"
 $groovyUninstallResult = Get-Json $groovyUninstall
 Write-Text '09-groovyserv-uninstall-result.json' ($groovyUninstallResult | ConvertTo-Json -Depth 8)
 Assert (@($groovyUninstallResult.installers).Count -eq 0) 'uninstall ran an installer program for a package that declares none'
 $scoopListAfter = Run-Scoop 'scoop-list-after' @('list')
 Write-Text '10-scoop-list-after.log' $scoopListAfter.output
-Assert ($scoopListAfter.output -notmatch 'groovyserv') 'Scoop still lists groovyserv after the Coop uninstall'
+Assert ($scoopListAfter.output -notmatch 'groovyserv') 'Scoop still lists groovyserv after the Burrow uninstall'
 Assert (-not (Test-Path -LiteralPath "$Root/apps/groovyserv") -and
     -not (Test-Path -LiteralPath "$Root/shims/groovyclient.exe") -and
-    -not (Test-Path -LiteralPath "$Root/.coop/packages/groovyserv.json")) 'uninstall left groovyserv program state'
+    -not (Test-Path -LiteralPath "$Root/.burrow/packages/groovyserv.json")) 'uninstall left groovyserv program state'
 
 # 5. Restore comparison: only this run's state may differ.
 $appsAfter = Snapshot '11-apps-after.json'
-$pending = @(Get-ChildItem "$Root/.coop/transactions" -Directory -ErrorAction SilentlyContinue | Where-Object {
+$pending = @(Get-ChildItem "$Root/.burrow/transactions" -Directory -ErrorAction SilentlyContinue | Where-Object {
     (Get-Content -LiteralPath "$(Join-Path $_.FullName 'journal.json')" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).state -eq 'pending' }).Count
 Write-Text '11-pending-transactions.txt' ("pending="+$pending)
 Assert ($pending -eq 0) 'a pending transaction was left behind'
 Assert (($appsAfter.apps -join ',') -eq ($appsBefore.apps -join ',')) 'the installed application set changed'
 Assert (($appsAfter.shims -join ',') -eq ($appsBefore.shims -join ',')) 'the shared shim set changed'
 Assert (($appsAfter.persist -join ',') -eq ($appsBefore.persist -join ',')) 'the persist store set changed'
-Write-Text '12-evidence.txt' ("runs="+$script:runs+"`nroot="+$Root+"`ncoop="+$coopVersion.output.Trim()+
+Write-Text '12-evidence.txt' ("runs="+$script:runs+"`nroot="+$Root+"`nburrow="+$burrowVersion.output.Trim()+
     "`nscoop="+($scoopVersion.output -replace "`r?`n",' / ').Trim()+
     "`nreal installer program: Main/groovyserv bin\setup.bat (keep=true), executed in the shared root"+
     "`nread-only combined declaration: Main/vcpkg bootstrap-vcpkg.bat + pre_install/post_install/uninstaller scripts"+

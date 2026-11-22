@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [Parameter(Mandatory)][string]$TestRoot,
     [string]$ScoopRoot = 'C:\Users\Neo\scoop',
@@ -7,7 +7,7 @@ param(
     [string]$Version = '1.8.2'
 )
 # R17 (#38) real acceptance: create a fresh installation root without Scoop, initialize it with
-# Coop while git.exe, 7z.exe and scoop are unreachable on PATH (none of them are uninstalled from
+# Burrow while git.exe, 7z.exe and scoop are unreachable on PATH (none of them are uninstalled from
 # the machine), install a real Main package, then install the real Scoop program tree into the same
 # root as a later user action and manage the package from both clients in turn.
 $ErrorActionPreference = 'Stop'
@@ -18,15 +18,15 @@ $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Test data must stay within the project test directory'
 }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot)
 $runLabel = Split-Path $EvidenceDir -Leaf
-$root = Join-Path $TestRoot ('coop-initialized-' + $runLabel)
+$root = Join-Path $TestRoot ('burrow-initialized-' + $runLabel)
 $realScoop = Join-Path $ScoopRoot 'shims/scoop.ps1'
 $realBucket = Join-Path $ScoopRoot 'buckets/main'
 $scoopApp = Join-Path $ScoopRoot 'apps/scoop/current'
-$guard = Join-Path (Split-Path $CoopExe) 'process_guard.exe'
-foreach ($path in @($CoopExe, $realScoop, $realBucket, $scoopApp, $guard)) {
+$guard = Join-Path (Split-Path $BurrowExe) 'process_guard.exe'
+foreach ($path in @($BurrowExe, $realScoop, $realBucket, $scoopApp, $guard)) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing fixed input: $path" }
 }
 if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
@@ -54,15 +54,15 @@ function Run([string]$name, [string]$exe, [string[]]$arguments, [hashtable]$envi
         stdout_log = $stdoutLog; stderr_log = $stderrLog; environment = $environment })
     return [pscustomobject]@{ exit = $exit; stdout = $stdout; stderr = $stderr }
 }
-function Coop([string]$name, [string[]]$arguments, [hashtable]$environment = @{}) {
-    return Run $name $CoopExe (@('--root', $root) + $arguments) $environment
+function Burrow([string]$name, [string[]]$arguments, [hashtable]$environment = @{}) {
+    return Run $name $BurrowExe (@('--root', $root) + $arguments) $environment
 }
-function GuardedCoop([string]$name, [string[]]$arguments, [hashtable]$environment = @{}) {
+function GuardedBurrow([string]$name, [string[]]$arguments, [hashtable]$environment = @{}) {
     $guardEnvironment = $environment.Clone()
     # A real download can legitimately take longer than the guard default; the guard still fails
     # when the workload starts an extra process or exits non-zero.
-    $guardEnvironment['COOP_PROCESS_GUARD_TIMEOUT_MS'] = '180000'
-    return Run $name $guard (@($CoopExe, '--root', $root) + $arguments) $guardEnvironment
+    $guardEnvironment['BURROW_PROCESS_GUARD_TIMEOUT_MS'] = '180000'
+    return Run $name $guard (@($BurrowExe, '--root', $root) + $arguments) $guardEnvironment
 }
 function FreshScoop([string]$name, [string[]]$arguments) {
     # The real Scoop program tree copied into the target root: its entry script resolves the root
@@ -147,45 +147,45 @@ try {
     Assert-True ($uninitialized.exit -ne 0) "Real Scoop reported a usable uninitialized root: $($uninitialized.stdout)$($uninitialized.stderr)"
     Assert-True (-not (Test-Path -LiteralPath $root)) 'The uninitialized-root probe created the root'
 
-    # 4. Coop preview and initialization run with the restricted PATH and start no child process.
-    $preview = Coop 'init-preview' @('init', '--dry-run', '--json') $restricted
+    # 4. Burrow preview and initialization run with the restricted PATH and start no child process.
+    $preview = Burrow 'init-preview' @('init', '--dry-run', '--json') $restricted
     Assert-True ($preview.exit -eq 0) "init preview failed: $($preview.stdout)$($preview.stderr)"
     $previewJson = $preview.stdout | ConvertFrom-Json
     Assert-True ($previewJson.dry_run -eq $true -and @($previewJson.created).Count -eq 5) "init preview did not list the standard layout: $($preview.stdout)"
     Assert-True (-not (Test-Path -LiteralPath $root)) 'init preview created the installation root'
-    $init = GuardedCoop 'init-process-guard' @('init', '--json') $restricted
+    $init = GuardedBurrow 'init-process-guard' @('init', '--json') $restricted
     Assert-True ($init.exit -eq 0) "guarded init failed: $($init.stdout)$($init.stderr)"
     Assert-True ($init.stderr -match 'Observed workload processes: 1;') "init started an extra process: $($init.stderr)"
     $initJson = $init.stdout | ConvertFrom-Json
     Assert-True ((@($initJson.created) -join ',') -eq 'apps,buckets,cache,persist,shims') "init created the wrong layout: $($init.stdout)"
     $layoutAfterInit = @(Get-ChildItem -LiteralPath $root -Force | Sort-Object Name | ForEach-Object { $_.Name })
     Assert-True (($layoutAfterInit -join ',') -eq 'apps,buckets,cache,persist,shims') "init created unexpected entries: $($layoutAfterInit -join ',')"
-    $idempotent = Coop 'init-idempotent' @('init', '--json') $restricted
+    $idempotent = Burrow 'init-idempotent' @('init', '--json') $restricted
     Assert-True ($idempotent.exit -eq 0) "repeated init failed: $($idempotent.stdout)$($idempotent.stderr)"
     $idempotentJson = $idempotent.stdout | ConvertFrom-Json
     Assert-True (@($idempotentJson.created).Count -eq 0 -and @($idempotentJson.existing).Count -eq 5) "repeated init was not idempotent: $($idempotent.stdout)"
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root '.coop'))) 'init created Coop private state in a fresh root'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root '.burrow'))) 'init created Burrow private state in a fresh root'
 
     # 5. A real Main bucket is cloned with the embedded Git library, and a real package is
     #    installed and run with the restricted PATH.
     $bucketUrl = ([Uri]$realBucket).AbsoluteUri
-    $bucketAdd = Coop 'bucket-add' @('bucket', 'add', 'main', $bucketUrl) $restricted
+    $bucketAdd = Burrow 'bucket-add' @('bucket', 'add', 'main', $bucketUrl) $restricted
     Assert-True ($bucketAdd.exit -eq 0) "bucket add failed: $($bucketAdd.stdout)$($bucketAdd.stderr)"
     $bucketJson = $bucketAdd.stdout | ConvertFrom-Json
     $sourceRevision = (& git -C $realBucket rev-parse HEAD 2>&1 | Out-String).Trim()
     Assert-True ($bucketJson.kind -eq 'git' -and $bucketJson.revision -eq $sourceRevision) "the shared bucket clone does not match the real revision: $($bucketAdd.stdout) expected=$sourceRevision"
     Assert-True (Test-Path -LiteralPath (Join-Path $root 'buckets/main/.git')) 'the bucket was not cloned into the shared layout'
-    $install = GuardedCoop 'install-process-guard' @('install', $Package, '--json') $restricted
+    $install = GuardedBurrow 'install-process-guard' @('install', $Package, '--json') $restricted
     Assert-True ($install.exit -eq 0) "guarded install failed: $($install.stdout)$($install.stderr)"
     Assert-True ($install.stderr -match 'Observed workload processes: 1;') "install started an extra process: $($install.stderr)"
     $installJson = $install.stdout | ConvertFrom-Json
     Assert-True ($installJson.status -eq 'success' -and $installJson.version -eq $Version) "install did not report success: $($install.stdout)"
     $program = Run 'program-run' (Join-Path $root "shims/$Package.exe") @('--version') $restricted
     Assert-True ($program.exit -eq 0 -and $program.stdout.Trim() -eq "$Package-$Version") "the installed program did not run: $($program.stdout)$($program.stderr)"
-    $list = Coop 'coop-list-after-install' @('list', '--json') $restricted
-    Assert-True ($list.exit -eq 0) "coop list failed: $($list.stdout)$($list.stderr)"
+    $list = Burrow 'burrow-list-after-install' @('list', '--json') $restricted
+    Assert-True ($list.exit -eq 0) "burrow list failed: $($list.stdout)$($list.stderr)"
     $listed = @(($list.stdout | ConvertFrom-Json) | Where-Object { $_.name -eq $Package })
-    Assert-True ($listed.Count -eq 1 -and $listed[0].version -eq $Version -and $listed[0].bucket -eq 'main') "coop did not list the installed package: $($list.stdout)"
+    Assert-True ($listed.Count -eq 1 -and $listed[0].version -eq $Version -and $listed[0].bucket -eq 'main') "burrow did not list the installed package: $($list.stdout)"
     $standardRecords = [ordered]@{
         manifest = Join-Path $root "apps/$Package/current/scoop-manifest.json"
         install = Join-Path $root "apps/$Package/current/scoop-install.json"
@@ -215,15 +215,15 @@ try {
     $afterScoopInstall = Tree-Fingerprint $root
     $addedByScoopInstall = @($afterScoopInstall | Where-Object { $beforeScoopInstall -notcontains $_ })
     Assert-True (@($addedByScoopInstall | Where-Object { $_ -like 'd|apps*' -and $_ -notlike 'd|apps/scoop*' }).Count -eq 0) 'copying Scoop changed existing application state'
-    $initAfterScoop = Coop 'init-after-scoop' @('init', '--json')
+    $initAfterScoop = Burrow 'init-after-scoop' @('init', '--json')
     Assert-True ($initAfterScoop.exit -eq 0) "init after Scoop failed: $($initAfterScoop.stdout)$($initAfterScoop.stderr)"
     $initAfterScoopJson = $initAfterScoop.stdout | ConvertFrom-Json
     Assert-True (@($initAfterScoopJson.created).Count -eq 0 -and $initAfterScoopJson.scoop_installation.present -eq $true) "init did not report the later Scoop installation: $($initAfterScoop.stdout)"
 
-    # 7. The later-installed Scoop recognizes and manages the Coop installation, and Coop
+    # 7. The later-installed Scoop recognizes and manages the Burrow installation, and Burrow
     #    re-identifies the facts afterwards. Its own PATH update is observed and restored.
-    $scoopList = FreshScoop 'scoop-list-after-coop-install' @('list', $Package)
-    Assert-True ($scoopList.exit -eq 0 -and $scoopList.stdout -match [regex]::Escape($Version)) "Scoop did not recognize the Coop installation: $($scoopList.stdout)$($scoopList.stderr)"
+    $scoopList = FreshScoop 'scoop-list-after-burrow-install' @('list', $Package)
+    Assert-True ($scoopList.exit -eq 0 -and $scoopList.stdout -match [regex]::Escape($Version)) "Scoop did not recognize the Burrow installation: $($scoopList.stdout)$($scoopList.stderr)"
     $scoopReset = FreshScoop 'scoop-reset' @('reset', $Package)
     Assert-True ($scoopReset.exit -eq 0) "Scoop reset failed: $($scoopReset.stdout)$($scoopReset.stderr)"
     $resetRun = Run 'program-run-after-scoop-reset' (Join-Path $root "shims/$Package.exe") @('--version')
@@ -231,43 +231,43 @@ try {
     $scoopResetEntry = [ordered]@{
         shim_metadata = (Get-Content -LiteralPath (Join-Path $root "shims/$Package.shim") -Raw).Trim()
         launcher_sha256 = (Get-FileHash -LiteralPath (Join-Path $root "shims/$Package.exe") -Algorithm SHA256).Hash.ToLower()
-        launcher_is_coop_exe = ((Get-FileHash -LiteralPath (Join-Path $root "shims/$Package.exe") -Algorithm SHA256).Hash.ToLower() -eq (Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash.ToLower())
+        launcher_is_burrow_exe = ((Get-FileHash -LiteralPath (Join-Path $root "shims/$Package.exe") -Algorithm SHA256).Hash.ToLower() -eq (Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash.ToLower())
         scoop_output = ($scoopReset.stdout + $scoopReset.stderr).Trim()
     }
     Assert-True ($scoopResetEntry.shim_metadata -match [regex]::Escape("apps\$Package\current")) "Scoop reset did not publish its own shared entry: $($scoopResetEntry.shim_metadata)"
     $userPathAfterReset = Get-UserPath
     $scoopPathEntries = Path-Delta $userPathBefore $userPathAfterReset
-    $listAfterReset = Coop 'coop-list-after-scoop-reset' @('list', '--json')
-    Assert-True ($listAfterReset.exit -eq 0) "coop list after Scoop reset failed: $($listAfterReset.stdout)$($listAfterReset.stderr)"
+    $listAfterReset = Burrow 'burrow-list-after-scoop-reset' @('list', '--json')
+    Assert-True ($listAfterReset.exit -eq 0) "burrow list after Scoop reset failed: $($listAfterReset.stdout)$($listAfterReset.stderr)"
     $listedAfterReset = @(($listAfterReset.stdout | ConvertFrom-Json) | Where-Object { $_.name -eq $Package })
-    Assert-True ($listedAfterReset.Count -eq 1 -and $listedAfterReset[0].version -eq $Version) "Coop did not re-identify the Scoop-reset installation: $($listAfterReset.stdout)"
-    $scoopResetEntry['coop_management_after'] = $listedAfterReset[0].management
+    Assert-True ($listedAfterReset.Count -eq 1 -and $listedAfterReset[0].version -eq $Version) "Burrow did not re-identify the Scoop-reset installation: $($listAfterReset.stdout)"
+    $scoopResetEntry['burrow_management_after'] = $listedAfterReset[0].management
     $scoopUninstall = FreshScoop 'scoop-uninstall' @('uninstall', $Package)
     Assert-True ($scoopUninstall.exit -eq 0) "Scoop uninstall failed: $($scoopUninstall.stdout)$($scoopUninstall.stderr)"
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $root "apps/$Package/current"))) 'Scoop uninstall left the application current link'
-    $listAfterScoopUninstall = Coop 'coop-list-after-scoop-uninstall' @('list', '--json')
-    Assert-True ($listAfterScoopUninstall.exit -eq 0) "coop list after Scoop uninstall failed: $($listAfterScoopUninstall.stdout)$($listAfterScoopUninstall.stderr)"
-    Assert-True (@((($listAfterScoopUninstall.stdout | ConvertFrom-Json) | Where-Object { $_.name -eq $Package })).Count -eq 0) "Coop still listed the Scoop-uninstalled package: $($listAfterScoopUninstall.stdout)"
+    $listAfterScoopUninstall = Burrow 'burrow-list-after-scoop-uninstall' @('list', '--json')
+    Assert-True ($listAfterScoopUninstall.exit -eq 0) "burrow list after Scoop uninstall failed: $($listAfterScoopUninstall.stdout)$($listAfterScoopUninstall.stderr)"
+    Assert-True (@((($listAfterScoopUninstall.stdout | ConvertFrom-Json) | Where-Object { $_.name -eq $Package })).Count -eq 0) "Burrow still listed the Scoop-uninstalled package: $($listAfterScoopUninstall.stdout)"
 
-    # 8. Reverse direction in the initialized root: Coop creates the installation again and the
-    #    later-installed Scoop recognizes it, then Coop removes its own entry again.
-    $reinstall = Coop 'coop-reinstall' @('install', $Package, '--json')
-    Assert-True ($reinstall.exit -eq 0) "Coop reinstall failed: $($reinstall.stdout)$($reinstall.stderr)"
-    $scoopListAgain = FreshScoop 'scoop-list-after-coop-reinstall' @('list', $Package)
-    Assert-True ($scoopListAgain.exit -eq 0 -and $scoopListAgain.stdout -match [regex]::Escape($Version)) "Scoop did not recognize the Coop reinstall: $($scoopListAgain.stdout)$($scoopListAgain.stderr)"
-    $uninstall = Coop 'coop-uninstall' @('uninstall', $Package, '--json')
-    Assert-True ($uninstall.exit -eq 0) "Coop uninstall failed: $($uninstall.stdout)$($uninstall.stderr)"
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root "apps/$Package/current")) -and -not (Test-Path -LiteralPath (Join-Path $root "shims/$Package.exe"))) 'Coop uninstall left published state'
+    # 8. Reverse direction in the initialized root: Burrow creates the installation again and the
+    #    later-installed Scoop recognizes it, then Burrow removes its own entry again.
+    $reinstall = Burrow 'burrow-reinstall' @('install', $Package, '--json')
+    Assert-True ($reinstall.exit -eq 0) "Burrow reinstall failed: $($reinstall.stdout)$($reinstall.stderr)"
+    $scoopListAgain = FreshScoop 'scoop-list-after-burrow-reinstall' @('list', $Package)
+    Assert-True ($scoopListAgain.exit -eq 0 -and $scoopListAgain.stdout -match [regex]::Escape($Version)) "Scoop did not recognize the Burrow reinstall: $($scoopListAgain.stdout)$($scoopListAgain.stderr)"
+    $uninstall = Burrow 'burrow-uninstall' @('uninstall', $Package, '--json')
+    Assert-True ($uninstall.exit -eq 0) "Burrow uninstall failed: $($uninstall.stdout)$($uninstall.stderr)"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root "apps/$Package/current")) -and -not (Test-Path -LiteralPath (Join-Path $root "shims/$Package.exe"))) 'Burrow uninstall left published state'
     $scoopListFinal = FreshScoop 'scoop-list-final' @('list', $Package)
-    Assert-True ($scoopListFinal.stdout -notmatch [regex]::Escape($Package)) "Scoop still listed the Coop-uninstalled package: $($scoopListFinal.stdout)$($scoopListFinal.stderr)"
+    Assert-True ($scoopListFinal.stdout -notmatch [regex]::Escape($Package)) "Scoop still listed the Burrow-uninstalled package: $($scoopListFinal.stdout)$($scoopListFinal.stderr)"
 
     $evidence = [ordered]@{
         platform = (Get-CimInstance Win32_OperatingSystem).Caption
         run = $runLabel
         timestamp = [DateTime]::UtcNow.ToString('o')
-        coop_exe = $CoopExe
-        coop_sha256 = (Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash.ToLower()
-        coop_version = (& $CoopExe --version | Out-String).Trim()
+        burrow_exe = $BurrowExe
+        burrow_sha256 = (Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash.ToLower()
+        burrow_version = (& $BurrowExe --version | Out-String).Trim()
         scoop_root = $ScoopRoot
         fresh_root = $root
         freshness = $freshness

@@ -1,9 +1,9 @@
-# Red when: bare `coop update` stops refreshing every bucket, `update *` / `-a` stops expanding to the
+# Red when: bare `burrow update` stops refreshing every bucket, `update *` / `-a` stops expanding to the
 # installed apps, `-g`/`--global` stops reporting the system-level boundary as a stable marker, or
 # `bucket rm` stops acting as `remove`.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -18,19 +18,19 @@ Copy-Item "$PSScriptRoot/corpus/main/jq.json" "$root/apps/demo/1.7.1/scoop-manif
 New-Item -ItemType Junction -Path "$root/apps/demo/current" -Target "$root/apps/demo/1.7.1" | Out-Null
 
 # `scoop update` with no app refreshes the buckets and prints Scoop's heading.
-$out = @(& $CoopExe --root $root update)
+$out = @(& $BurrowExe --root $root update)
 if ($LASTEXITCODE -cne 0) { throw "bare update failed: $($out -join ' | ')" }
 if ($out.Count -lt 1 -or $out[0] -cne 'Updating Buckets...') { throw "bare update first line is '$($out -join ' | ')'" }
 
 # `*` and `-a` expand to every installed app instead of refreshing buckets.
 foreach ($wildcard in '*', '-a') {
-    $out = @(& $CoopExe --root $root update $wildcard --dry-run)
+    $out = @(& $BurrowExe --root $root update $wildcard --dry-run)
     if ($LASTEXITCODE -cne 0) { throw "update $wildcard failed: $($out -join ' | ')" }
     if (($out -join "`n") -cnotmatch 'demo') { throw "update $wildcard did not reach the installed app" }
 }
 
 # A system-level write is refused with the product's own marker, not as an unknown switch.
-$refusal = Invoke-CoopNative $CoopExe  --root $root uninstall -g demo
+$refusal = Invoke-BurrowNative $BurrowExe  --root $root uninstall -g demo
 if ($LASTEXITCODE -cne 1) { throw "uninstall -g exited $LASTEXITCODE" }
 if (($refusal -join "`n") -cnotmatch 'global-scope-readonly') { throw "uninstall -g said: $($refusal -join ' | ')" }
 
@@ -38,43 +38,43 @@ if (($refusal -join "`n") -cnotmatch 'global-scope-readonly') { throw "uninstall
 $source = Join-Path $TestRoot 'bare-source'
 New-Item -ItemType Directory -Path "$source/bucket" -Force | Out-Null
 Copy-Item "$PSScriptRoot/corpus/main/jq.json" "$source/bucket/extra.json" -Force
-& $CoopExe --root $root bucket add extra "$source" | Out-Null
+& $BurrowExe --root $root bucket add extra "$source" | Out-Null
 if ($LASTEXITCODE -cne 0) { throw 'bucket add failed' }
-$out = @(& $CoopExe --root $root bucket rm extra)
+$out = @(& $BurrowExe --root $root bucket rm extra)
 if ($LASTEXITCODE -cne 0 -or ($out -join "`n") -cnotmatch 'Removed bucket registration extra') {
     throw "bucket rm failed: $($out -join ' | ')"
 }
 
 # `bucket known` answers from Scoop's own list, or from the snapshot when Scoop is not beside the root.
-$out = @(& $CoopExe --root $root bucket known)
+$out = @(& $BurrowExe --root $root bucket known)
 if ($LASTEXITCODE -cne 0 -or $out -cnotcontains 'main' -or $out -cnotcontains 'extras') {
     throw "bucket known printed '$($out -join ' | ')'"
 }
 
 # The switches a Scoop user arrives with are accepted: `-p` for purge, `-a` for every app,
 # `-u` for "do not update Scoop first" and `-q` for quiet.
-$out = @(& $CoopExe --root $root uninstall -p demo --dry-run)
+$out = @(& $BurrowExe --root $root uninstall -p demo --dry-run)
 if ($LASTEXITCODE -cne 0) { throw "uninstall -p failed: $($out -join ' | ')" }
-$out = @(& $CoopExe --root $root cleanup -a --dry-run)
+$out = @(& $BurrowExe --root $root cleanup -a --dry-run)
 if ($LASTEXITCODE -cne 0) { throw "cleanup -a failed: $($out -join ' | ')" }
-$out = @(& $CoopExe --root $root update demo -u -q --dry-run)
+$out = @(& $BurrowExe --root $root update demo -u -q --dry-run)
 if ($LASTEXITCODE -cne 0) { throw "update -u -q failed: $($out -join ' | ')" }
-$out = @(& $CoopExe --root $root update demo -k -s -i --dry-run)
+$out = @(& $BurrowExe --root $root update demo -k -s -i --dry-run)
 if ($LASTEXITCODE -cne 0) { throw "update -k -s -i failed: $($out -join ' | ')" }
-$out = @(& $CoopExe --root $root update demo -f --dry-run)
+$out = @(& $BurrowExe --root $root update demo -f --dry-run)
 if ($LASTEXITCODE -cne 0) { throw "update -f failed: $($out -join ' | ')" }
 
 # `cleanup -k` removes cached artifacts no installed version refers to, and keeps the current one.
 New-Item -ItemType Directory -Path "$root/cache" -Force | Out-Null
 'keep' | Set-Content "$root/cache/demo#1.8.2#abc1234.zip" -Encoding ascii
 'stale' | Set-Content "$root/cache/oldpkg#0.9#abcdef1.zip" -Encoding ascii
-$out = @(& $CoopExe --root $root cleanup -k --dry-run)
+$out = @(& $BurrowExe --root $root cleanup -k --dry-run)
 $dryRun = $out -join "`n"
 if ($LASTEXITCODE -cne 0 -or $dryRun -cnotmatch 'oldpkg#0\.9#abcdef1\.zip' -or $dryRun -cmatch 'demo#1\.8\.2') {
     throw "cleanup -k dry run said '$($out -join ' | ')'"
 }
 if (-not (Test-Path "$root/cache/oldpkg#0.9#abcdef1.zip")) { throw 'cleanup -k dry run removed a file' }
-$out = @(& $CoopExe --root $root cleanup -k)
+$out = @(& $BurrowExe --root $root cleanup -k)
 if ($LASTEXITCODE -cne 0) { throw "cleanup -k failed: $($out -join ' | ')" }
 if (Test-Path "$root/cache/oldpkg#0.9#abcdef1.zip") { throw 'cleanup -k kept the stale cache entry' }
 if (-not (Test-Path "$root/cache/demo#1.8.2#abc1234.zip")) { throw 'cleanup -k removed the current version cache entry' }

@@ -4,7 +4,7 @@
 
 ## 1. Scoop 语义依据
 
-- 更新默认保留旧版本目录，Scoop 与 Coop 都从 `apps/<包>/<版本>` 的实际文件、保存的 Manifest 和安装记录识别本地版本。
+- 更新默认保留旧版本目录，Scoop 与 Burrow 都从 `apps/<包>/<版本>` 的实际文件、保存的 Manifest 和安装记录识别本地版本。
 - Scoop 的 `reset` 只重新发布已安装版本：切换 `current`、重新建立持久化链接、入口、快捷方式与环境，不重新下载，也不再执行安装 Hook。
 - Scoop 的 `cleanup` 只删除本机保留的旧版本；卸载默认保留 `persist` 存储，彻底删除是独立请求。
 - 规格 #21 明确：远端历史版本查找不在范围内；缺失版本必须失败，不猜测下载 URL；程序回退不承诺数据回退。
@@ -16,17 +16,17 @@
 - `apps/<包>/<版本>/scoop-manifest.json`（Scoop 安装也可能是 `manifest.json`）及其保存的版本；
 - 同目录的 `scoop-install.json`（或 `install.json`）中的 bucket、架构与来源；
 - 实际程序文件和声明入口目标；
-- 存在时，Coop 管理记录 `.coop/packages/<包>.json` 中记录的 Manifest 摘要、安装记录摘要和目录树摘要。
+- 存在时，Burrow 管理记录 `.burrow/packages/<包>.json` 中记录的 Manifest 摘要、安装记录摘要和目录树摘要。
 
-没有 Coop 私有版本记录、但保存的 Manifest 与安装记录一致且实际产物可校验的本地版本仍可用于回退；这不要求私有管理记录或接管步骤。没有保存 Manifest 或安装记录的目录不会被用来回退，也不会被清理删除。
+没有 Burrow 私有版本记录、但保存的 Manifest 与安装记录一致且实际产物可校验的本地版本仍可用于回退；这不要求私有管理记录或接管步骤。没有保存 Manifest 或安装记录的目录不会被用来回退，也不会被清理删除。
 
-Scoop 后续更新可能让 Coop 私有记录中的当前版本过期。清理以 `current` 指向的本地版本及匹配的标准安装证据识别当前版本；它不会删除当前版本，也不会为此改写私有记录。当前目标越出包目录或版本证据不匹配时，仍保留不一致保护；旧版本仍须通过既有归属与摘要校验。
+Scoop 后续更新可能让 Burrow 私有记录中的当前版本过期。清理以 `current` 指向的本地版本及匹配的标准安装证据识别当前版本；它不会删除当前版本，也不会为此改写私有记录。当前目标越出包目录或版本证据不匹配时，仍保留不一致保护；旧版本仍须通过既有归属与摘要校验。
 
-## 3. 程序回退：`coop reset <包名>@<版本>`
+## 3. 程序回退：`burrow reset <包名>@<版本>`
 
 ```powershell
-coop reset 7zip@26.03 --dry-run --json
-coop reset 7zip@26.03 --json
+burrow reset 7zip@26.03 --dry-run --json
+burrow reset 7zip@26.03 --json
 ```
 
 预览与实际执行消费同一份 IR 操作序列：
@@ -49,25 +49,25 @@ coop reset 7zip@26.03 --json
 
 - 目标版本目录不存在、是 reparse point，或缺少保存的 Manifest/安装记录；
 - 保存的 Manifest 版本与目录名不一致，或实际产物摘要不匹配；
-- 存在 Coop 版本记录但 Manifest、安装记录或目录树摘要已被修改；
+- 存在 Burrow 版本记录但 Manifest、安装记录或目录树摘要已被修改；
 - 目标就是当前版本；
 - 持久化映射与当前版本不同，或旧版本的已声明链接缺失、被重定向；
 - 声明依赖未安装、当前安装/入口/持久化事实无法核对，或存在 pending 事务。
 
 `reset` 不运行 `pre_install`/`post_install` 等 Hook，也不运行声明的 installer 程序；这些外部副作用在安装/更新时已经发生，回退不重放。入口和持久化链接冲突在写入前失败。
 
-## 4. 旧版本清理：`coop cleanup [包名...]`
+## 4. 旧版本清理：`burrow cleanup [包名...]`
 
-`coop cleanup --dry-run --json` 输出可核对的删除范围：
+`burrow cleanup --dry-run --json` 输出可核对的删除范围：
 
 - `delete_scope`：每个候选版本的绝对路径、Manifest/安装记录摘要、目录树摘要和计划操作；
 - `keep_scope`：当前版本和所有不满足条件的版本及原因；
 - `current`：已发布当前版本；
 - `scope_summary`：删除、保留和已缺失的数量；
 - 每个版本仍保留完整证据字段（`status`、`reason`、`recorded`、`provenance` 等）。
-### 4.1 写入事务记录：`coop cleanup --transactions`
+### 4.1 写入事务记录：`burrow cleanup --transactions`
 
-事务记录是崩溃恢复与追查"这次更新做了什么"的证据（journal 与脚本输出），默认**不自动删除**：失败运行的证据必须留到人能看为止。`coop cleanup --transactions` 按请求裁剪：
+事务记录是崩溃恢复与追查"这次更新做了什么"的证据（journal 与脚本输出），默认**不自动删除**：失败运行的证据必须留到人能看为止。`burrow cleanup --transactions` 按请求裁剪：
 
 - 保留最近 **10** 条已结束的记录；更旧的删除并报告释放的字节；
 - **永不删除** `state` 为 `pending` 的记录——那是 `recover` 要用的；
@@ -75,7 +75,7 @@ coop reset 7zip@26.03 --json
 - 根内没有记录时输出 `No transaction records to clean` 并返回 0；
 - `--json` 输出 `kept`、`pending`、`removed`（路径与字节）、`bytes` 和 `dry_run`。
 
-记录位置随状态目录一起迁移（见 ADR-0006）；在当前版本的布局里它是 `<安装根>/.coop/transactions`。
+记录位置随状态目录一起迁移（见 ADR-0006）；在当前版本的布局里它是 `<安装根>/.burrow/transactions`。
 
 实际执行先恢复中断的清理事务，再重新核对同样的证据，只移动并删除 `delete_scope` 中的目录。清理候选必须同时满足：
 
@@ -87,7 +87,7 @@ coop reset 7zip@26.03 --json
 
 当前版本、未记录目录、缺失历史 Manifest、被用户修改的版本、被占用而无法移动的版本都会保留并报告原因，不强制结束进程。删除时遇到持久化 junction/reparse point 只解除链接，不跟随到 store 或其他外部内容。
 
-## 5. 显式数据彻底删除：`coop uninstall <包名> --purge`
+## 5. 显式数据彻底删除：`burrow uninstall <包名> --purge`
 
 - 普通 `uninstall` 保留声明的持久化数据并保留旧版本目录。
 - `--purge` 是独立请求；预览列出每个声明映射的 `source`、`target`、`store`、`link`、类型和文件身份。
@@ -105,9 +105,9 @@ coop reset 7zip@26.03 --json
 - 目标缺失、已是当前、目录树被修改、保存 Manifest 缺失、版本目录是 reparse point 时拒绝回退；
 - 持久化 store 内容、链接目标不变；链接被重定向或缺失时拒绝回退；
 - 保留版本的 `pre_install` Hook 不因回退重跑；
-- 没有 Coop 版本记录但保存证据完整的本地版本可回退，清理仍保护当前版本。
+- 没有 Burrow 版本记录但保存证据完整的本地版本可回退，清理仍保护当前版本。
 
-真机共用根：`tests/real-scoop-old-versions.ps1` 在人工选定的本机 Scoop 根内创建临时 bucket 与测试包，顺序执行 Coop 安装 → Scoop list/reset → Coop 更新 → Scoop reset → Coop 回退 → Scoop reset → Coop cleanup → Coop `uninstall --purge`，最后清理测试对象并核对根内既有 15 个包清单不变。本轮运行的命令、退出码、`summary.json`、清理范围和执行前后清单保存在 `.local/pi/tasks/36/evidence/real-old-versions-run4/`；`summary.json` 记录 `coop_sha256`，`reset` 的 planned 与 observed 操作均为 `unlink-current,remove-entries,publish-current,persistence,entries,commit-state`，Scoop 在 Coop 回退后仍能 `reset` 并运行 v1，清理只删除保留的 v2，持久化 store 在 cleanup 后仍在、在 purge 后只删除声明的 `config`。
+真机共用根：`tests/real-scoop-old-versions.ps1` 在人工选定的本机 Scoop 根内创建临时 bucket 与测试包，顺序执行 Burrow 安装 → Scoop list/reset → Burrow 更新 → Scoop reset → Burrow 回退 → Scoop reset → Burrow cleanup → Burrow `uninstall --purge`，最后清理测试对象并核对根内既有 15 个包清单不变。本轮运行的命令、退出码、`summary.json`、清理范围和执行前后清单保存在 `.local/pi/tasks/36/evidence/real-old-versions-run4/`；`summary.json` 记录 `burrow_sha256`，`reset` 的 planned 与 observed 操作均为 `unlink-current,remove-entries,publish-current,persistence,entries,commit-state`，Scoop 在 Burrow 回退后仍能 `reset` 并运行 v1，清理只删除保留的 v2，持久化 store 在 cleanup 后仍在、在 purge 后只删除声明的 `config`。
 
 未运行/不在范围：
 

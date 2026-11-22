@@ -10,7 +10,7 @@
 #     .NET Framework 4.8 has `Arguments` (a string) and `EnvironmentVariables` (an IDictionary).
 #   * `Process.Kill($true)` has no bool overload on .NET Framework.
 #
-# Tests keep their own `Invoke-Coop` wrappers; these helpers are the portable primitives underneath.
+# Tests keep their own `Invoke-Burrow` wrappers; these helpers are the portable primitives underneath.
 
 # Quotes one argument the way CommandLineToArgvW parses it: wrap in quotes when it is empty or contains
 # whitespace/a quote, double the backslashes that precede a quote, and double a trailing run of them.
@@ -41,7 +41,7 @@ function Add-ProcessArgument {
 # stdout lines come first, then stderr lines; $LASTEXITCODE is set like a direct call.
 # Runs an executable and returns its stdout and stderr as text lines, on both PowerShell versions.
 # stdout lines come first, then stderr lines; $LASTEXITCODE is set like a direct call.
-function Invoke-CoopNative {
+function Invoke-BurrowNative {
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
         [Parameter(ValueFromRemainingArguments = $true)][object[]]$Arguments
@@ -68,7 +68,7 @@ function Invoke-CoopNative {
     return $lines
 }
 
-function Invoke-CoopNativeRaw {
+function Invoke-BurrowNativeRaw {
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
         [Parameter(ValueFromRemainingArguments = $true)][object[]]$Arguments
@@ -100,13 +100,13 @@ function Invoke-CoopNativeRaw {
 
 # Redirect a child's stderr to a file and swallow stdout, the way `& exe ... 2> file | Out-Null` reads.
 # That form throws on 5.1 for the same reason 2>&1 does, so the file capture happens here instead.
-function Invoke-CoopNativeToFile {
+function Invoke-BurrowNativeToFile {
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
         [Parameter(Mandatory = $true)][string]$ErrorFile,
         [Parameter(ValueFromRemainingArguments = $true)][object[]]$Arguments
     )
-    $result = Invoke-CoopNativeRaw $Exe @Arguments
+    $result = Invoke-BurrowNativeRaw $Exe @Arguments
     [IO.File]::WriteAllText($ErrorFile, $result.err)
     $global:LASTEXITCODE = $result.code
     return $result.out
@@ -148,7 +148,7 @@ function Get-LinkTarget {
     if ($item.PSObject.Properties['LinkTarget'] -and $item.LinkTarget) { return [string]$item.LinkTarget }
     if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
     # fsutil writes its label to stderr on some systems; the tolerant capture keeps 5.1 from throwing.
-    $lines = Invoke-CoopNative fsutil.exe reparsepoint query $Path
+    $lines = Invoke-BurrowNative fsutil.exe reparsepoint query $Path
     foreach ($line in $lines) {
         if ($line -match '^\s*Print Name:\s*(?<target>.+?)\s*$') { return $Matches['target'] }
     }
@@ -189,12 +189,12 @@ function Get-JsonItems {
 }
 # stdout only (stderr is dropped): for calls whose output is parsed as JSON, so a diagnostic line from a
 # successful-but-noisy child does not turn into "Invalid JSON primitive".
-function Invoke-CoopStdout {
+function Invoke-BurrowStdout {
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
         [Parameter(ValueFromRemainingArguments = $true)][object[]]$Arguments
     )
-    $result = Invoke-CoopNativeRaw $Exe @Arguments
+    $result = Invoke-BurrowNativeRaw $Exe @Arguments
     $global:LASTEXITCODE = $result.code
     $lines = @()
     foreach ($line in ($result.out -split "`n")) { $lines += @($line.TrimEnd("`r")) }
@@ -204,12 +204,12 @@ function Invoke-CoopStdout {
 # Runs the child and parses its stdout as JSON, returning the document's elements (arrays expanded).
 # Raw stdout is parsed as one string: rebuilding lines and re-joining them changed the text enough that
 # 5.1's ConvertFrom-Json returned no objects for `list --json`.
-function Invoke-CoopJson {
+function Invoke-BurrowJson {
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
         [Parameter(ValueFromRemainingArguments = $true)][object[]]$Arguments
     )
-    $result = Invoke-CoopNativeRaw $Exe @Arguments
+    $result = Invoke-BurrowNativeRaw $Exe @Arguments
     $global:LASTEXITCODE = $result.code
     if ([string]::IsNullOrWhiteSpace($result.out)) { return }
     $value = ConvertFrom-Json $result.out

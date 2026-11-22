@@ -1,11 +1,11 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$fixture1 = Join-Path (Split-Path $CoopExe) 'fixture-1.exe'
-$fixture2 = Join-Path (Split-Path $CoopExe) 'fixture-2.exe'
+$fixture1 = Join-Path (Split-Path $BurrowExe) 'fixture-1.exe'
+$fixture2 = Join-Path (Split-Path $BurrowExe) 'fixture-2.exe'
 foreach ($path in @($fixture1,$fixture2)) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing fixed test input: $path" } }
 function New-TestRoot {
     $root = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
@@ -31,7 +31,7 @@ $root = New-TestRoot
 # Real Main/wget declares depends: cacert. The dependency order is planned before any product state exists.
 Write-Manifest $root 'main' 'cacert' '1' $fixture1 'cacert.exe' $null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'corpus/main/wget.json') -Destination "$root/buckets/main/bucket/wget.json"
-$preview = & $CoopExe --root $root install main/wget --dry-run --json
+$preview = & $BurrowExe --root $root install main/wget --dry-run --json
 Assert-Exit 'real Main/wget dependency preview failed'
 $wget = Read-Json $preview
 if ('cacert' -notin @($wget.package.dependencies)) { throw 'real Manifest dependency was not disclosed' }
@@ -42,7 +42,7 @@ foreach ($entry in $order) {
     if (@($entry.ir_operations).Count -eq 0) { throw "planned dependency $($entry.package) has no IR operations" }
 }
 if (@($wget.diagnostics | Where-Object code -eq 'dependency-missing').Count) { throw 'available cacert dependency was reported missing' }
-if ((Test-Path "$root/apps") -or (Test-Path "$root/shims") -or (Test-Path "$root/.coop")) { throw 'dependency preview changed product state' }
+if ((Test-Path "$root/apps") -or (Test-Path "$root/shims") -or (Test-Path "$root/.burrow")) { throw 'dependency preview changed product state' }
 # Main/wget's lifecycle text is ordinary PowerShell now, so it is planned for execution. The
 # dependency-before-root rule is proven with a root Manifest whose command entry path escapes its
 # package, so the root is refused and its planned dependency is never installed first.
@@ -56,7 +56,7 @@ if ($wget.execution_available -ne $true) { throw 'real Manifest with ordinary Po
   "bin": "..\\blockedroot.pdf"
 }
 '@ | Set-Content -LiteralPath "$root/buckets/main/bucket/blockedroot.json" -Encoding utf8
-$blockedPreview = & $CoopExe --root $root install main/blockedroot --dry-run --json 2>$null
+$blockedPreview = & $BurrowExe --root $root install main/blockedroot --dry-run --json 2>$null
 $blockedPlan = Read-Json $blockedPreview
 $blockedCodes = @($blockedPlan.diagnostics | ForEach-Object { $_.code })
 if ($blockedPlan.execution_available -ne $false -or 'manifest-shape' -notin $blockedCodes -or
@@ -64,7 +64,7 @@ if ($blockedPlan.execution_available -ne $false -or 'manifest-shape' -notin $blo
     @($blockedPlan.diagnostics | Where-Object { $_.code -eq 'execution-blocked' -and $_.message -match 'unsupported or invalid' }).Count -eq 0) {
     throw 'blocked root preview did not disclose the unsafe command entry'
 }
-$blockedInstall = Invoke-CoopNative $CoopExe  --root $root install main/blockedroot --json
+$blockedInstall = Invoke-BurrowNative $BurrowExe  --root $root install main/blockedroot --json
 if ($LASTEXITCODE -eq 0 -or (Test-Path "$root/apps/cacert") -or (Test-Path "$root/apps/blockedroot")) { throw 'unsafe root package installed its dependency before refusing the root' }
 
 Write-Manifest $root 'test' 'base' '1' $fixture1 'base.exe' $null
@@ -89,7 +89,7 @@ $blockedDependency = @{version='1';url=(File-Uri $fixture1)+'#/blockeddependency
 Write-Manifest $root 'test' 'needsscript' '1' $fixture1 'needsscript.exe' 'blockeddependency'
 
 # A dependency is installed first in its own transaction, then the requested package is published.
-$preview = & $CoopExe --root $root install leaf --dry-run --json
+$preview = & $BurrowExe --root $root install leaf --dry-run --json
 Assert-Exit 'dependency install preview failed'
 $leafPreview = Read-Json $preview
 if (-not $leafPreview.execution_available) { throw 'preview did not consider planned dependencies executable' }
@@ -101,8 +101,8 @@ foreach ($entry in $order) {
         throw "dependency $($entry.package) has no planned IR operation sequence"
     }
 }
-if ((Test-Path "$root/apps") -or (Test-Path "$root/shims") -or (Test-Path "$root/.coop")) { throw 'dependency preview changed product state' }
-$install = & $CoopExe --root $root install leaf --json
+if ((Test-Path "$root/apps") -or (Test-Path "$root/shims") -or (Test-Path "$root/.burrow")) { throw 'dependency preview changed product state' }
+$install = & $BurrowExe --root $root install leaf --json
 Assert-Exit "dependency install failed: $($install -join "`n")"
 $result = Read-Json $install
 $packages = @($result.packages)
@@ -118,18 +118,18 @@ for ($index = 0; $index -lt $packages.Count; $index++) {
 }
 Assert-Runs "$root/shims/base.exe" 'fixture 1'
 Assert-Runs "$root/shims/leaf.exe" 'fixture 2'
-$leafRecord = Get-Content -LiteralPath "$root/.coop/packages/leaf.json" -Raw | ConvertFrom-Json
+$leafRecord = Get-Content -LiteralPath "$root/.burrow/packages/leaf.json" -Raw | ConvertFrom-Json
 if ('base' -notin @($leafRecord.dependencies)) { throw 'management record omitted the declared dependency' }
 
 # An already installed dependency is skipped, not reinstalled, and the dependent still installs.
-$skipPreview = & $CoopExe --root $root install leaf2 --dry-run --json
+$skipPreview = & $BurrowExe --root $root install leaf2 --dry-run --json
 Assert-Exit 'install preview with an already installed dependency failed'
 $skipPlan = Read-Json $skipPreview
 if (@($skipPlan.dependency_order).Count -ne 2 -or $skipPlan.dependency_order[0].package -ne 'base' -or
     $skipPlan.dependency_order[0].installed -ne $true -or $skipPlan.dependency_order[0].status -ne 'satisfied' -or
     @($skipPlan.dependency_order[0].ir_operations).Count -ne 0 -or
     $skipPlan.dependency_order[0].installed_version -ne '1') { throw 'installed dependency was not reused in the plan' }
-$skip = & $CoopExe --root $root install leaf2 --json
+$skip = & $BurrowExe --root $root install leaf2 --json
 Assert-Exit 'install with an already installed dependency failed'
 $skipResult = Read-Json $skip
 $skipPackages = @($skipResult.packages)
@@ -139,7 +139,7 @@ Assert-Runs "$root/shims/base.exe" 'fixture 1'
 Assert-Runs "$root/shims/leaf2.exe" 'fixture 2'
 
 # A transitive dependency chain is resolved and ordered by the IR planner before any write.
-$deepPreview = & $CoopExe --root $root install deeper --dry-run --json
+$deepPreview = & $BurrowExe --root $root install deeper --dry-run --json
 Assert-Exit 'transitive dependency preview failed'
 $deepPlan = Read-Json $deepPreview
 $deepOrder = @($deepPlan.dependency_order)
@@ -153,7 +153,7 @@ if ((Test-Path "$root/apps/deep") -or (Test-Path "$root/apps/deeper")) { throw '
 
 # A batch reports every requested package; installing the version that is already current is a no-op
 # for that package, not a batch failure, and the earlier package still installs.
-$batch = & $CoopExe --root $root install ind leaf --json
+$batch = & $BurrowExe --root $root install ind leaf --json
 if ($LASTEXITCODE -ne 0) { throw "a batch containing an already installed package failed: $($batch -join ' ')" }
 $batchResult = Read-Json $batch
 $batchItems = @($batchResult)
@@ -165,38 +165,38 @@ Assert-Runs "$root/shims/ind.exe" 'fixture 1'
 Assert-Runs "$root/shims/leaf.exe" 'fixture 2'
 
 # Missing, circular and ambiguous dependencies are explicit failures before any product state changes.
-$missing = & $CoopExe --root $root install missing --dry-run --json
+$missing = & $BurrowExe --root $root install missing --dry-run --json
 if ($LASTEXITCODE -eq 0 -or ($missing -join "`n") -notmatch 'dependency-missing' -or ($missing -join "`n") -notmatch 'ghost') { throw 'missing dependency was not reported' }
 if (Test-Path "$root/apps/missing") { throw 'missing dependency preview wrote product state' }
-$missingInstall = Invoke-CoopNative $CoopExe  --root $root install missing --json
+$missingInstall = Invoke-BurrowNative $BurrowExe  --root $root install missing --json
 if ($LASTEXITCODE -eq 0 -or (Test-Path "$root/apps/missing") -or (Test-Path "$root/shims/missing.exe")) { throw 'missing dependency install was not refused' }
-$cycle = & $CoopExe --root $root install cyclea --dry-run --json
+$cycle = & $BurrowExe --root $root install cyclea --dry-run --json
 if ($LASTEXITCODE -eq 0 -or ($cycle -join "`n") -notmatch 'dependency-cycle' -or ($cycle -join "`n") -notmatch 'Circular dependency') { throw 'circular dependency was not reported' }
 if (Test-Path "$root/apps/cyclea") { throw 'circular dependency preview wrote product state' }
-$cycleInstall = Invoke-CoopNative $CoopExe  --root $root install cyclea --json
+$cycleInstall = Invoke-BurrowNative $BurrowExe  --root $root install cyclea --json
 if ($LASTEXITCODE -eq 0 -or (Test-Path "$root/apps/cyclea")) { throw 'circular dependency install was not refused' }
-$ambiguous = & $CoopExe --root $root install amb --dry-run --json
+$ambiguous = & $BurrowExe --root $root install amb --dry-run --json
 if ($LASTEXITCODE -eq 0 -or ($ambiguous -join "`n") -notmatch 'dependency-ambiguous' -or
     ($ambiguous -join "`n") -notmatch 'other' -or ($ambiguous -join "`n") -notmatch 'test') { throw 'ambiguous dependency was not reported with its buckets' }
-$versioned = & $CoopExe --root $root install versiondep --dry-run --json
+$versioned = & $BurrowExe --root $root install versiondep --dry-run --json
 if ($LASTEXITCODE -eq 0 -or ($versioned -join "`n") -notmatch 'dependency-version') { throw 'version-constrained dependency was not refused explicitly' }
-$qualifiedVersioned = & $CoopExe --root $root install qualifiedversion --dry-run --json
+$qualifiedVersioned = & $BurrowExe --root $root install qualifiedversion --dry-run --json
 if ($LASTEXITCODE -eq 0 -or ($qualifiedVersioned -join "`n") -notmatch 'dependency-version' -or ($qualifiedVersioned -join "`n") -notmatch 'test/base@1') { throw 'bucket-qualified version-constrained dependency was not refused with its source' }
-$unsupported = & $CoopExe --root $root install needsscript --dry-run --json
+$unsupported = & $BurrowExe --root $root install needsscript --dry-run --json
 if ($LASTEXITCODE -eq 0 -or ($unsupported -join "`n") -notmatch 'dependency-unsupported' -or ($unsupported -join "`n") -notmatch 'blockeddependency') { throw 'unsupported dependency was not refused with a capability diagnostic' }
 if (Test-Path "$root/apps/needsscript") { throw 'unsupported dependency preview wrote product state' }
 Write-Manifest $root 'other' 'base' '1' $fixture1 'base.exe' $null
 Write-Manifest $root 'test' 'conflict' '1' $fixture1 'conflict.exe' 'other/base'
-$sourceConflict = & $CoopExe --root $root install conflict --dry-run --json
+$sourceConflict = & $BurrowExe --root $root install conflict --dry-run --json
 if ($LASTEXITCODE -eq 0 -or ($sourceConflict -join "`n") -notmatch 'dependency-bucket-conflict' -or ($sourceConflict -join "`n") -notmatch 'other') { throw 'installed dependency from a conflicting source was not reported' }
 
 # Update preview checks the new Manifest against actually installed dependencies.
 Rename-Item -LiteralPath "$root/apps/base" -NewName 'base-hidden'
 Write-Manifest $root 'test' 'leaf' '2' $fixture2 'leaf.exe' 'base'
-$update = & $CoopExe --root $root update leaf --dry-run --json
+$update = & $BurrowExe --root $root update leaf --dry-run --json
 if ($LASTEXITCODE -eq 0 -or ($update -join "`n") -notmatch 'dependency-missing' -or ($update -join "`n") -notmatch 'base') { throw 'update did not detect a missing declared dependency' }
 Rename-Item -LiteralPath "$root/apps/base-hidden" -NewName 'base'
-$update = & $CoopExe --root $root update leaf --dry-run --json
+$update = & $BurrowExe --root $root update leaf --dry-run --json
 Assert-Exit 'update preview failed after restoring the dependency'
 $updatePlan = Read-Json $update
 if (@($updatePlan.dependency_order | Where-Object { $_.package -eq 'base' -and $_.status -eq 'satisfied' }).Count -ne 1) { throw 'update preview omitted the satisfied dependency' }
@@ -210,13 +210,13 @@ Copy-Item -LiteralPath "$root/buckets/test/bucket/leaf.json" -Destination "$root
 New-Item -ItemType Directory -Path "$root/apps/mystery/current" -Force | Out-Null
 '{' | Set-Content -LiteralPath "$root/apps/mystery/current/scoop-manifest.json" -Encoding utf8
 '{"bucket":"test","architecture":"64bit"}' | Set-Content -LiteralPath "$root/apps/mystery/current/scoop-install.json" -Encoding utf8
-$blocked = & $CoopExe --root $root uninstall base --dry-run --json
+$blocked = & $BurrowExe --root $root uninstall base --dry-run --json
 if ($LASTEXITCODE -eq 0) { throw 'blocked uninstall preview unexpectedly succeeded' }
 $blockedPlan = Read-Json $blocked
 foreach ($dependent in @('leaf','leaf2','legacy')) { if ($dependent -notin @($blockedPlan.blocking_dependents)) { throw "uninstall did not list dependent $dependent" } }
 if ('user/mystery' -notin @($blockedPlan.unverified_dependents)) { throw 'unreadable dependency evidence was treated as no dependency' }
 if ('blocked-by-dependents' -notin @($blockedPlan.diagnostics.code) -or 'dependency-evidence-incomplete' -notin @($blockedPlan.diagnostics.code)) { throw 'uninstall protection diagnostics are incomplete' }
-$blockedInstall = Invoke-CoopNative $CoopExe  --root $root uninstall base --json
+$blockedInstall = Invoke-BurrowNative $BurrowExe  --root $root uninstall base --json
 if ($LASTEXITCODE -eq 0) { throw 'blocked uninstall was executed' }
 Assert-Runs "$root/shims/base.exe" 'fixture 1'
 Assert-Runs "$root/shims/leaf.exe" 'fixture 2'
@@ -224,28 +224,28 @@ Remove-Item -LiteralPath "$root/apps/mystery" -Recurse -Force
 Remove-Item -LiteralPath "$root/apps/legacy" -Recurse -Force
 
 # Uninstalling dependents is a per-package batch; the shared dependency is retained, never autoremoved.
-$remove = & $CoopExe --root $root uninstall leaf leaf2 --json
+$remove = & $BurrowExe --root $root uninstall leaf leaf2 --json
 Assert-Exit "dependent batch uninstall failed: $($remove -join "`n")"
 $removeResult = @(Read-Json $remove)
 if ($removeResult.Count -ne 2 -or $removeResult[0].status -ne 'success' -or $removeResult[1].status -ne 'success') { throw 'dependent batch uninstall did not report both packages' }
 if (Test-Path "$root/shims/leaf.exe") { throw 'batch uninstall left a dependent entry' }
 Assert-Runs "$root/shims/base.exe" 'fixture 1'
-$baseRecord = Get-Content -LiteralPath "$root/.coop/packages/base.json" -Raw | ConvertFrom-Json
+$baseRecord = Get-Content -LiteralPath "$root/.burrow/packages/base.json" -Raw | ConvertFrom-Json
 if ($baseRecord.status -ne 'ready') { throw 'retained dependency lost its management record' }
-$list = @(Read-Json (& $CoopExe --root $root list --json))
+$list = @(Read-Json (& $BurrowExe --root $root list --json))
 if (@($list | Where-Object { $_.name -eq 'base' -and $_.management -eq 'managed' }).Count -ne 1) { throw 'retained dependency disappeared from list' }
-$removeBase = & $CoopExe --root $root uninstall base --json
+$removeBase = & $BurrowExe --root $root uninstall base --json
 Assert-Exit 'dependency uninstall failed after dependents were removed'
 if (Test-Path "$root/shims/base.exe") { throw 'dependency entry remained after explicit uninstall' }
 
 # A batch uninstall continues after one package fails and reports an accurate overall result.
-$partial = & $CoopExe --root $root uninstall ghostpkg ind --json
+$partial = & $BurrowExe --root $root uninstall ghostpkg ind --json
 if ($LASTEXITCODE -eq 0) { throw 'batch uninstall with a missing package unexpectedly succeeded' }
 $partialResult = @(Read-Json $partial)
 if ($partialResult.Count -ne 2 -or $partialResult[0].package -ne 'ghostpkg' -or $partialResult[0].status -ne 'failed' -or
     $partialResult[1].package -ne 'ind' -or $partialResult[1].status -ne 'success') { throw "batch uninstall did not report per-package failure and success (exit $LASTEXITCODE): $($partial -join "`n")" }
 if (Test-Path "$root/shims/ind.exe") { throw 'successful batch entry was not removed' }
 
-@{coop=$CoopExe;root=$root;fixed_wget_manifest=(Join-Path $PSScriptRoot 'corpus/main/wget.json')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $TestRoot 'dependencies-evidence.json') -Encoding utf8
+@{burrow=$BurrowExe;root=$root;fixed_wget_manifest=(Join-Path $PSScriptRoot 'corpus/main/wget.json')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $TestRoot 'dependencies-evidence.json') -Encoding utf8
 Write-Output "PASS dependency install order, batch outcomes and reverse dependency protection: $TestRoot"
 exit 0

@@ -44,27 +44,27 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ steps.version.outputs.version }}'
-          $reported = (& ./.local/build/coop.exe --version | Out-String).Trim()
-          if ($reported -ne "coop $version") {
-            throw "coop.exe reports '$reported', but the tag is v$version"
+          $reported = (& ./.local/build/burrow.exe --version | Out-String).Trim()
+          if ($reported -ne "burrow $version") {
+            throw "burrow.exe reports '$reported', but the tag is v$version"
           }
 
       - name: Package and smoke-test the archive
         shell: pwsh
         run: |
           $version = '${{ steps.version.outputs.version }}'
-          $asset = "coop-v$version-x64.zip"
-          Compress-Archive -Path ./.local/build/coop.exe, ./.local/build/scoop-lib, ./.local/build/licenses, ./LICENSE, ./THIRD_PARTY.md -DestinationPath $asset
+          $asset = "burrow-v$version-x64.zip"
+          Compress-Archive -Path ./.local/build/burrow.exe, ./.local/build/scoop-lib, ./.local/build/licenses, ./LICENSE, ./THIRD_PARTY.md -DestinationPath $asset
           Expand-Archive -Path $asset -DestinationPath ./.local/release-check
           if (-not (Test-Path ./.local/release-check/scoop-lib/core.ps1)) {
-            throw 'scoop-lib was not packaged beside coop.exe'
+            throw 'scoop-lib was not packaged beside burrow.exe'
           }
           if (-not (Test-Path ./.local/release-check/LICENSE)) {
             throw 'LICENSE was not packaged'
           }
-          $reported = (& ./.local/release-check/coop.exe --version | Out-String).Trim()
-          if ($reported -ne "coop $version") {
-            throw "the unpacked coop.exe reports '$reported', but the tag is v$version"
+          $reported = (& ./.local/release-check/burrow.exe --version | Out-String).Trim()
+          if ($reported -ne "burrow $version") {
+            throw "the unpacked burrow.exe reports '$reported', but the tag is v$version"
           }
           $hash = (Get-FileHash -Path $asset -Algorithm SHA256).Hash.ToLower()
           "sha256 $hash" >> $env:GITHUB_STEP_SUMMARY
@@ -75,4 +75,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = '${{ steps.version.outputs.version }}'
-          gh release create $env:GITHUB_REF_NAME "coop-v$version-x64.zip" --verify-tag --title $env:GITHUB_REF_NAME --generate-notes
+          gh release create $env:GITHUB_REF_NAME "burrow-v$version-x64.zip" --verify-tag --title $env:GITHUB_REF_NAME --generate-notes

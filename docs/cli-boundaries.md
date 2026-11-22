@@ -1,15 +1,15 @@
 # CLI 路径、退出码与批量边界
 
-本文件记录 #39（R18）完成的命令行边界：中文、空格和复杂 Windows 路径可以执行，标准输出、标准错误与退出码可区分，批量操作逐包报告结果，系统级安装根保持只读。正式产品范围见 [Issue #21](https://github.com/Coh1e/coop/issues/21)，整体模块边界见[包管理 IR 与查询/预览路径](ir-pipeline.md)。
+本文件记录 #39（R18）完成的命令行边界：中文、空格和复杂 Windows 路径可以执行，标准输出、标准错误与退出码可区分，批量操作逐包报告结果，系统级安装根保持只读。正式产品范围见 [Issue #21](https://github.com/Coh1e/burrow/issues/21)，整体模块边界见[包管理 IR 与查询/预览路径](ir-pipeline.md)。
 
 ## 1. 命令形式与退出码
 
 `--root`、`--global-root`、`--arch` 同时接受分离形式和等号形式：
 
 ```powershell
-coop --root "D:\some root" list --json
-coop --root="D:\some root" list --json
-coop --arch=64bit install main/ripgrep
+burrow --root "D:\some root" list --json
+burrow --root="D:\some root" list --json
+burrow --arch=64bit install main/ripgrep
 ```
 
 退出码固定为：
@@ -24,9 +24,9 @@ coop --arch=64bit install main/ripgrep
 
 ### update 参数与预览
 
-修复任务 [#103](https://github.com/Coh1e/coop/issues/103) 要求在状态迁移、运行记录和来源刷新之前完成 update 参数校验。未知长短选项、空包名、重复 `--dry-run`、包名与 `*/-a/--all` 混用，以及 update 的 `--purge` 等无效参数退出 2；系统级写请求保持 `global-scope-readonly`，退出 1。`--force`、`--no-cache`、`--skip-hash-check`、`--independent` 必须带包名或全部软件选择，不能在裸更新中被静默丢弃。全局选项的分离值不能吞掉后续开关（如 `--root --dry-run`）；以 `-` 开头的字面值使用等号形式或明确的相对路径，例如 `--root=--dry-run` 或 `--root .\--dry-run`。
+修复任务 [#103](https://github.com/Coh1e/burrow/issues/103) 要求在状态迁移、运行记录和来源刷新之前完成 update 参数校验。未知长短选项、空包名、重复 `--dry-run`、包名与 `*/-a/--all` 混用，以及 update 的 `--purge` 等无效参数退出 2；系统级写请求保持 `global-scope-readonly`，退出 1。`--force`、`--no-cache`、`--skip-hash-check`、`--independent` 必须带包名或全部软件选择，不能在裸更新中被静默丢弃。全局选项的分离值不能吞掉后续开关（如 `--root --dry-run`）；以 `-` 开头的字面值使用等号形式或明确的相对路径，例如 `--root=--dry-run` 或 `--root .\--dry-run`。
 
-指定本地软件或全部软件的 `update --dry-run` 不迁移旧状态、不写运行记录、不刷新来源、不修改软件。当前尚不能完成裸更新和清单 URL 的完整预览：这两种预览明确退出 1，说明能力不足，不执行刷新，也不把 URL 清单写入私有缓存。完整客户端和来源预览仍属于 [status/update 总规格 #102](https://github.com/Coh1e/coop/issues/102) 的后续任务，本修复不宣称已实现。
+指定本地软件或全部软件的 `update --dry-run` 不迁移旧状态、不写运行记录、不刷新来源、不修改软件。当前尚不能完成裸更新和清单 URL 的完整预览：这两种预览明确退出 1，说明能力不足，不执行刷新，也不把 URL 清单写入私有缓存。完整客户端和来源预览仍属于 [status/update 总规格 #102](https://github.com/Coh1e/burrow/issues/102) 的后续任务，本修复不宣称已实现。
 
 回归入口为 CTest `update_safety`：使用项目内 Git 来源及独立安装根，对比安装根、共享 Git、遗留状态和外部状态的内容与文件时间，同时验证退出码。该测试也覆盖正常软件文本/JSON 预览及空软件集合。
 
@@ -47,8 +47,8 @@ coop --arch=64bit install main/ripgrep
 ## 3. Unicode、空格与输出编码
 
 - 包名、bucket 名、入口名、`bin` 别名和根路径中的中文、空格及 `#`、`&`、`%`、方括号、圆括号等普通路径字符按 UTF-8/宽字符传递；不会按包名或词法改写。
-- 标准输出与标准错误固定写 UTF-8。连接到真实控制台时，Coop 在进程内临时把控制台输出代码页切到 UTF-8，退出前刷新缓冲并恢复原代码页；重定向到管道或文件时字节保持 UTF-8，不随系统 ANSI 代码页变化。
-- PowerShell 7 在输出被重定向时会用当前 `[Console]::OutputEncoding` 解码子进程输出。读取 Coop JSON 的脚本应显式设置 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`（`tests/path-batch.ps1` 已这样做），否则系统 ANSI 代码页会把 UTF-8 字节显示成乱码；这不是 Coop 输出了另一种编码。
+- 标准输出与标准错误固定写 UTF-8。连接到真实控制台时，Burrow 在进程内临时把控制台输出代码页切到 UTF-8，退出前刷新缓冲并恢复原代码页；重定向到管道或文件时字节保持 UTF-8，不随系统 ANSI 代码页变化。
+- PowerShell 7 在输出被重定向时会用当前 `[Console]::OutputEncoding` 解码子进程输出。读取 Burrow JSON 的脚本应显式设置 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`（`tests/path-batch.ps1` 已这样做），否则系统 ANSI 代码页会把 UTF-8 字节显示成乱码；这不是 Burrow 输出了另一种编码。
 - 命令入口的参数转发沿用现有 Windows 命令行引用规则；本票只验证复杂路径与入口运行，不改变入口宿主语义。
 
 ## 4. 批量结果
@@ -66,7 +66,7 @@ coop --arch=64bit install main/ripgrep
 `--global-root`（或默认发现的系统级根）只作为安装事实来源：
 
 - `list --json` 的系统级项带 `"scope": "global"` 与 `"read_only": true`；查询、`info` 和预览可读取它们。
-- 仅存在于系统级根的包，`update`、`uninstall`、`reset` 在执行前被拒绝，错误包含稳定标记 `global-scope-readonly` 并给出该根路径；不会写入系统级根，也不会创建当前用户的 `.coop`。
+- 仅存在于系统级根的包，`update`、`uninstall`、`reset` 在执行前被拒绝，错误包含稳定标记 `global-scope-readonly` 并给出该根路径；不会写入系统级根，也不会创建当前用户的 `.burrow`。
 - 对这类包执行当前用户级 `install` 仍是合法的用户范围写入：计划与结果带 `global_installation: {scope: global, read_only: true, directory: ...}`，安装只写当前用户根，系统级根保持逐字节不变。之后 `list` 仍同时显示两个范围，用户级卸载只影响用户级安装。
 - 批量卸载同时包含用户级包与仅系统级包时，用户级项可成功、系统级项以 `global-scope-readonly` 失败，整体退出码为 1，系统级根不变。
 - 没有 `--global` 写入开关；默认系统级软件管理仍不在产品范围内。
@@ -88,9 +88,9 @@ coop --arch=64bit install main/ripgrep
 | --- | --- |
 | 代码基线 | 本票提交 `HEAD`（报告与 Issue 评论记录完整 SHA） |
 | 平台 | Windows 11 Pro N for Workstations 10.0.26300 build 26300，x64 |
-| 工具 | Coop 0.1.0；MSVC 14.51.36231；CMake 4.4.4；Ninja；PowerShell 7.6.5（测试宿主），Windows PowerShell 5.1.26100.9711（外层） |
+| 工具 | Burrow 0.1.0；MSVC 14.51.36231；CMake 4.4.4；Ninja；PowerShell 7.6.5（测试宿主），Windows PowerShell 5.1.26100.9711（外层） |
 | 构建 | `scripts/build.ps1 -Action build`，退出码 0（本轮运行；最终代码构建见 `build-07.log`） |
-| 定向测试 | `pwsh -File tests/path-batch.ps1 -CoopExe .local/build/coop.exe -TestRoot ".local/tests/path-batch 中文 space"`，退出码 0，`PASS CLI path boundaries, exit codes, long roots and per-package batch outcomes`（本轮运行；中间失败与修复见同目录编号日志） |
+| 定向测试 | `pwsh -File tests/path-batch.ps1 -BurrowExe .local/build/burrow.exe -TestRoot ".local/tests/path-batch 中文 space"`，退出码 0，`PASS CLI path boundaries, exit codes, long roots and per-package batch outcomes`（本轮运行；中间失败与修复见同目录编号日志） |
 | 完整 CTest | `scripts/build.ps1 -Action test`，40/40 通过，`path_batch` 6.26 s（本轮运行，代码提交 6059c71；后续 `main.cpp` 控制台诊断修复由定向测试覆盖） |
 | 真实 Scoop 根 | 本票未在真实 Scoop 根执行写入；只读/写入路径由项目内真实 CLI 测试与既有真实根证据覆盖（未运行项） |
 
@@ -100,7 +100,7 @@ coop --arch=64bit install main/ripgrep
 - `.local/pi/tasks/39/evidence/path-batch-10.*.log`：定向测试全绿（`path-batch-01` 至 `-09` 保留每轮失败/修复证据，未覆盖改写）；
 - `.local/pi/tasks/39/evidence/build-tests-02.log`：完整 CTest 40/40（代码提交 6059c71）；
 - `.local/pi/tasks/39/evidence/ctest-final-302f520.log`：最终代码提交 `302f520` 上的定向 `cli` 与 `path_batch` 复测；文档提交后的同一代码复测见 `ctest-final-f59085d.log` 及报告记录的最终提交日志；
-- `.local/pi/tasks/39/evidence/environment.json`：平台、工具、基线与 Coop 版本。
+- `.local/pi/tasks/39/evidence/environment.json`：平台、工具、基线与 Burrow 版本。
 
 ## 7. 未覆盖与后续
 

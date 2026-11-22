@@ -4,7 +4,7 @@
 #include <functional>
 #include <string>
 
-namespace coop {
+namespace burrow {
 // One downloaded artifact, as the execution layer knows it. The execution layer no longer decides
 // which mechanism applies extract_dir, and no longer knows whether a mechanism unpacks into its own
 // working tree first: both are facts about the payload, not about the install plan.

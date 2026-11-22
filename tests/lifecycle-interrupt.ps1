@@ -1,6 +1,6 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
@@ -14,7 +14,7 @@ $client = $null
 try {
     @{version='1';url="http://127.0.0.1:$port/fixture.exe";hash=('0'*64);bin='fixture.exe'} | ConvertTo-Json | Set-Content "$root/buckets/test/bucket/fixture.json" -Encoding utf8
     $connection = $listener.AcceptTcpClientAsync()
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -22,14 +22,14 @@ try {
     $process = [Diagnostics.Process]::Start($start)
     if (-not $connection.Wait(15000)) { throw 'native downloader did not connect to local listener' }
     $client = $connection.GetAwaiter().GetResult()
-    $journals = @(Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json)
+    $journals = @(Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json)
     if ($journals.Count -ne 1 -or (Get-Content $journals[0].FullName -Raw | ConvertFrom-Json).state -ne 'pending') { throw 'network mutation started without prior pending journal' }
     $process.Kill()
     $process.WaitForExit()
-    if ((Test-Path "$root/apps/fixture/current") -or (Test-Path "$root/.coop/packages/fixture.json")) { throw 'interrupted install published success' }
-    $retry = Invoke-CoopNative $CoopExe  --root $root install test/fixture --json
+    if ((Test-Path "$root/apps/fixture/current") -or (Test-Path "$root/.burrow/packages/fixture.json")) { throw 'interrupted install published success' }
+    $retry = Invoke-BurrowNative $BurrowExe  --root $root install test/fixture --json
     if ($LASTEXITCODE -eq 0 -or ($retry -join "`n") -notlike '*Pending transaction requires recovery*') { throw 'pending transaction was silently ignored' }
-    $query = & $CoopExe --root $root list --json
+    $query = & $BurrowExe --root $root list --json
     if ($LASTEXITCODE -ne 0) { throw 'pending writer blocked read-only query' }
     @{root=$root;interrupted_exit=$process.ExitCode;journal=$journals[0].FullName;retry_refused=$true;query_available=$true} | ConvertTo-Json | Set-Content "$root/evidence.json" -Encoding utf8
     Write-Output "PASS actual download interruption/pending/read-only query: $root/evidence.json"

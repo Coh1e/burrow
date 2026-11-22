@@ -1,19 +1,19 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # R13 / #34: real Inno Setup artifact lifecycle through the real CLI in a project-local Scoop
 # layout. The vendor setup.exe is never executed: the separately installed innounp helper unpacks
 # exactly the Inno directory Scoop's Expand-InnoArchive selects. Real GNU Units 2.27/2.26 setups
 # provide install, update and failure evidence; a real rizin installer provides the relative
 # extract_dir ({app}\bin) layout. The helper is provisioned from its pinned Scoop package archive
-# and must remain byte-identical, proving Coop neither downloads nor replaces it.
+# and must remain byte-identical, proving Burrow neither downloads nor replaces it.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-$coopDirectory = Split-Path $CoopExe
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+$burrowDirectory = Split-Path $BurrowExe
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
-$guard = Join-Path $coopDirectory 'process_guard.exe'
+$guard = Join-Path $burrowDirectory 'process_guard.exe'
 $units227 = Join-Path $archives 'units-2.27-setup.exe'
 $units226 = Join-Path $archives 'units-2.26-setup.exe'
 $rizin = Join-Path $archives 'rizin-0.9.1-installer.exe'
@@ -25,7 +25,7 @@ foreach ($path in @($guard,$units227,$units226,$rizin,$innounpArchive,$pwshPath)
 
 $root = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$root/buckets/main/bucket","$root/temp","$root/build","$root/programs","$root/apps/innounp/current" -Force | Out-Null
-# The helper is a normal Scoop package installed in this root, never something Coop ships.
+# The helper is a normal Scoop package installed in this root, never something Burrow ships.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::ExtractToDirectory($innounpArchive,"$root/apps/innounp/current")
 # The helper is a normal shared Scoop installation: give it the same records Scoop would write so
@@ -53,7 +53,7 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    # Coop emits UTF-8 JSON and diagnostics; decode both streams as UTF-8 so a test root with
+    # Burrow emits UTF-8 JSON and diagnostics; decode both streams as UTF-8 so a test root with
     # non-ASCII characters is reported, not mangled by the console code page.
     $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
     $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
@@ -61,7 +61,7 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     foreach ($argument in $arguments) { Add-ProcessArgument $start ($argument) }
     $start.EnvironmentVariables['TEMP'] = "$root/temp"
     $start.EnvironmentVariables['TMP'] = "$root/temp"
-    $start.EnvironmentVariables['COOP_PROGRAMS_DIR'] = "$root/programs"
+    $start.EnvironmentVariables['BURROW_PROGRAMS_DIR'] = "$root/programs"
     foreach ($key in $environment.Keys) { $start.EnvironmentVariables[$key] = $environment[$key] }
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
@@ -73,43 +73,43 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ("$root/run-{0:d2}-{1}.json" -f $script:runs,$label) -Encoding utf8
     return $result
 }
-function Invoke-Coop([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $CoopExe $arguments $environment
+function Invoke-Burrow([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
+    return Invoke-Process $label $BurrowExe $arguments $environment
 }
 # The guard observes the real process tree. Installs and updates legitimately start the declared
 # innounp helper, so children are allowed but must be named and must include no vendor setup or
 # msiexec process. Previews, uninstalls and blocked operations must start no child at all.
 function Invoke-Guarded([string]$label,[string[]]$arguments,[bool]$allowHelper) {
     $environment = @{}
-    $previousTimeout = $env:COOP_PROCESS_GUARD_TIMEOUT_MS
-    $previousChildren = $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN
-    $env:COOP_PROCESS_GUARD_TIMEOUT_MS = '120000'
-    if ($allowHelper) { $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN = '1' }
-    try { return Invoke-Process $label $guard (@($CoopExe)+$arguments) $environment }
+    $previousTimeout = $env:BURROW_PROCESS_GUARD_TIMEOUT_MS
+    $previousChildren = $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN
+    $env:BURROW_PROCESS_GUARD_TIMEOUT_MS = '120000'
+    if ($allowHelper) { $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN = '1' }
+    try { return Invoke-Process $label $guard (@($BurrowExe)+$arguments) $environment }
     finally {
-        if ($null -eq $previousTimeout) { Remove-Item Env:COOP_PROCESS_GUARD_TIMEOUT_MS -ErrorAction SilentlyContinue }
-        else { $env:COOP_PROCESS_GUARD_TIMEOUT_MS = $previousTimeout }
-        if ($null -eq $previousChildren) { Remove-Item Env:COOP_PROCESS_GUARD_ALLOW_CHILDREN -ErrorAction SilentlyContinue }
-        else { $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN = $previousChildren }
+        if ($null -eq $previousTimeout) { Remove-Item Env:BURROW_PROCESS_GUARD_TIMEOUT_MS -ErrorAction SilentlyContinue }
+        else { $env:BURROW_PROCESS_GUARD_TIMEOUT_MS = $previousTimeout }
+        if ($null -eq $previousChildren) { Remove-Item Env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN -ErrorAction SilentlyContinue }
+        else { $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN = $previousChildren }
     }
 }
 function Assert-Workloads($result,[bool]$allowHelper) {
     $names = @([regex]::Matches($result.error,'Workload process: (.+)') | ForEach-Object { $_.Groups[1].Value.Trim() })
     Check ($names.Count -eq ($(if ($allowHelper) { 2 } else { 1 }))) "unexpected workload processes: $($names -join '; ') ($($result.error))"
-    Check ($names[0] -match 'coop\.exe$') "first workload process is not coop.exe: $($names -join '; ')"
+    Check ($names[0] -match 'burrow\.exe$') "first workload process is not burrow.exe: $($names -join '; ')"
     Check (-not ($names -match '(?i)msiexec|setup\.exe')) "a vendor installer process was started: $($names -join '; ')"
     if ($allowHelper) {
         Check ($names[1] -match 'innounp\.exe$') "the only extra workload process is not innounp.exe: $($names -join '; ')"
-        Check ($result.error -match 'Observed workload processes: 2') "the guard did not observe exactly coop and innounp: $($result.error)"
+        Check ($result.error -match 'Observed workload processes: 2') "the guard did not observe exactly burrow and innounp: $($result.error)"
     } else {
-        Check ($result.error -match 'Observed workload processes: 1') "coop started an unexpected child process: $($result.error)"
+        Check ($result.error -match 'Observed workload processes: 1') "burrow started an unexpected child process: $($result.error)"
     }
 }
 function Parse-Json([string]$label,$result) {
     try { return $result.output | ConvertFrom-Json } catch { throw "$label did not print JSON: $($result.output)" }
 }
 function Last-Journal([string]$package) {
-    $journals = @(Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
+    $journals = @(Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } |
         Where-Object { $_.package -eq $package })
@@ -155,7 +155,7 @@ Check ($plan.artifacts[0].requires_elevation -eq $false -and $plan.artifacts[0].
 $facts = $plan.package.inno_setup
 Check ($facts.mechanism -match 'innounp' -and $facts.helper_available -eq $true -and $facts.installer_executed -eq $false) 'Inno preview does not describe the external helper mechanism'
 Check (Same-Path $facts.helper $helperExecutable) "Inno preview does not name the helper in the selected root: $($facts.helper)"
-Check ($facts.helper_policy -match 'software dependency' -and $facts.helper_policy -match 'never downloads') 'Inno preview does not separate the helper from Coop core dependencies'
+Check ($facts.helper_policy -match 'software dependency' -and $facts.helper_policy -match 'never downloads') 'Inno preview does not separate the helper from Burrow core dependencies'
 Check ($facts.elevation -match 'not requested' -and $facts.reboot -match 'not required' -and
     $facts.installer_effects -match 'not executed' -and $facts.selection -match '-c\{app\}') 'Inno preview does not state the permission, reboot and effect boundary'
 Check (@($plan.external_tools).Count -eq 1 -and $plan.external_tools[0].name -match '^innounp' -and
@@ -166,7 +166,7 @@ Check (@($plan.capabilities | Where-Object { $_.id -eq 'inno-setup' -and $_.supp
 Check (@($plan.diagnostics | Where-Object { $_.code -eq 'execution-blocked' }).Count -eq 0) 'Inno preview reports an execution blocker'
 Check ($plan.lifecycle_checks.inno_setup -match 'innounp') 'Inno lifecycle check does not name the helper'
 Check ((@($plan.ir_operations | ForEach-Object { $_.operation }) -join ',') -eq 'download,verify,extract,publish-current,entries,persistence,commit-state') 'Inno plan does not carry the expected operation order'
-Check (-not (Test-Path -LiteralPath "$root/apps/units") -and -not (Test-Path -LiteralPath "$root/.coop/transactions")) 'Inno preview wrote installation state'
+Check (-not (Test-Path -LiteralPath "$root/apps/units") -and -not (Test-Path -LiteralPath "$root/.burrow/transactions")) 'Inno preview wrote installation state'
 Check ((Helper-Snapshot) -join "`n" -eq ($helperBefore -join "`n")) 'the preview changed the helper package'
 
 # --- 2. Install the real 2.26 Inno Setup artifact. ----------------------------------------------
@@ -189,7 +189,7 @@ $conversion = Invoke-Process 'units-convert' "$root/shims/units.exe" @('1 mile',
 if ($conversion.exit -ne 0 -and [string]::IsNullOrWhiteSpace($conversion.output)) {
     # GNU Units loads its conversion table from a data file next to the executable or from UNITSFILE.
     # A host that ships a build without that table runs (the version check above passed) but cannot
-    # convert; skip the conversion rather than reporting it as a coop defect.
+    # convert; skip the conversion rather than reporting it as a burrow defect.
     Write-Output "skipped units conversion: this build reported no output and exit $($conversion.exit)"
 } else {
     Check ($conversion.exit -eq 0 -and $conversion.output -match '1\.609344') "the installed program cannot convert units: $($conversion.output)"
@@ -210,8 +210,8 @@ Check ($innoRecord.selection -eq '-c{app}' -and $innoRecord.installer_executed -
 Check ($innoRecord.files -eq 15 -and $innoRecord.bytes -gt 2000000) "Inno journal extraction totals are wrong: $($innoRecord.files) files, $($innoRecord.bytes) bytes"
 Check ($innoRecord.stdout_tail -match 'Inno Setup version detected:  6\.6\.0' -and $innoRecord.stdout_tail -match '#15 \{app\}\\unitsfile\.ico - extracted') 'Inno journal does not keep the helper output'
 Check ((Helper-Snapshot) -join "`n" -eq ($helperBefore -join "`n")) 'the install changed the helper package'
-$installedList = Invoke-Coop 'inno-list' @('--root',$root,'list','--json')
-Check ($installedList.exit -eq 0 -and $installedList.output -match 'units') 'Coop list does not see the Inno installation'
+$installedList = Invoke-Burrow 'inno-list' @('--root',$root,'list','--json')
+Check ($installedList.exit -eq 0 -and $installedList.output -match 'units') 'Burrow list does not see the Inno installation'
 $image226 = Get-TreeSnapshot $versionDirectory
 
 # --- 3. Update to the real 2.27 artifact and keep the old version. ------------------------------
@@ -266,8 +266,8 @@ try {
     Check ($missing.exit -ne 0) 'missing-helper install unexpectedly succeeded'
     Check ($missing.error -match 'innounp' -and $missing.error -match 'never downloads') "missing-helper failure is not explicit: $($missing.error)"
     Assert-Workloads $missing $false
-    Check (-not (Test-Path -LiteralPath "$root/apps/missing") -and -not (Test-Path -LiteralPath "$root/.coop/packages/missing.json")) 'missing-helper install wrote package state'
-    Check (-not (Test-Path -LiteralPath "$root/apps/innounp")) 'Coop downloaded or recreated the helper'
+    Check (-not (Test-Path -LiteralPath "$root/apps/missing") -and -not (Test-Path -LiteralPath "$root/.burrow/packages/missing.json")) 'missing-helper install wrote package state'
+    Check (-not (Test-Path -LiteralPath "$root/apps/innounp")) 'Burrow downloaded or recreated the helper'
 } finally {
     Rename-Item -LiteralPath "$root/apps/innounp-absent" -NewName 'innounp'
 }
@@ -314,7 +314,7 @@ Check ((Helper-Snapshot) -join "`n" -eq ($helperBefore -join "`n")) 'the lifecyc
     root=$root
     checks=$script:checks
     runs=$script:runs
-    coop_sha256=(File-Hash $CoopExe)
+    burrow_sha256=(File-Hash $BurrowExe)
     powershell=$pwshPath
     helper=@{path=$helperExecutable;sha256=$helperHash;archive=$innounpArchive;archive_sha256=(File-Hash $innounpArchive);unchanged=$true}
     artifacts=@(

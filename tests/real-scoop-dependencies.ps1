@@ -1,12 +1,12 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [string]$ScoopRoot = 'C:\Users\Neo\scoop'
 )
 $ErrorActionPreference = 'Stop'
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 New-Item -ItemType Directory -Path $EvidenceDir -Force | Out-Null
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot)
 $scoop = (Get-Command scoop.ps1 -ErrorAction Stop).Source
 $commands = [System.Collections.Generic.List[object]]::new()
@@ -19,13 +19,13 @@ function Run([string]$name,[string]$exe,[string[]]$arguments) {
     $commands.Add([pscustomobject]@{name=$name;exe=$exe;arguments=$arguments;exit=$exit;log=$log})
     return [pscustomobject]@{exit=$exit;output=$output;log=$log}
 }
-function Coop([string]$name,[string[]]$arguments) { return Run $name $CoopExe (@('--root',$ScoopRoot)+$arguments) }
+function Burrow([string]$name,[string[]]$arguments) { return Run $name $BurrowExe (@('--root',$ScoopRoot)+$arguments) }
 function Scoop([string]$name,[string[]]$arguments) { return Run $name $scoop $arguments }
 function Assert-True([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
 function Read-Json([object]$output) { return (($output -join "`n") | ConvertFrom-Json) }
 function HashOf([string]$path) { return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLower() }
 function InstalledEntry([string]$name) {
-    $items = (Coop ($name+'-list') @('list','--json')).output | ConvertFrom-Json
+    $items = (Burrow ($name+'-list') @('list','--json')).output | ConvertFrom-Json
     $entry = @($items | Where-Object { $_.name -eq $name -and ($_.status -eq 'installed' -or $_.status -eq 'ready') })
     if ($entry.Count -eq 0) { return $null }
     if ($entry.Count -ne 1) { throw "Duplicate installed entries for $name" }
@@ -38,7 +38,7 @@ function Assert-PlanMatchesJournal($plan,$journal,[string]$name) {
     return [pscustomobject]@{planned=$planned;observed=$observed}
 }
 try {
-    $inventoryBefore = (Coop 'coop-list-before' @('list','--json')).output | ConvertFrom-Json
+    $inventoryBefore = (Burrow 'burrow-list-before' @('list','--json')).output | ConvertFrom-Json
     $gitBefore = @($inventoryBefore | Where-Object { $_.name -eq 'git' })
     Assert-True ($gitBefore.Count -eq 1) 'The selected real Scoop root does not contain exactly one git installation'
     if (Test-Path "$ScoopRoot/apps/git-tfs/current") { throw 'git-tfs is already installed; refusing to change the selected real root' }
@@ -51,7 +51,7 @@ try {
 
     # A real Main Manifest (git-tfs) declares depends: git. Preview resolves it from the real
     # installed git and produces the dependency's own IR sequence without writing product state.
-    $preview = Coop 'git-tfs-preview' @('install','git-tfs','--dry-run','--json')
+    $preview = Burrow 'git-tfs-preview' @('install','git-tfs','--dry-run','--json')
     Assert-True ($preview.exit -eq 0) "real dependency preview failed: $($preview.output)"
     $plan = Read-Json $preview.output
     Assert-True ($plan.execution_available -eq $true) 'real dependency preview was not executable'
@@ -64,11 +64,11 @@ try {
     Assert-True (@($gitPlan.ir_operations).Count -eq 0) 'a satisfied dependency unexpectedly has installation operations'
     Assert-True ($rootPlan.package -eq 'git-tfs' -and $rootPlan.status -eq 'planned' -and @($rootPlan.ir_operations).Count -gt 0) 'preview omitted the requested package operation sequence'
     Assert-True (-not (Test-Path "$ScoopRoot/apps/git-tfs")) 'dependency preview wrote a product installation'
-    Assert-True (-not (Test-Path "$ScoopRoot/.coop/packages/git-tfs.json")) 'dependency preview wrote a Coop record'
+    Assert-True (-not (Test-Path "$ScoopRoot/.burrow/packages/git-tfs.json")) 'dependency preview wrote a Burrow record'
 
     # Execute the same plan: the installed dependency is skipped and the requested package is
     # installed in its own transaction. The journal proves the displayed root operations ran.
-    $install = Coop 'git-tfs-install' @('install','git-tfs','--json')
+    $install = Burrow 'git-tfs-install' @('install','git-tfs','--json')
     Assert-True ($install.exit -eq 0) "real dependency install failed: $($install.output)"
     $installedByTest.Add('git-tfs')
     $result = Read-Json $install.output
@@ -78,18 +78,18 @@ try {
     Assert-True ($packages[1].package -eq 'git-tfs' -and $packages[1].status -eq 'success' -and $packages[1].requested -eq $true) 'requested real package was not installed after its dependency'
     $journal = Get-Content -LiteralPath $packages[1].journal -Raw | ConvertFrom-Json
     $planMatch = Assert-PlanMatchesJournal $plan $journal 'git-tfs'
-    $record = Get-Content -LiteralPath "$ScoopRoot/.coop/packages/git-tfs.json" -Raw | ConvertFrom-Json
-    Assert-True ('git' -in @($record.dependencies)) 'the Coop record did not preserve the declared real dependency'
+    $record = Get-Content -LiteralPath "$ScoopRoot/.burrow/packages/git-tfs.json" -Raw | ConvertFrom-Json
+    Assert-True ('git' -in @($record.dependencies)) 'the Burrow record did not preserve the declared real dependency'
     $gitTfsRun = Run 'git-tfs-run' "$ScoopRoot/shims/git-tfs.exe" @('--version')
     Assert-True ($gitTfsRun.exit -eq 0 -and $gitTfsRun.output.Trim().Length -gt 0) "installed git-tfs did not run: $($gitTfsRun.output)"
 
-    # Reverse protection includes the real installed package's declared dependents. The Coop-
+    # Reverse protection includes the real installed package's declared dependents. The Burrow-
     # installed git-tfs blocks git removal in both preview and execution.
-    $blockedPreview = Coop 'git-uninstall-preview' @('uninstall','git','--dry-run','--json')
+    $blockedPreview = Burrow 'git-uninstall-preview' @('uninstall','git','--dry-run','--json')
     Assert-True ($blockedPreview.exit -ne 0) 'blocked reverse-dependency preview unexpectedly succeeded'
     Assert-True (($blockedPreview.output -join "`n") -match 'blocking_dependents' -and ($blockedPreview.output -join "`n") -match 'git-tfs') 'reverse-dependency preview did not list git-tfs'
     Assert-True (Test-Path "$ScoopRoot/apps/git/current") 'blocked uninstall preview changed git'
-    $blocked = Coop 'git-uninstall' @('uninstall','git','--json')
+    $blocked = Burrow 'git-uninstall' @('uninstall','git','--json')
     Assert-True ($blocked.exit -ne 0) 'blocked reverse-dependency uninstall unexpectedly succeeded'
     Assert-True (($blocked.output -join "`n") -match 'git-tfs') 'blocked uninstall did not explain the dependent'
     $gitRunBlocked = Run 'git-after-blocked-uninstall' "$ScoopRoot/shims/git.exe" @('--version')
@@ -97,7 +97,7 @@ try {
 
     # Removing the dependent does not cascade to git. git remains installed and runnable until an
     # explicit uninstall is requested.
-    $remove = Coop 'git-tfs-uninstall' @('uninstall','git-tfs','--json')
+    $remove = Burrow 'git-tfs-uninstall' @('uninstall','git-tfs','--json')
     Assert-True ($remove.exit -eq 0) "real dependent uninstall failed: $($remove.output)"
     $installedByTest.Remove('git-tfs') | Out-Null
     Assert-True (-not (Test-Path "$ScoopRoot/apps/git-tfs/current")) 'dependent uninstall left git-tfs current'
@@ -109,19 +109,19 @@ try {
 
     # A real missing dependency is diagnosed before any write. Main/terraform-provider-ibm
     # declares versions/terraform011, which is not present in the selected buckets.
-    $missing = Coop 'terraform-provider-ibm-missing-preview' @('install','terraform-provider-ibm','--dry-run','--json')
+    $missing = Burrow 'terraform-provider-ibm-missing-preview' @('install','terraform-provider-ibm','--dry-run','--json')
     Assert-True ($missing.exit -ne 0) 'preview with a missing real dependency unexpectedly succeeded'
     Assert-True (($missing.output -join "`n") -match 'dependency-missing' -and ($missing.output -join "`n") -match 'versions/terraform011') 'missing real dependency was not diagnosed with its source identity'
     Assert-True (-not (Test-Path "$ScoopRoot/apps/terraform-provider-ibm")) 'missing dependency preview wrote a product installation'
 
-    $inventoryAfter = (Coop 'coop-list-after' @('list','--json')).output | ConvertFrom-Json
+    $inventoryAfter = (Burrow 'burrow-list-after' @('list','--json')).output | ConvertFrom-Json
     $beforeNames = @($inventoryBefore | ForEach-Object { "$($_.name)@$($_.version)" } | Sort-Object)
     $afterNames = @($inventoryAfter | ForEach-Object { "$($_.name)@$($_.version)" } | Sort-Object)
     Assert-True (($beforeNames -join '|') -eq ($afterNames -join '|')) 'the shared installation inventory changed outside the test'
     $evidence = [pscustomobject]@{
-        coop_exe = $CoopExe
-        coop_sha256 = (HashOf $CoopExe)
-        coop_version = (& $CoopExe --version | Out-String).Trim()
+        burrow_exe = $BurrowExe
+        burrow_sha256 = (HashOf $BurrowExe)
+        burrow_version = (& $BurrowExe --version | Out-String).Trim()
         scoop_version = $scoopVersion
         main_bucket_revision = $gitBucketHead
         scoop_root = $ScoopRoot
@@ -145,7 +145,7 @@ try {
 } finally {
     foreach ($name in @($installedByTest)) {
         if (Test-Path "$ScoopRoot/apps/$name/current") {
-            $cleanup = Coop ($name+'-cleanup') @('uninstall',$name,'--json')
+            $cleanup = Burrow ($name+'-cleanup') @('uninstall',$name,'--json')
             if ($cleanup.exit -ne 0) { Write-Warning "Could not clean up test installation $name : $($cleanup.output)" }
         }
     }

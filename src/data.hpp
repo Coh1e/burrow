@@ -3,7 +3,7 @@
 #include "ir.hpp"
 #include <nlohmann/json.hpp>
 
-namespace coop {
+namespace burrow {
 using Json = nlohmann::json;
 struct OperationResult;
 // Wire adapter for the standard-type operation model; the model header does not depend on JSON.
@@ -11,13 +11,13 @@ Json operation_result_json(const OperationResult& report);
 Json read_json(const fs::path& path);
 fs::path installed_record(const fs::path& directory, const std::wstring& kind);
 Json installed_packages(const Context& context);
-// Coop's private state lives outside the Scoop root: %USERPROFILE%\.coop\roots\<root>-<hash> by
-// default. COOP_STATE_DIR overrides it and expands %ROOT% per invocation, which is how the test
-// suite pins each test root without rewriting every <root>/.coop reference.
+// Burrow's private state lives outside the Scoop root: %USERPROFILE%\.burrow\roots\<root>-<hash> by
+// default. BURROW_STATE_DIR overrides it and expands %ROOT% per invocation, which is how the test
+// suite pins each test root without rewriting every <root>/.burrow reference.
 fs::path state_directory(const Context& context);
 fs::path state_directory_for_root(const fs::path& root);
 fs::path state_cache_directory(const Context& context);
-// First-run move of a legacy <root>/.coop into the state directory. A no-op when COOP_STATE_DIR
+// First-run move of a legacy <root>/.burrow into the state directory. A no-op when BURROW_STATE_DIR
 // already points at the legacy path; failures keep the old directory and only warn.
 void migrate_legacy_state(const Context& context);
 // Move a file or directory, falling back to copy + delete when source and destination are on
@@ -37,7 +37,7 @@ void note_durable_sync();
 // Write-through flush that the counter sees. Every durability decision goes through it, so a test can
 // tell "we stopped flushing per file" from "we started again".
 bool durable_flush(void* file);
-// Removes a Coop-managed tree. Reparse points are unlinked instead of followed, and the read-only
+// Removes a Burrow-managed tree. Reparse points are unlinked instead of followed, and the read-only
 // attribute Scoop keeps on persist junctions (attrib +R /L) is cleared before unlinking.
 void erase_tree(const fs::path& path);
 void validate_component(const std::string& value);

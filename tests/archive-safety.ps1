@@ -1,20 +1,20 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
 # System.Formats.Tar (used below to build symlink/hardlink fixtures) ships with .NET 7+; Windows
 # PowerShell 5.1 runs on .NET Framework 4.8 and does not have it. Hand-building the tar would test our
-# tar writer rather than coop, so the suite is skipped there and says so.
+# tar writer rather than burrow, so the suite is skipped there and says so.
 if ($null -eq ('System.Formats.Tar.TarWriter' -as [type])) {
     Write-Output 'archive safety: SKIPPED (System.Formats.Tar needs .NET 7+, absent in Windows PowerShell 5.1)'
     exit 0
 }
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
-$fixture1 = Join-Path (Split-Path $CoopExe) 'fixture-1.exe'
+$fixture1 = Join-Path (Split-Path $BurrowExe) 'fixture-1.exe'
 $rg14 = Join-Path $archives 'ripgrep-14.1.1-x86_64-pc-windows-msvc.zip'
 foreach ($path in @($rg14,$fixture1)) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing fixed test input: $path; run scripts/fetch-deps.ps1" } }
 
@@ -29,7 +29,7 @@ function Write-Manifest([string]$root,[string]$name,[object]$manifest) {
 }
 function Assert-Failed([string]$message,[string]$output) {
     if ($LASTEXITCODE -eq 0) { throw $message }
-    if ($output -notmatch 'coop:') { throw "$message (missing diagnostic output)" }
+    if ($output -notmatch 'burrow:') { throw "$message (missing diagnostic output)" }
 }
 function First-Version([string]$output) { return ($output | Where-Object { $_ -match '\S' } | Select-Object -First 1) }
 function New-Zip([string]$path,[hashtable]$entries) {
@@ -67,19 +67,19 @@ $fixtures = Join-Path $root 'fixtures'; New-Item -ItemType Directory -Path $fixt
 $bad = Join-Path $fixtures 'bad.zip'
 [IO.File]::WriteAllBytes($bad,[byte[]](1..256 | ForEach-Object { $_ % 251 }))
 Write-Manifest $root 'bad' @{version='1';url=(File-Uri $bad);hash=(Get-FileHash $bad -Algorithm SHA256).Hash.ToLower();bin='bad.exe'}
-$output = Invoke-CoopNative $CoopExe  --root $root install test/bad --json
+$output = Invoke-BurrowNative $BurrowExe  --root $root install test/bad --json
 Assert-Failed 'bad archive install unexpectedly succeeded' ($output -join "`n")
-if ((Test-Path "$root/apps/bad/current") -or (Test-Path "$root/.coop/packages/bad.json") -or (Test-Path "$root/shims/bad.exe")) { throw 'bad archive published state' }
+if ((Test-Path "$root/apps/bad/current") -or (Test-Path "$root/.burrow/packages/bad.json") -or (Test-Path "$root/shims/bad.exe")) { throw 'bad archive published state' }
 
 $root = New-TestRoot
 $fixtures = Join-Path $root 'fixtures'; New-Item -ItemType Directory -Path $fixtures -Force | Out-Null
 $missing = Join-Path $fixtures 'missing.zip'
 New-Zip $missing @{'other.txt'=[Text.Encoding]::UTF8.GetBytes('not the command')}
 Write-Manifest $root 'missing' @{version='1';url=(File-Uri $missing);hash=(Get-FileHash $missing -Algorithm SHA256).Hash.ToLower();bin='missing.exe'}
-$output = Invoke-CoopNative $CoopExe  --root $root install test/missing --json
+$output = Invoke-BurrowNative $BurrowExe  --root $root install test/missing --json
 Assert-Failed 'archive without command target unexpectedly succeeded' ($output -join "`n")
 if (($output -join "`n") -notmatch 'Command entry target is missing') { throw 'missing command target was not reported clearly' }
-if ((Test-Path "$root/apps/missing/current") -or (Test-Path "$root/.coop/packages/missing.json")) { throw 'missing command target published state' }
+if ((Test-Path "$root/apps/missing/current") -or (Test-Path "$root/.burrow/packages/missing.json")) { throw 'missing command target published state' }
 
 # Path traversal and link entries are rejected before any package publication.
 $root = New-TestRoot
@@ -87,30 +87,30 @@ $fixtures = Join-Path $root 'fixtures'; New-Item -ItemType Directory -Path $fixt
 $traversal = Join-Path $fixtures 'traversal.zip'
 New-Zip $traversal @{'../escape.exe'=[IO.File]::ReadAllBytes($fixture1)}
 Write-Manifest $root 'traversal' @{version='1';url=(File-Uri $traversal);hash=(Get-FileHash $traversal -Algorithm SHA256).Hash.ToLower();bin='escape.exe'}
-$output = Invoke-CoopNative $CoopExe  --root $root install test/traversal --json
+$output = Invoke-BurrowNative $BurrowExe  --root $root install test/traversal --json
 Assert-Failed 'path traversal archive unexpectedly succeeded' ($output -join "`n")
 if (($output -join "`n") -notmatch 'path|Unsafe|Invalid') { throw 'path traversal was not reported clearly' }
-if ((Test-Path "$root/apps/traversal/current") -or (Test-Path "$root/.coop/packages/traversal.json") -or (Test-Path "$root/escape.exe") -or (Test-Path "$TestRoot/escape.exe")) { throw 'path traversal escaped its package destination' }
+if ((Test-Path "$root/apps/traversal/current") -or (Test-Path "$root/.burrow/packages/traversal.json") -or (Test-Path "$root/escape.exe") -or (Test-Path "$TestRoot/escape.exe")) { throw 'path traversal escaped its package destination' }
 
 $root = New-TestRoot
 $fixtures = Join-Path $root 'fixtures'; New-Item -ItemType Directory -Path $fixtures -Force | Out-Null
 $link = Join-Path $fixtures 'link.tar'
 New-LinkTar $link
 Write-Manifest $root 'link' @{version='1';url=(File-Uri $link);hash=(Get-FileHash $link -Algorithm SHA256).Hash.ToLower();bin='evil.exe'}
-$output = Invoke-CoopNative $CoopExe  --root $root install test/link --json
+$output = Invoke-BurrowNative $BurrowExe  --root $root install test/link --json
 Assert-Failed 'link archive unexpectedly succeeded' ($output -join "`n")
 if (($output -join "`n") -notmatch 'link') { throw 'link entry was not reported clearly' }
-if ((Test-Path "$root/apps/link/current") -or (Test-Path "$root/.coop/packages/link.json") -or (Test-Path "$root/evil.exe") -or (Test-Path "$TestRoot/evil.exe")) { throw 'link entry escaped its package destination' }
+if ((Test-Path "$root/apps/link/current") -or (Test-Path "$root/.burrow/packages/link.json") -or (Test-Path "$root/evil.exe") -or (Test-Path "$TestRoot/evil.exe")) { throw 'link entry escaped its package destination' }
 
 $root = New-TestRoot
 $fixtures = Join-Path $root 'fixtures'; New-Item -ItemType Directory -Path $fixtures -Force | Out-Null
 $hard = Join-Path $fixtures 'hardlink.tar'
 New-HardLinkTar $hard
 Write-Manifest $root 'hardlink' @{version='1';url=(File-Uri $hard);hash=(Get-FileHash $hard -Algorithm SHA256).Hash.ToLower();bin='hard.exe'}
-$output = Invoke-CoopNative $CoopExe  --root $root install test/hardlink --json
+$output = Invoke-BurrowNative $BurrowExe  --root $root install test/hardlink --json
 Assert-Failed 'hardlink archive unexpectedly succeeded' ($output -join "`n")
 if (($output -join "`n") -notmatch 'link') { throw 'hardlink entry was not reported clearly' }
-if ((Test-Path "$root/apps/hardlink/current") -or (Test-Path "$root/.coop/packages/hardlink.json")) { throw 'hardlink entry published state' }
+if ((Test-Path "$root/apps/hardlink/current") -or (Test-Path "$root/.burrow/packages/hardlink.json")) { throw 'hardlink entry published state' }
 
 # A rejected archive during update must leave the working current version and record intact.
 $root = New-TestRoot
@@ -118,18 +118,18 @@ function Write-Ripgrep([string]$version,[string]$url,[string]$hash) {
     Write-Manifest $root 'ripgrep' @{version=$version;architecture=@{'64bit'=@{url=$url;hash=$hash;extract_dir="ripgrep-$version-x86_64-pc-windows-msvc"}};bin='rg.exe'}
 }
 Write-Ripgrep '14.1.1' (File-Uri $rg14) 'd0f534024c42afd6cb4d38907c25cd2b249b79bbe6cc1dbee8e3e37c2b6e25a1'
-$install = & $CoopExe --root $root install test/ripgrep --json
+$install = & $BurrowExe --root $root install test/ripgrep --json
 if ($LASTEXITCODE -ne 0) { throw 'update safety baseline install failed' }
 $fixtures = Join-Path $root 'fixtures'; New-Item -ItemType Directory -Path $fixtures -Force | Out-Null
 $link = Join-Path $fixtures 'link.tar'
 New-LinkTar $link
 Write-Ripgrep '15.2.0' (File-Uri $link) (Get-FileHash $link -Algorithm SHA256).Hash.ToLower()
-$output = Invoke-CoopNative $CoopExe  --root $root update ripgrep --json
+$output = Invoke-BurrowNative $BurrowExe  --root $root update ripgrep --json
 Assert-Failed 'link archive update unexpectedly succeeded' ($output -join "`n")
 $version = First-Version (& "$root/shims/rg.exe" --version)
 if ($version -notlike 'ripgrep 14.1.1*') { throw 'rejected archive update changed the current entry' }
-if ((Test-Path "$root/apps/ripgrep/15.2.0") -or ([IO.File]::ReadAllText("$root/.coop/packages/ripgrep.json") | ConvertFrom-Json).version -ne '14.1.1') { throw 'rejected archive update changed publication state' }
-$journal = Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json | Sort-Object LastWriteTime | Select-Object -Last 1
+if ((Test-Path "$root/apps/ripgrep/15.2.0") -or ([IO.File]::ReadAllText("$root/.burrow/packages/ripgrep.json") | ConvertFrom-Json).version -ne '14.1.1') { throw 'rejected archive update changed publication state' }
+$journal = Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json | Sort-Object LastWriteTime | Select-Object -Last 1
 if ((Get-Content $journal.FullName -Raw | ConvertFrom-Json).state -ne 'rolled-back') { throw 'rejected archive update journal does not show rollback' }
 
 # A corrupt MSI database fails clearly at extraction without msiexec and without publishing state.
@@ -138,17 +138,17 @@ $brokenMsi = Join-Path $root 'fixtures/broken.msi'
 New-Item -ItemType Directory -Path (Split-Path $brokenMsi) -Force | Out-Null
 [IO.File]::WriteAllText($brokenMsi,'this is not an installer database',[Text.UTF8Encoding]::new($false))
 Write-Manifest $root 'msi' @{version='1';url=(File-Uri $brokenMsi);hash=(Get-FileHash -LiteralPath $brokenMsi -Algorithm SHA256).Hash.ToLower();bin='setup.exe'}
-$output = Invoke-CoopNative $CoopExe  --root $root install test/msi --json
+$output = Invoke-BurrowNative $BurrowExe  --root $root install test/msi --json
 Assert-Failed 'corrupt MSI archive unexpectedly succeeded' ($output -join "`n")
 if (($output -join "`n") -notmatch 'MSI database') { throw 'corrupt MSI failure was not reported clearly' }
-if ((Test-Path "$root/apps/msi/current") -or (Test-Path "$root/.coop/packages/msi.json")) { throw 'corrupt MSI published state' }
-$msiJournal = Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+if ((Test-Path "$root/apps/msi/current") -or (Test-Path "$root/.burrow/packages/msi.json")) { throw 'corrupt MSI published state' }
+$msiJournal = Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
 if ($msiJournal -and (Get-Content $msiJournal.FullName -Raw | ConvertFrom-Json).state -ne 'rolled-back') { throw 'corrupt MSI journal does not show rollback' }
 
 # Interrupted archive download keeps the previous current version and a pending journal.
 $root = New-TestRoot
 Write-Ripgrep '14.1.1' (File-Uri $rg14) 'd0f534024c42afd6cb4d38907c25cd2b249b79bbe6cc1dbee8e3e37c2b6e25a1'
-$install = & $CoopExe --root $root install test/ripgrep --json
+$install = & $BurrowExe --root $root install test/ripgrep --json
 if ($LASTEXITCODE -ne 0) { throw 'interruption baseline install failed' }
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start()
@@ -158,7 +158,7 @@ $client = $null
 try {
     Write-Manifest $root 'ripgrep' @{version='15.2.0';architecture=@{'64bit'=@{url="http://127.0.0.1:$port/slow.zip";hash='71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5';extract_dir='ripgrep-15.2.0-x86_64-pc-windows-msvc'}};bin='rg.exe'}
     $connection = $listener.AcceptTcpClientAsync()
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -176,7 +176,7 @@ try {
     $journal = $null
     for ($attempt = 0; $attempt -lt 100 -and -not $journal; $attempt++) {
         Start-Sleep -Milliseconds 100
-        $journal = Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
+        $journal = Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
             Where-Object { (Get-Content $_.FullName -Raw | ConvertFrom-Json).state -eq 'pending' } | Select-Object -Last 1
     }
     if (-not $journal) { throw 'interrupted archive update did not create a pending journal' }
@@ -186,9 +186,9 @@ try {
     if (-not (Test-Path "$root/apps/ripgrep/current") -or (Test-Path "$root/apps/ripgrep/15.2.0")) { throw 'interrupted archive update changed publication state' }
     $journalState = (Get-Content $journal.FullName -Raw | ConvertFrom-Json).state
     if ($journalState -ne 'pending') { throw "interrupted archive update journal is $journalState, not pending" }
-    $query = & $CoopExe --root $root list --json
+    $query = & $BurrowExe --root $root list --json
     if ($LASTEXITCODE -ne 0) { throw 'pending archive writer blocked read-only query' }
-    $retry = Invoke-CoopNative $CoopExe  --root $root update ripgrep --json
+    $retry = Invoke-BurrowNative $BurrowExe  --root $root update ripgrep --json
     if ($LASTEXITCODE -eq 0 -or ($retry -join "`n") -notmatch 'Pending transaction requires recovery') { throw 'pending archive transaction was silently ignored' }
 } finally {
     if ($client) { $client.Dispose() }
@@ -196,6 +196,6 @@ try {
     if ($process) { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }; $process.Dispose() }
 }
 
-@{coop=$CoopExe;archives=$archives;unsupported=$unsupported.Count;interrupt_journal=$journal.FullName} | ConvertTo-Json | Set-Content (Join-Path $TestRoot 'archive-safety-evidence.json') -Encoding utf8
+@{burrow=$BurrowExe;archives=$archives;unsupported=$unsupported.Count;interrupt_journal=$journal.FullName} | ConvertTo-Json | Set-Content (Join-Path $TestRoot 'archive-safety-evidence.json') -Encoding utf8
 Write-Output "PASS archive bad/link/traversal rejection, unsupported formats and interrupted update: $TestRoot"
 exit 0

@@ -1,16 +1,16 @@
 # Red when: named update uses stale manifests, misses a newly declared source, or preview writes shared state.
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
 $fixture = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 $root = Join-Path $fixture 'root'
-$env:COOP_STATE_DIR = Join-Path $fixture 'state'
+$env:BURROW_STATE_DIR = Join-Path $fixture 'state'
 function Check([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
 function Run([string[]]$arguments,[int]$code = 0) {
-    $result = Invoke-CoopNativeRaw -Exe $CoopExe -Arguments (@('--root',$root) + $arguments)
+    $result = Invoke-BurrowNativeRaw -Exe $BurrowExe -Arguments (@('--root',$root) + $arguments)
     Check ($result.code -eq $code) "Unexpected exit $($result.code): $($arguments -join ' ') $($result.out) $($result.err)"
     return $result
 }
@@ -21,7 +21,7 @@ function Publish([string]$bucket,[string]$package,[string]$version,[string]$depe
         & git init -q -b main $remote
         Check ($LASTEXITCODE -eq 0) 'Git init failed'
     }
-    $file = Join-Path (Split-Path $CoopExe) "fixture-$version.exe"
+    $file = Join-Path (Split-Path $BurrowExe) "fixture-$version.exe"
     $manifest = @{version=$version;url=([Uri][IO.Path]::GetFullPath($file)).AbsoluteUri+"#/$package.exe";hash=(Get-FileHash $file).Hash.ToLower();bin="$package.exe"}
     if ($dependency) { $manifest.depends = $dependency }
     $manifest | ConvertTo-Json | Set-Content "$remote/bucket/$package.json" -Encoding utf8
@@ -32,7 +32,7 @@ function Publish([string]$bucket,[string]$package,[string]$version,[string]$depe
     & git -C $remote rev-parse HEAD
 }
 function Snapshot {
-    $files = foreach ($directory in @($root,$env:COOP_STATE_DIR)) {
+    $files = foreach ($directory in @($root,$env:BURROW_STATE_DIR)) {
         Get-ChildItem -LiteralPath $directory -Force -Recurse -File | Sort-Object FullName | ForEach-Object {
             $_.FullName + ':' + $_.LastWriteTimeUtc.Ticks + ':' + (Get-FileHash -LiteralPath $_.FullName).Hash
         }
@@ -52,7 +52,7 @@ $revision = Publish 'upstream' 'demo' '2' 'dependent/helper'
 $before = Snapshot
 $preview = Run @('update','demo','--dry-run','--json') 1
 Check ($preview.out -match 'remote revision differs') 'Stale preview did not explain missing revision evidence'
-Check ((Snapshot) -ceq $before) 'Preview changed shared worktree, Git references or Coop state'
+Check ((Snapshot) -ceq $before) 'Preview changed shared worktree, Git references or Burrow state'
 $result = (Run @('update','demo','--json')).out | ConvertFrom-Json
 Check ($result.version -eq '2' -and $result.status -eq 'success') 'Single update did not install the refreshed version'
 Check (@($result.source_revisions).Count -eq 2) 'Update did not report both planned revisions'

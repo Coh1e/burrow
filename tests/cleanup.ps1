@@ -1,6 +1,6 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
@@ -10,7 +10,7 @@ function Manifest([string]$Root,[string]$Name,[string]$Version,[string]$Source,[
     [IO.File]::WriteAllText((Join-Path $Root "buckets/test/bucket/$Name.json"),($value | ConvertTo-Json -Depth 6))
 }
 function Run-Json([string[]]$Arguments) {
-    $text = Invoke-CoopNative $CoopExe  @Arguments
+    $text = Invoke-BurrowNative $BurrowExe  @Arguments
     $code = $LASTEXITCODE
     $value = $null
     if (($text -join "`n").Trim().StartsWith('[') -or ($text -join "`n").Trim().StartsWith('{')) {
@@ -26,8 +26,8 @@ function Remove-Junction([string]$Path) {
 # Old-version query, cleanup, protection and explicit non-following behavior.
 $root = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$root/buckets/test/bucket" -Force | Out-Null
-$fixture1 = Join-Path (Split-Path $CoopExe) 'fixture-1.exe'
-$fixture2 = Join-Path (Split-Path $CoopExe) 'fixture-2.exe'
+$fixture1 = Join-Path (Split-Path $BurrowExe) 'fixture-1.exe'
+$fixture2 = Join-Path (Split-Path $BurrowExe) 'fixture-2.exe'
 Manifest $root 'cleanupfixture' '1' $fixture1
 $install = Run-Json @('--root',$root,'install','test/cleanupfixture','--json')
 if ($install.code -ne 0) { throw "cleanup fixture install failed: $($install.text)" }
@@ -64,7 +64,7 @@ if ($changed.code -eq 0 -or @($changed.value[0].unmanageable | Where-Object stat
 (Get-Item -LiteralPath $manifestPath).LastWriteTimeUtc = $manifestTime
 
 # A pending transaction blocks cleanup before any version directory is moved.
-$pending = "$root/.coop/transactions/pending-cleanup-test"
+$pending = "$root/.burrow/transactions/pending-cleanup-test"
 New-Item -ItemType Directory -Path $pending -Force | Out-Null
 '{"state":"pending","action":"update","package":"cleanupfixture"}' | Set-Content "$pending/journal.json" -Encoding utf8
 $blocked = Run-Json @('--root',$root,'cleanup','cleanupfixture','--json')
@@ -113,7 +113,7 @@ $update3 = Run-Json @('--root',$root3,'update','retainedfixture','--json')
 if ($update3.code -ne 0) { throw "retained fixture update failed: $($update3.text)" }
 # Removing the current junction must not make the recorded current version look like an old
 # version. Cleanup blocks before moving anything and leaves the management record unchanged.
-$record3 = "$root3/.coop/packages/retainedfixture.json"
+$record3 = "$root3/.burrow/packages/retainedfixture.json"
 $record3Before = [IO.File]::ReadAllText($record3)
 Remove-Junction "$root3/apps/retainedfixture/current"
 $blockedCurrent = Run-Json @('--root',$root3,'cleanup','retainedfixture','--json')
@@ -129,11 +129,11 @@ if (-not (Test-Path "$root3/apps/retainedfixture/2/retainedfixture.exe") -or
 }
 New-Item -ItemType Junction -Path "$root3/apps/retainedfixture/current" -Target "$root3/apps/retainedfixture/2" | Out-Null
 $remove3 = Run-Json @('--root',$root3,'uninstall','retainedfixture','--json')
-if ($remove3.code -ne 0 -or -not (Test-Path "$root3/apps/retainedfixture/1/retainedfixture.exe") -or (Test-Path "$root3/.coop/packages/retainedfixture.json")) { throw "normal uninstall did not retain old version/evidence: $($remove3.text)" }
-if (-not (Test-Path "$root3/.coop/retained/retainedfixture.json")) { throw 'normal uninstall did not retain version ownership evidence' }
+if ($remove3.code -ne 0 -or -not (Test-Path "$root3/apps/retainedfixture/1/retainedfixture.exe") -or (Test-Path "$root3/.burrow/packages/retainedfixture.json")) { throw "normal uninstall did not retain old version/evidence: $($remove3.text)" }
+if (-not (Test-Path "$root3/.burrow/retained/retainedfixture.json")) { throw 'normal uninstall did not retain version ownership evidence' }
 # An interrupted cleanup that already moved a candidate to its transaction trash is completed by
 # the next cleanup invocation instead of leaving a permanently pending cleanup journal.
-$interrupted = "$root3/.coop/transactions/interrupted-cleanup"
+$interrupted = "$root3/.burrow/transactions/interrupted-cleanup"
 $interruptedTrash = "$interrupted/0-1"
 New-Item -ItemType Directory -Path $interrupted -Force | Out-Null
 Move-Item -LiteralPath "$root3/apps/retainedfixture/1" -Destination $interruptedTrash
@@ -152,8 +152,8 @@ if ($later.code -ne 0 -or (Test-Path "$root3/apps/retainedfixture/1")) { throw "
 # Explicit purge lists the declared store scope, rechecks ownership, and removes only that scope.
 $root2 = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$root2/buckets/test/bucket","$root2/persist/persistfixture/config","$root2/persist/persistfixture/unrelated","$root2/outside" -Force | Out-Null
-$persist1 = Join-Path (Split-Path $CoopExe) 'persist-fixture-1.exe'
-$persist2 = Join-Path (Split-Path $CoopExe) 'persist-fixture-2.exe'
+$persist1 = Join-Path (Split-Path $BurrowExe) 'persist-fixture-1.exe'
+$persist2 = Join-Path (Split-Path $BurrowExe) 'persist-fixture-2.exe'
 Set-Content -LiteralPath "$root2/persist/persistfixture/config/settings.ini" -Value 'owner-data' -NoNewline
 Set-Content -LiteralPath "$root2/persist/persistfixture/sample.ini" -Value 'file-data' -NoNewline
 Set-Content -LiteralPath "$root2/persist/persistfixture/unrelated/keep.txt" -Value 'unrelated' -NoNewline
@@ -173,7 +173,7 @@ if (-not ((Get-Item -LiteralPath "$root2/apps/persistfixture/1/config" -Force).A
 $cleanupPersist = Run-Json @('--root',$root2,'cleanup','persistfixture','--json')
 if ($cleanupPersist.code -ne 0 -or (Test-Path "$root2/apps/persistfixture/1")) { throw "old-version cleanup with persist links failed: $($cleanupPersist.text)" }
 if (-not (Test-Path "$root2/persist/persistfixture/config/settings.ini") -or -not (Test-Path "$root2/persist/persistfixture/sample.ini") -or -not (Test-Path "$root2/persist/persistfixture/unrelated/keep.txt")) { throw 'cleanup followed a persist link and deleted store data' }
-$recordPath = "$root2/.coop/packages/persistfixture.json"
+$recordPath = "$root2/.burrow/packages/persistfixture.json"
 $recordBefore = [IO.File]::ReadAllText($recordPath)
 $storeConfig = Join-Path $root2 'persist/persistfixture/config'
 $storeFile = Join-Path $root2 'persist/persistfixture/sample.ini'
@@ -210,6 +210,6 @@ if ((Test-Path $storeConfig) -or (Test-Path $storeFile)) { throw 'purge left dec
 if (-not (Test-Path "$root2/persist/persistfixture/unrelated/keep.txt") -or -not (Test-Path "$root2/outside/keep.txt")) { throw 'purge deleted content outside the declared scope or followed a junction' }
 if (Test-Path $recordPath) { throw 'purge left the management record' }
 
-@{cleanup_root=$root;retained_root=$root3;purge_root=$root2;coop=$CoopExe} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $TestRoot 'cleanup-evidence.json') -Encoding utf8
+@{cleanup_root=$root;retained_root=$root3;purge_root=$root2;burrow=$BurrowExe} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $TestRoot 'cleanup-evidence.json') -Encoding utf8
 Write-Output "PASS old-version query/cleanup and explicit persistent-data purge: $TestRoot"
 exit 0

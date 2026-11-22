@@ -7,7 +7,7 @@
 #include <iostream>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 std::string lowercase_text(std::string value) {
     for (auto& character : value) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
@@ -20,7 +20,7 @@ struct CacheEntry {
     std::uintmax_t size = 0;
 };
 // A cache file is `<app>#<version>#<sha256(url)[0..7]><extension>`; a file without both markers was
-// written by an older Coop and cannot be attributed to a package.
+// written by an older Burrow and cannot be attributed to a package.
 bool is_attributed(const std::string& name) {
     const auto first = name.find('#');
     return first != std::string::npos && name.find('#',first+1) != std::string::npos;
@@ -117,7 +117,7 @@ int cache_command(const Context& context,const std::vector<std::wstring>& args) 
     }
     if (command != "rm") return cache_show(context,apps);
     // Scoop requires a package or `*`/`--all`: a bare `cache rm` must not empty the cache.
-    if (apps.empty() && !all) throw std::runtime_error("<app(s)> missing\nUsage: coop cache show|rm [app(s)]");
+    if (apps.empty() && !all) throw std::runtime_error("<app(s)> missing\nUsage: burrow cache show|rm [app(s)]");
     return cache_remove(context,apps,all || apps.empty());
 }
 int download_command(const Context& context,const std::vector<std::wstring>& args,const std::string& architecture) {
@@ -146,7 +146,7 @@ int download_command(const Context& context,const std::vector<std::wstring>& arg
                 if (found) throw std::runtime_error("Ambiguous package; qualify it with its bucket");
                 found = &entry;
             }
-        if (!found) { std::cerr << "coop: Package not found in local buckets: "<<utf8(request)<<'\n'; failed = true; continue; }
+        if (!found) { std::cerr << "burrow: Package not found in local buckets: "<<utf8(request)<<'\n'; failed = true; continue; }
         try {
             auto package = parse_package(found->manifest_path,found->name,found->bucket,
                 architecture.empty() ? std::string("64bit") : architecture);
@@ -194,7 +194,7 @@ int download_command(const Context& context,const std::vector<std::wstring>& arg
             }
             std::cout << "'" << package.name << "' (" << package.version << ") was downloaded successfully!\n";
         } catch (const std::exception& error) {
-            std::cerr << "coop: "<<utf8(request)<<": "<<error.what()<<'\n';
+            std::cerr << "burrow: "<<utf8(request)<<": "<<error.what()<<'\n';
             failed = true;
         }
     }

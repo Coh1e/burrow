@@ -1,21 +1,21 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [string]$Root = 'C:\Users\Neo\scoop')
 # Real shared-root evidence for #35: NSIS software lifecycle and alternating management.
 # Main/apngasm 3.1.3 is a real NSIS package whose Manifest declares the setup.exe as dl.7z; the
 # payload is unpacked by the 7-Zip helper already installed in this root (the same helper Scoop's
-# Expand-7zipArchive uses), Scoop removes and reinstalls it, and Coop removes the Scoop
+# Expand-7zipArchive uses), Scoop removes and reinstalls it, and Burrow removes the Scoop
 # installation. The version directory trees produced by both clients are compared file by file.
 # Only state this run creates is removed afterwards; pre-existing installations and the helper
 # package are never touched.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 New-Item -ItemType Directory -Path $EvidenceDir -Force | Out-Null
-$guard = Join-Path (Split-Path $CoopExe) 'process_guard.exe'
-if (-not (Test-Path -LiteralPath $guard)) { throw "Missing process guard beside coop.exe: $guard" }
+$guard = Join-Path (Split-Path $BurrowExe) 'process_guard.exe'
+if (-not (Test-Path -LiteralPath $guard)) { throw "Missing process guard beside burrow.exe: $guard" }
 $script:runs = 0
 function Write-Text([string]$name,[string]$text) { [IO.File]::WriteAllText((Join-Path $EvidenceDir $name),$text,[Text.UTF8Encoding]::new($false)) }
 function Run([string]$label,[string]$file,[string[]]$arguments) {
@@ -44,18 +44,18 @@ function Run([string]$label,[string]$file,[string[]]$arguments) {
     return $result
 }
 function Get-Json($result) { return ($result.output | ConvertFrom-Json) }
-function Test-Coop([string]$label,[string[]]$arguments) { return Run $label $CoopExe (@('--root',$Root)+$arguments) }
-function Test-CoopGuarded([string]$label,[string[]]$arguments) {
-    $previousTimeout = $env:COOP_PROCESS_GUARD_TIMEOUT_MS
-    $previousChildren = $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN
-    $env:COOP_PROCESS_GUARD_TIMEOUT_MS = '120000'
-    $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN = '1'
-    try { return Run $label $guard (@($CoopExe,'--root',$Root)+$arguments) }
+function Test-Burrow([string]$label,[string[]]$arguments) { return Run $label $BurrowExe (@('--root',$Root)+$arguments) }
+function Test-BurrowGuarded([string]$label,[string[]]$arguments) {
+    $previousTimeout = $env:BURROW_PROCESS_GUARD_TIMEOUT_MS
+    $previousChildren = $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN
+    $env:BURROW_PROCESS_GUARD_TIMEOUT_MS = '120000'
+    $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN = '1'
+    try { return Run $label $guard (@($BurrowExe,'--root',$Root)+$arguments) }
     finally {
-        if ($null -eq $previousTimeout) { Remove-Item Env:COOP_PROCESS_GUARD_TIMEOUT_MS -ErrorAction SilentlyContinue }
-        else { $env:COOP_PROCESS_GUARD_TIMEOUT_MS = $previousTimeout }
-        if ($null -eq $previousChildren) { Remove-Item Env:COOP_PROCESS_GUARD_ALLOW_CHILDREN -ErrorAction SilentlyContinue }
-        else { $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN = $previousChildren }
+        if ($null -eq $previousTimeout) { Remove-Item Env:BURROW_PROCESS_GUARD_TIMEOUT_MS -ErrorAction SilentlyContinue }
+        else { $env:BURROW_PROCESS_GUARD_TIMEOUT_MS = $previousTimeout }
+        if ($null -eq $previousChildren) { Remove-Item Env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN -ErrorAction SilentlyContinue }
+        else { $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN = $previousChildren }
     }
 }
 function Assert([bool]$condition,[string]$message) { if (-not $condition) { throw "real-root NSIS check failed: $message" } }
@@ -67,8 +67,8 @@ $pwshPath = (Get-Process -Id $PID).Path
 function Run-Scoop([string]$label,[string[]]$arguments) {
     return Run $label $pwshPath (@('-NoProfile','-NonInteractive','-Command',('scoop '+($arguments -join ' '))))
 }
-function Get-CoopList([string]$label) {
-    $result = Test-Coop $label @('list','--json')
+function Get-BurrowList([string]$label) {
+    $result = Test-Burrow $label @('list','--json')
     Assert ($result.exit -eq 0) "$label failed: $($result.error)"
     return @(Get-Json $result)
 }
@@ -80,8 +80,8 @@ function Snapshot([string]$name) {
         apps = @(Get-ChildItem "$Root/apps" -Directory | Select-Object -ExpandProperty Name)
         persist = @(Get-ChildItem "$Root/persist" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
         shims = @(Get-ChildItem "$Root/shims" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
-        coop_records = @(Get-ChildItem "$Root/.coop/packages" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
-        pending_transactions = @(Get-ChildItem "$Root/.coop/transactions" -Directory -ErrorAction SilentlyContinue |
+        burrow_records = @(Get-ChildItem "$Root/.burrow/packages" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+        pending_transactions = @(Get-ChildItem "$Root/.burrow/transactions" -Directory -ErrorAction SilentlyContinue |
             Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'journal.json') } |
             Where-Object { (Get-Content -LiteralPath (Join-Path $_.FullName 'journal.json') -Raw | ConvertFrom-Json).state -eq 'pending' } |
             Select-Object -ExpandProperty Name)
@@ -109,7 +109,7 @@ function Get-BundleVersion([string]$package) {
 }
 
 $scoopVersion = Run-Scoop 'scoop-version' @('--version')
-$coopVersion = Run 'coop-version' $CoopExe @('--version')
+$burrowVersion = Run 'burrow-version' $BurrowExe @('--version')
 $mainRevision = Run 'main-bucket-revision' 'git' @('-C',"$Root/buckets/main",'rev-parse','HEAD')
 $helperExecutable = [IO.Path]::GetFullPath("$Root/apps/7zip/current/7z.exe")
 Assert (Test-Path -LiteralPath $helperExecutable) "the real root has no 7-Zip helper: $helperExecutable"
@@ -119,8 +119,8 @@ $before = [ordered]@{
     timestamp = [DateTime]::UtcNow.ToString('o')
     platform = (Get-CimInstance Win32_OperatingSystem).Caption
     ps_version = $PSVersionTable.PSVersion.ToString()
-    coop_version = $coopVersion.output.Trim()
-    coop_sha256 = (File-Hash $CoopExe)
+    burrow_version = $burrowVersion.output.Trim()
+    burrow_sha256 = (File-Hash $BurrowExe)
     scoop_version = ($scoopVersion.output -replace "`r?`n",' / ').Trim()
     main_bucket_revision = $mainRevision.output.Trim()
     package = 'apngasm'
@@ -128,7 +128,7 @@ $before = [ordered]@{
     helper = $helperExecutable
     helper_sha256 = (File-Hash $helperExecutable)
     helper_version = $helperVersion
-    planned_actions = @('coop preview (read-only)','coop install','scoop uninstall','scoop install','coop uninstall')
+    planned_actions = @('burrow preview (read-only)','burrow install','scoop uninstall','scoop install','burrow uninstall')
 }
 Write-Text '00-versions.txt' (($before | ConvertTo-Json -Depth 4))
 Write-Text '00-scoop-list-before.log' (Run-Scoop 'scoop-list-before' @('list')).output
@@ -137,15 +137,15 @@ $version = Get-BundleVersion 'apngasm'
 $app = "$Root/apps/apngasm"
 $directory = "$app/$version"
 Assert (-not (Test-Path -LiteralPath $app)) 'apngasm is already installed; refusing to touch it'
-Assert (-not (Test-Path -LiteralPath "$Root/.coop/packages/apngasm.json")) 'apngasm already has a Coop record; refusing to touch it'
+Assert (-not (Test-Path -LiteralPath "$Root/.burrow/packages/apngasm.json")) 'apngasm already has a Burrow record; refusing to touch it'
 Assert (-not (Test-Path -LiteralPath "$Root/shims/apngasm.exe")) 'apngasm already has a command entry; refusing to touch it'
 
 # 1. Read-only: the real NSIS package is planned with its declared helper, without writes.
-$preview = Test-Coop 'apngasm-install-preview' @('install','main/apngasm','--dry-run','--json')
-Assert ($preview.exit -eq 0) "apngasm Coop preview failed: $($preview.error)"
+$preview = Test-Burrow 'apngasm-install-preview' @('install','main/apngasm','--dry-run','--json')
+Assert ($preview.exit -eq 0) "apngasm Burrow preview failed: $($preview.error)"
 Assert (-not ($preview.error -match 'Workload process:')) "apngasm preview started an external process: $($preview.error)"
 $plan = Get-Json $preview
-Write-Text '01-apngasm-coop-plan.json' ($plan | ConvertTo-Json -Depth 8)
+Write-Text '01-apngasm-burrow-plan.json' ($plan | ConvertTo-Json -Depth 8)
 Assert ($plan.execution_available -eq $true) "apngasm preview is blocked: $(@($plan.diagnostics) | ConvertTo-Json -Compress)"
 Assert ($plan.artifacts[0].archive -eq '7z' -and $plan.artifacts[0].extraction -eq 'native-archive-or-external-7zip-nsis') 'apngasm is not reported as an NSIS payload archive'
 Assert ($plan.artifacts[0].requires_elevation -eq $false -and $plan.artifacts[0].reboot_required -eq $false -and
@@ -156,72 +156,72 @@ Assert (@($plan.external_tools | Where-Object { $_.name -match '^7-Zip' -and $_.
 Assert (@($plan.capabilities | Where-Object { $_.id -eq 'nsis-installer' -and $_.supported -eq $true }).Count -eq 1) 'nsis-installer capability is not reported'
 Assert (-not (Test-Path -LiteralPath $app)) 'the preview wrote installation state'
 
-# 2. Coop installs the real NSIS package with the declared helper.
-$install = Test-CoopGuarded 'apngasm-coop-install' @('install','main/apngasm','--json')
-Assert ($install.exit -eq 0) "apngasm Coop install failed: $($install.error)"
+# 2. Burrow installs the real NSIS package with the declared helper.
+$install = Test-BurrowGuarded 'apngasm-burrow-install' @('install','main/apngasm','--json')
+Assert ($install.exit -eq 0) "apngasm Burrow install failed: $($install.error)"
 $workload = Workload-Processes $install
-Assert ($workload.Count -eq 3 -and $workload[0] -match 'coop\.exe$' -and $workload[1] -match '7z\.exe$' -and $workload[2] -match '(?:pwsh|powershell)\.exe$') "apngasm Coop install did not start exactly coop, 7z and the hook host: $($workload -join '; ')"
+Assert ($workload.Count -eq 3 -and $workload[0] -match 'burrow\.exe$' -and $workload[1] -match '7z\.exe$' -and $workload[2] -match '(?:pwsh|powershell)\.exe$') "apngasm Burrow install did not start exactly burrow, 7z and the hook host: $($workload -join '; ')"
 Assert (-not ($workload -match '(?i)msiexec|setup\.exe|apngasm\.exe$')) "a vendor installer process was started: $($workload -join '; ')"
 $installResult = Get-Json $install
-Write-Text '02-apngasm-coop-install.json' ($installResult | ConvertTo-Json -Depth 8)
-Assert (Test-Path -LiteralPath $directory) "apngasm Coop install did not create $directory"
-Assert (Test-Path -LiteralPath "$directory/bin/apngasm.exe") 'apngasm Coop install did not publish the extracted program'
+Write-Text '02-apngasm-burrow-install.json' ($installResult | ConvertTo-Json -Depth 8)
+Assert (Test-Path -LiteralPath $directory) "apngasm Burrow install did not create $directory"
+Assert (Test-Path -LiteralPath "$directory/bin/apngasm.exe") 'apngasm Burrow install did not publish the extracted program'
 Assert (-not (Test-Path -LiteralPath "$directory/`$PLUGINSDIR")) 'the NSIS $PLUGINSDIR was published instead of being removed by the Manifest hook'
 Assert (-not (Test-Path -LiteralPath "$directory/Uninstall.exe")) 'the vendor NSIS Uninstall.exe was published'
-$coopImage = Get-ImageSnapshot $directory
-Write-Text '03-apngasm-coop-image.txt' ($coopImage -join "`n")
+$burrowImage = Get-ImageSnapshot $directory
+Write-Text '03-apngasm-burrow-image.txt' ($burrowImage -join "`n")
 $journal = Get-Content -LiteralPath $installResult.journal -Raw | ConvertFrom-Json
-Write-Text '04-apngasm-coop-journal.json' ($journal | ConvertTo-Json -Depth 8)
-Assert ($journal.state -eq 'committed') 'apngasm Coop journal is not committed'
+Write-Text '04-apngasm-burrow-journal.json' ($journal | ConvertTo-Json -Depth 8)
+Assert ($journal.state -eq 'committed') 'apngasm Burrow journal is not committed'
 $record = @($journal.nsis_extractions)[0]
-Assert ((Same-Path $record.helper $helperExecutable) -and $record.exit_code -eq 0 -and $record.installer_executed -eq $false) 'apngasm Coop journal does not record the declared helper extraction'
-Assert ($record.detection.signature -match 'NullsoftInst' -and $record.files -eq 16) "apngasm Coop journal extraction facts are wrong: $($record.files) files, detection $($record.detection.offset)"
-$coopProgram = Run 'apngasm-coop-program' "$Root/shims/apngasm.exe" @()
-Assert ($coopProgram.output -match 'apngasm 3\.1\.3') "the Coop-installed program does not run: $($coopProgram.output)"
-$listed = Get-CoopList 'apngasm-coop-list'
-Assert (@($listed | Where-Object { $_.name -eq 'apngasm' -and $_.status -eq 'ready' }).Count -eq 1) 'Coop list does not show its apngasm installation'
-$scoopList = Run-Scoop 'apngasm-scoop-list-after-coop' @('list')
-Assert ($scoopList.output -match '(?m)^apngasm\s+') 'Scoop does not list the Coop-installed apngasm'
+Assert ((Same-Path $record.helper $helperExecutable) -and $record.exit_code -eq 0 -and $record.installer_executed -eq $false) 'apngasm Burrow journal does not record the declared helper extraction'
+Assert ($record.detection.signature -match 'NullsoftInst' -and $record.files -eq 16) "apngasm Burrow journal extraction facts are wrong: $($record.files) files, detection $($record.detection.offset)"
+$burrowProgram = Run 'apngasm-burrow-program' "$Root/shims/apngasm.exe" @()
+Assert ($burrowProgram.output -match 'apngasm 3\.1\.3') "the Burrow-installed program does not run: $($burrowProgram.output)"
+$listed = Get-BurrowList 'apngasm-burrow-list'
+Assert (@($listed | Where-Object { $_.name -eq 'apngasm' -and $_.status -eq 'ready' }).Count -eq 1) 'Burrow list does not show its apngasm installation'
+$scoopList = Run-Scoop 'apngasm-scoop-list-after-burrow' @('list')
+Assert ($scoopList.output -match '(?m)^apngasm\s+') 'Scoop does not list the Burrow-installed apngasm'
 
-# 3. The other client removes the Coop installation, then installs it again.
+# 3. The other client removes the Burrow installation, then installs it again.
 $scoopUninstall = Run-Scoop 'apngasm-scoop-uninstall' @('uninstall','apngasm')
-Assert ($scoopUninstall.exit -eq 0) "Scoop could not uninstall the Coop-installed apngasm: $($scoopUninstall.error)"
+Assert ($scoopUninstall.exit -eq 0) "Scoop could not uninstall the Burrow-installed apngasm: $($scoopUninstall.error)"
 Assert (-not (Test-Path -LiteralPath $app)) 'apngasm survived the Scoop uninstall'
-$listedAfter = Get-CoopList 'apngasm-coop-list-after-scoop-uninstall'
-Assert (@($listedAfter | Where-Object { $_.name -eq 'apngasm' }).Count -eq 0) 'Coop still lists apngasm after Scoop removed it'
+$listedAfter = Get-BurrowList 'apngasm-burrow-list-after-scoop-uninstall'
+Assert (@($listedAfter | Where-Object { $_.name -eq 'apngasm' }).Count -eq 0) 'Burrow still lists apngasm after Scoop removed it'
 $scoopInstall = Run-Scoop 'apngasm-scoop-install' @('install','apngasm')
 Assert ($scoopInstall.exit -eq 0) "Scoop could not install apngasm: $($scoopInstall.error)"
 Assert (Test-Path -LiteralPath $directory) "apngasm Scoop install did not create $directory"
 $scoopImage = Get-ImageSnapshot $directory
 Write-Text '05-apngasm-scoop-image.txt' ($scoopImage -join "`n")
-Assert (($scoopImage -join "`n") -eq ($coopImage -join "`n")) 'apngasm Coop and Scoop produced different version directory contents'
+Assert (($scoopImage -join "`n") -eq ($burrowImage -join "`n")) 'apngasm Burrow and Scoop produced different version directory contents'
 $scoopProgram = Run 'apngasm-scoop-program' "$Root/shims/apngasm.exe" @()
 Assert ($scoopProgram.output -match 'apngasm 3\.1\.3') "the Scoop-installed program does not run: $($scoopProgram.output)"
-$info = Test-Coop 'apngasm-coop-info' @('info','main/apngasm','--json')
-Assert ($info.exit -eq 0) "apngasm Coop info failed: $($info.error)"
-Write-Text '06-apngasm-coop-info.json' $info.output
-$uninstallPreview = Test-Coop 'apngasm-coop-uninstall-preview' @('uninstall','apngasm','--dry-run','--json')
-Assert ($uninstallPreview.exit -eq 0) "apngasm Coop uninstall preview failed: $($uninstallPreview.error)"
-Assert ((Get-Json $uninstallPreview).execution_available -eq $true) 'apngasm Coop uninstall preview is not executable'
+$info = Test-Burrow 'apngasm-burrow-info' @('info','main/apngasm','--json')
+Assert ($info.exit -eq 0) "apngasm Burrow info failed: $($info.error)"
+Write-Text '06-apngasm-burrow-info.json' $info.output
+$uninstallPreview = Test-Burrow 'apngasm-burrow-uninstall-preview' @('uninstall','apngasm','--dry-run','--json')
+Assert ($uninstallPreview.exit -eq 0) "apngasm Burrow uninstall preview failed: $($uninstallPreview.error)"
+Assert ((Get-Json $uninstallPreview).execution_available -eq $true) 'apngasm Burrow uninstall preview is not executable'
 
-# 4. Coop removes the Scoop installation without a takeover step.
-$uninstall = Test-CoopGuarded 'apngasm-coop-uninstall' @('uninstall','apngasm','--json')
-Assert ($uninstall.exit -eq 0) "apngasm Coop uninstall failed: $($uninstall.error)"
+# 4. Burrow removes the Scoop installation without a takeover step.
+$uninstall = Test-BurrowGuarded 'apngasm-burrow-uninstall' @('uninstall','apngasm','--json')
+Assert ($uninstall.exit -eq 0) "apngasm Burrow uninstall failed: $($uninstall.error)"
 $uninstallWorkload = Workload-Processes $uninstall
-Assert ($uninstallWorkload.Count -eq 1 -and $uninstallWorkload[0] -match 'coop\.exe$') "apngasm Coop uninstall started an external process: $($uninstallWorkload -join '; ')"
-Assert (-not (Test-Path -LiteralPath $app)) 'apngasm Coop uninstall left the application directory'
-Assert (-not (Test-Path -LiteralPath "$Root/shims/apngasm.exe")) 'apngasm Coop uninstall left its command entry'
-$finalList = Get-CoopList 'apngasm-coop-list-final'
-Assert (@($finalList | Where-Object { $_.name -eq 'apngasm' }).Count -eq 0) 'Coop still lists apngasm after its uninstall'
+Assert ($uninstallWorkload.Count -eq 1 -and $uninstallWorkload[0] -match 'burrow\.exe$') "apngasm Burrow uninstall started an external process: $($uninstallWorkload -join '; ')"
+Assert (-not (Test-Path -LiteralPath $app)) 'apngasm Burrow uninstall left the application directory'
+Assert (-not (Test-Path -LiteralPath "$Root/shims/apngasm.exe")) 'apngasm Burrow uninstall left its command entry'
+$finalList = Get-BurrowList 'apngasm-burrow-list-final'
+Assert (@($finalList | Where-Object { $_.name -eq 'apngasm' }).Count -eq 0) 'Burrow still lists apngasm after its uninstall'
 $scoopListFinal = Run-Scoop 'apngasm-scoop-list-final' @('list')
-Assert ($scoopListFinal.output -notmatch '(?m)^apngasm\s+') 'Scoop still lists apngasm after the Coop uninstall'
+Assert ($scoopListFinal.output -notmatch '(?m)^apngasm\s+') 'Scoop still lists apngasm after the Burrow uninstall'
 
 # 5. Final state matches the pre-run state; the helper package is unchanged.
 $after = Snapshot '99-snapshot-after.json'
 Assert ((($after.apps -join ',') -eq ($appsBefore.apps -join ','))) 'the apps directory list changed after the run'
 Assert ((($after.persist -join ',') -eq ($appsBefore.persist -join ','))) 'the persist directory list changed after the run'
 Assert ((($after.shims -join ',') -eq ($appsBefore.shims -join ','))) 'the shims directory list changed after the run'
-Assert ((($after.coop_records -join ',') -eq ($appsBefore.coop_records -join ','))) 'Coop records changed after the run'
+Assert ((($after.burrow_records -join ',') -eq ($appsBefore.burrow_records -join ','))) 'Burrow records changed after the run'
 Assert (@($after.pending_transactions).Count -eq 0) 'the run left a pending transaction'
 Assert ((($after.helper -join "`n") -eq ($appsBefore.helper -join "`n"))) 'the helper package changed after the run'
 Write-Text '99-summary.json' ([ordered]@{
@@ -229,10 +229,10 @@ Write-Text '99-summary.json' ([ordered]@{
     runs=$script:runs
     package='apngasm'
     version=$version
-    coop_sha256=$before.coop_sha256
+    burrow_sha256=$before.burrow_sha256
     helper_sha256=$before.helper_sha256
     helper_version=$before.helper_version
-    coop_image_entries=@($coopImage).Count
+    burrow_image_entries=@($burrowImage).Count
     scoop_image_identical=$true
     journal_nsis_files=$record.files
     journal_detection_offset=$record.detection.offset

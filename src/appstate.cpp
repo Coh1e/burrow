@@ -10,7 +10,7 @@
 #include <vector>
 #include <set>
 
-namespace coop {
+namespace burrow {
 namespace {
 // The install record is what Scoop's own `hold` writes and what `list`/`status` read for
 // `Held package`. `scoop-install.json` is the current name, `install.json` the legacy one.
@@ -30,7 +30,7 @@ int hold_command(const Context& context, const std::vector<std::wstring>& args, 
     std::vector<std::wstring> names;
     for (const auto& argument : args) {
         if (argument == L"-g" || argument == L"--global")
-            throw std::runtime_error("global-scope-readonly: Coop does not write a system-level installation; "
+            throw std::runtime_error("global-scope-readonly: Burrow does not write a system-level installation; "
                                      "use --global-root to read one");
         if (argument.starts_with(L"-")) throw UsageError("Unknown "+std::string(hold ? "hold" : "unhold")+" option: "+utf8(argument));
         names.push_back(argument);
@@ -43,13 +43,13 @@ int hold_command(const Context& context, const std::vector<std::wstring>& args, 
         const auto current = context.root/L"apps"/wide(name)/L"current";
         const auto directory = fs::canonical(current,error);
         if (error) {
-            std::cerr << "coop: '"<<name<<"' is not installed.\n";
+            std::cerr << "burrow: '"<<name<<"' is not installed.\n";
             result = 1;
             continue;
         }
         const auto record = install_record(directory);
         if (record.empty()) {
-            std::cerr << "coop: Failed to "<<(hold ? "hold" : "unhold")<<" '"<<name<<"'.\n";
+            std::cerr << "burrow: Failed to "<<(hold ? "hold" : "unhold")<<" '"<<name<<"'.\n";
             result = 1;
             continue;
         }
@@ -64,13 +64,13 @@ int hold_command(const Context& context, const std::vector<std::wstring>& args, 
             std::cout << (hold ? name+" is now held and can not be updated anymore."
                                : name+" is no longer held and can be updated again.") << '\n';
         } catch (const std::exception& failure) {
-            std::cerr << "coop: "<<name<<": "<<failure.what()<<'\n';
+            std::cerr << "burrow: "<<name<<": "<<failure.what()<<'\n';
             result = 1;
         }
     }
     return result;
 }
-// `shim` manages the shared <root>/shims entries. `add` publishes the same launcher Coop copies for
+// `shim` manages the shared <root>/shims entries. `add` publishes the same launcher Burrow copies for
 // a package entry and records the target in a Scoop `.shim` file, so either client can run, list and
 // remove the result.
 namespace {
@@ -213,16 +213,16 @@ int shim_command(const Context& context,const std::vector<std::wstring>& args) {
             const auto name = utf8(args[index]);
             std::error_code error;
             const auto metadata = directory/(wide(name)+L".shim");
-            const auto coop_metadata = directory/(wide(name)+L".coop-shim.json");
-            if (!fs::exists(metadata,error) && !fs::exists(coop_metadata,error)) {
-                std::cerr << "coop: Shim '"<<name<<"' not found\n";
+            const auto burrow_metadata = directory/(wide(name)+L".burrow-shim.json");
+            if (!fs::exists(metadata,error) && !fs::exists(burrow_metadata,error)) {
+                std::cerr << "burrow: Shim '"<<name<<"' not found\n";
                 result = 1;
                 continue;
             }
             std::cout << "Removing shim '"<<name<<".shim'.\n";
             std::cout << "Removing shim '"<<name<<".exe'.\n";
             fs::remove(metadata,error);
-            fs::remove(coop_metadata,error);
+            fs::remove(burrow_metadata,error);
             fs::remove(directory/(wide(name)+L".exe"),error);
         }
         return result;

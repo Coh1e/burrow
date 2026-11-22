@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 struct ArchiveDeleter {
     void operator()(archive* value) const { if (value) archive_read_free(value); }
@@ -135,7 +135,7 @@ void extract_archive(const fs::path& archive_path, const fs::path& destination, 
     ArchivePtr source{archive_read_new()};
     if (!source) throw std::runtime_error("Cannot initialize native archive reader");
     // The tar family is handled by the same native reader for every compression Scoop exposes:
-    // plain tar, gzip/tgz, xz/txz, lzma/tlz, bzip2/tbz and zstd/tzst. Each filter is linked into coop.exe;
+    // plain tar, gzip/tgz, xz/txz, lzma/tlz, bzip2/tbz and zstd/tzst. Each filter is linked into burrow.exe;
     // no external 7z.exe, tar.exe or bzip2.exe is started.
     if (archive_read_support_filter_none(source.get()) != ARCHIVE_OK ||
         archive_read_support_filter_gzip(source.get()) != ARCHIVE_OK ||
@@ -285,7 +285,7 @@ std::vector<ExternalTool> package_external_tools(const Context& context, const i
             nsis_reported = true;
             tools.push_back({"7-Zip (NSIS installer payloads)",
                 "unpack the NSIS payload of "+artifact.filename+" with the same arguments as Scoop's Expand-7zipArchive after the verified content is identified as an NSIS installer",
-                "separately installed 7-Zip software package in the selected root; Coop detects it, never downloads, installs or bundles it, and never substitutes a bundled unpacker",
+                "separately installed 7-Zip software package in the selected root; Burrow detects it, never downloads, installs or bundles it, and never substitutes a bundled unpacker",
                 !nsis.path.empty(),!nsis.path.empty(),
                 nsis.path.empty() ? nsis.problem :
                     "conditional: only a payload whose verified content carries the NSIS FirstHeader signature is unpacked with this helper, while ordinary 7z, ZIP and tar artifacts stay on the native archive reader; the vendor setup.exe is never executed, so its install directory, registry, service and uninstall-registration effects do not happen",
@@ -296,22 +296,22 @@ std::vector<ExternalTool> package_external_tools(const Context& context, const i
             if (!inno_looked_up) { inno = inno_helper(context); inno_looked_up = true; }
             tools.push_back({"innounp (Inno Setup unpacker)",
                 "unpack the Inno Setup payload of "+artifact.filename+" with the same arguments as Scoop's Expand-InnoArchive",
-                "separately declared software dependency installed in the selected root; Coop detects it, never downloads or installs it, and never substitutes a bundled unpacker",
+                "separately declared software dependency installed in the selected root; Burrow detects it, never downloads or installs it, and never substitutes a bundled unpacker",
                 !inno.path.empty(),!inno.path.empty(),
                 inno.path.empty() ? inno.problem :
-                    "extracts the vendor installer's files only: [Run], [Registry], service, shortcut and uninstall-registration effects are not executed, encrypted installers need a password Coop does not supply, and a non-zero helper exit fails before a version is published",
+                    "extracts the vendor installer's files only: [Run], [Registry], service, shortcut and uninstall-registration effects are not executed, encrypted installers need a password Burrow does not supply, and a non-zero helper exit fails before a version is published",
                 inno.path});
             continue;
         }
         if (artifact.format != ir::ArchiveFormat::msi) continue;
         tools.push_back({"Windows Installer APIs","read-only MSI database access (msi.dll) and embedded cabinet decompression (cabinet.dll) for "+artifact.filename,
-            "Windows system components; Coop never downloads or installs them and never runs msiexec.exe",
+            "Windows system components; Burrow never downloads or installs them and never runs msiexec.exe",
             database_api.has_value() && fdi_api.has_value(),database_api.has_value() && fdi_api.has_value(),
             "read-only database access only: no msiexec.exe process, no administrative installation or product registration, no elevation, no reboot and no %WINDIR%\\Installer machine-cache write; external, multi-part and vendor installer payloads are unsupported and fail with a named error",
             database_api.value_or(fs::path{})});
     }
     // Scoop's shim() runs .py entries through python and every other unrecognized target through
-    // bash. Both are external hosts detected before an entry is published, never bundled by Coop.
+    // bash. Both are external hosts detected before an entry is published, never bundled by Burrow.
     bool python_reported = false, bash_reported = false;
     for (const auto& command : package.entries) {
         const auto target = fs::path(wide(command.target));
@@ -321,7 +321,7 @@ std::vector<ExternalTool> package_external_tools(const Context& context, const i
             const auto host = command_host_path(kind);
             tools.push_back({"Python (command-entry host)",
                 "run the .py command entry "+command.target+" with python.exe, like Scoop's .py shim branch",
-                "external program required by the package's declared entry; Coop detects it, never downloads, installs or bundles it",
+                "external program required by the package's declared entry; Burrow detects it, never downloads, installs or bundles it",
                 host.has_value(),host.has_value(),
                 host ? "the entry is started by python.exe found on PATH" : command_host_problem(kind),
                 host.value_or(fs::path{})});
@@ -330,7 +330,7 @@ std::vector<ExternalTool> package_external_tools(const Context& context, const i
             const auto host = command_host_path(kind);
             tools.push_back({"bash (command-entry host)",
                 "run the script command entry "+command.target+" through bash, like Scoop's else shim branch (which also uses cygpath or wslpath for the path)",
-                "external program required by the package's declared entry; Coop detects it, never downloads, installs or bundles it",
+                "external program required by the package's declared entry; Burrow detects it, never downloads, installs or bundles it",
                 host.has_value(),host.has_value(),
                 host ? "the entry is started by bash.exe found on PATH; the generated Scoop wrapper uses cygpath or wslpath at run time like Scoop" : command_host_problem(kind),
                 host.value_or(fs::path{})});

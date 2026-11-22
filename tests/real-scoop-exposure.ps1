@@ -1,17 +1,17 @@
 ﻿param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [string]$ScoopRoot = 'C:\Users\Neo\scoop'
 )
 # Real-entry and shortcut acceptance (#28). It installs a bounded set of real Main packages in the
-# human-selected shared Scoop root, runs the actual programs through Coop's entries, lets real Scoop
+# human-selected shared Scoop root, runs the actual programs through Burrow's entries, lets real Scoop
 # reset the same installations, and removes only the test packages afterwards.
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 $allowed = [IO.Path]::GetFullPath((Join-Path $projectRoot '.local')).TrimEnd('\') + '\'
 if (-not ($EvidenceDir.TrimEnd('\') + '\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Evidence must stay inside the project .local directory' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot)
 $scoop = (Get-Command scoop.ps1 -ErrorAction Stop).Source
 $msiFixture = [IO.Path]::GetFullPath((Join-Path $projectRoot '.local/deps/test-archives/7z2605-x64.msi'))
@@ -33,7 +33,7 @@ function Run([string]$name,[string]$exe,[string[]]$arguments,[string]$WorkingDir
     $commands.Add([pscustomobject]@{name=$name;exe=$exe;arguments=$arguments;working_directory=$WorkingDirectory;exit=$exit;log=$log})
     return [pscustomobject]@{exit=$exit;output=$output;log=$log}
 }
-function Coop([string]$name,[string[]]$arguments) { return Run $name $CoopExe (@('--root',$ScoopRoot)+$arguments) }
+function Burrow([string]$name,[string[]]$arguments) { return Run $name $BurrowExe (@('--root',$ScoopRoot)+$arguments) }
 function Scoop([string]$name,[string[]]$arguments) { return Run $name $scoop $arguments }
 function Assert-True([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
 function Read-Json([object]$output) { return (($output -join "`n") | ConvertFrom-Json) }
@@ -68,7 +68,7 @@ function Assert-Shortcut([string]$link,[string]$target,[string]$arguments,[strin
     return $identity
 }
 function InstalledEntry([string]$name) {
-    $items = (Coop ($name+'-list') @('list','--json')).output | ConvertFrom-Json
+    $items = (Burrow ($name+'-list') @('list','--json')).output | ConvertFrom-Json
     $entry = @($items | Where-Object { $_.name -eq $name -and ($_.status -eq 'installed' -or $_.status -eq 'ready') })
     if ($entry.Count -eq 0) { return $null }
     if ($entry.Count -ne 1) { throw "Duplicate installed entries for $name" }
@@ -112,7 +112,7 @@ Copy-Item -LiteralPath $msiFixture -Destination (Join-Path $work 'sample.msi')
 $jarClass = Join-Path $ScoopRoot 'apps/cfr/current/probe-class.class'
 $guiProcess = $null
 try {
-    $inventoryBefore = (Coop 'coop-list-before' @('list','--json')).output | ConvertFrom-Json
+    $inventoryBefore = (Burrow 'burrow-list-before' @('list','--json')).output | ConvertFrom-Json
     foreach ($name in $packages) {
         Assert-True ($null -eq (InstalledEntry $name)) "The real root already contains test package $name; refusing to change it"
     }
@@ -122,11 +122,11 @@ try {
     $mainRevision = (& git -C "$ScoopRoot/buckets/main" rev-parse HEAD 2>&1 | Out-String).Trim()
     $installPlans = [ordered]@{}
     foreach ($name in $packages) {
-        $preview = Coop ($name+'-preview') @('install',$name,'--dry-run','--json')
+        $preview = Burrow ($name+'-preview') @('install',$name,'--dry-run','--json')
         Assert-True ($preview.exit -eq 0) "install preview failed for ${name}: $($preview.output)"
         $plan = Read-Json $preview.output
         Assert-True ($plan.execution_available -eq $true) "install preview for $name was not executable: $($preview.output)"
-        $install = Coop ($name+'-install') @('install',$name,'--json')
+        $install = Burrow ($name+'-install') @('install',$name,'--json')
         Assert-True ($install.exit -eq 0) "install failed for ${name}: $($install.output)"
         $installedByTest.Add($name)
         $result = Read-Json $install.output
@@ -137,25 +137,25 @@ try {
     }
 
     # Direct console EXE: relative paths are resolved from the caller directory and the real program
-    # lists the fixed MSI contents. Scoop receives a .shim, not Coop-only metadata.
-    Assert-True (Test-Path "$ScoopRoot/shims/lessmsi.exe") 'Coop did not create the lessmsi launcher'
-    Assert-True (Test-Path "$ScoopRoot/shims/lessmsi.shim") 'Coop did not create Scoop-readable lessmsi metadata'
-    Assert-True (-not (Test-Path "$ScoopRoot/shims/lessmsi.coop-shim.json")) 'a direct EXE entry used Coop-only metadata'
+    # lists the fixed MSI contents. Scoop receives a .shim, not Burrow-only metadata.
+    Assert-True (Test-Path "$ScoopRoot/shims/lessmsi.exe") 'Burrow did not create the lessmsi launcher'
+    Assert-True (Test-Path "$ScoopRoot/shims/lessmsi.shim") 'Burrow did not create Scoop-readable lessmsi metadata'
+    Assert-True (-not (Test-Path "$ScoopRoot/shims/lessmsi.burrow-shim.json")) 'a direct EXE entry used Burrow-only metadata'
     $lessmsiRun = Run 'lessmsi-list-relative' "$ScoopRoot/shims/lessmsi.exe" @('l','-t','File','sample.msi') $work
     Assert-True ($lessmsiRun.exit -eq 0) "lessmsi did not read the relative MSI from the caller directory: $($lessmsiRun.output)"
     Assert-True ($lessmsiRun.output -match 'File' -and $lessmsiRun.output -match '(?i)7z') 'lessmsi did not list the real MSI file table'
     $lessmsiShortcut = Join-Path $programs 'Less MSIérables.lnk'
     $lessmsiIdentity = Assert-Shortcut $lessmsiShortcut "$ScoopRoot/apps/lessmsi/current/lessmsi-gui.exe" '' "$ScoopRoot/apps/lessmsi/current"
-    $lessmsiRecord = Get-Content -LiteralPath "$ScoopRoot/.coop/packages/lessmsi.json" -Raw | ConvertFrom-Json
+    $lessmsiRecord = Get-Content -LiteralPath "$ScoopRoot/.burrow/packages/lessmsi.json" -Raw | ConvertFrom-Json
     Assert-True (@($lessmsiRecord.shortcuts)[0].sha256 -eq (HashOf $lessmsiShortcut)) 'lessmsi shortcut hash was not recorded'
 
-    # Real GUI program: the target is a GUI-subsystem executable and Coop's copied launcher is also
+    # Real GUI program: the target is a GUI-subsystem executable and Burrow's copied launcher is also
     # marked GUI, so it starts without a console and keeps the real process alive.
     Assert-True ((PeSubsystem "$ScoopRoot/apps/red-view/current/red-view.exe") -eq 2) 'red-view target is not a GUI executable'
-    Assert-True ((PeSubsystem "$ScoopRoot/shims/red-view.exe") -eq 2) 'Coop did not mark the red-view launcher as GUI'
+    Assert-True ((PeSubsystem "$ScoopRoot/shims/red-view.exe") -eq 2) 'Burrow did not mark the red-view launcher as GUI'
     $guiProcess = Start-Process -FilePath "$ScoopRoot/shims/red-view.exe" -PassThru
     $guiChild = Wait-ForChildWindow $guiProcess
-    Assert-True ($null -ne $guiChild) 'the real GUI program launched through the Coop entry did not stay running with a window'
+    Assert-True ($null -ne $guiChild) 'the real GUI program launched through the Burrow entry did not stay running with a window'
     $guiStarted = $true
     $guiTitle = $guiChild.MainWindowTitle
     $redViewSha = HashOf "$ScoopRoot/apps/red-view/current/red-view.exe"
@@ -167,7 +167,7 @@ try {
     # java.exe. The JAR deliberately receives a relative class name that exists only in the package
     # directory, proving Scoop's JAR working-directory behaviour.
     Assert-True (Test-Path "$ScoopRoot/shims/spotbugs.cmd") 'the BAT entry did not publish a Scoop-shaped wrapper'
-    Assert-True (-not (Test-Path "$ScoopRoot/shims/spotbugs.coop-shim.json")) 'the BAT entry wrote Coop-only metadata into shims/'
+    Assert-True (-not (Test-Path "$ScoopRoot/shims/spotbugs.burrow-shim.json")) 'the BAT entry wrote Burrow-only metadata into shims/'
     Assert-True (-not (Test-Path "$ScoopRoot/shims/spotbugs.exe")) 'the BAT entry published a launcher that shadows the .cmd wrapper'
     $spotbugsRun = Run 'spotbugs-version' "$ScoopRoot/shims/spotbugs.cmd" @('-version') $work
     Assert-True ($spotbugsRun.exit -eq 0 -and $spotbugsRun.output.Trim() -match '^\d+\.\d+') "the real BAT entry did not run SpotBugs: $($spotbugsRun.output)"
@@ -184,16 +184,16 @@ try {
     Assert-True ($cfrRun.output -match 'public|class|package') "the real JAR entry did not decompile the class: $($cfrRun.output)"
     Remove-Item -LiteralPath $jarClass -Force
     Assert-True (Test-Path "$ScoopRoot/shims/touch.cmd") 'the PowerShell entry did not publish a Scoop-shaped wrapper'
-    Assert-True (-not (Test-Path "$ScoopRoot/shims/touch.coop-shim.json")) 'the PowerShell entry wrote Coop-only metadata into shims/'
+    Assert-True (-not (Test-Path "$ScoopRoot/shims/touch.burrow-shim.json")) 'the PowerShell entry wrote Burrow-only metadata into shims/'
     $touchRun = Run 'touch-ps1-relative' "$ScoopRoot/shims/touch.cmd" @('created-by-ps1.txt') $work
     Assert-True ($touchRun.exit -eq 0) "the real PowerShell entry failed: $($touchRun.output)"
     Assert-True (Test-Path (Join-Path $work 'created-by-ps1.txt')) 'the real PowerShell entry did not create its argument relative to the caller directory'
 
-    # Real Scoop-owned shortcuts already use subdirectories and arguments. Coop must read the same
+    # Real Scoop-owned shortcuts already use subdirectories and arguments. Burrow must read the same
     # targets and arguments without claiming or rewriting them during a preview.
     $realShortcutEvidence = [ordered]@{}
     foreach ($name in @('7zip','git')) {
-        $preview = Coop ($name+'-uninstall-preview') @('uninstall',$name,'--dry-run','--json')
+        $preview = Burrow ($name+'-uninstall-preview') @('uninstall',$name,'--dry-run','--json')
         Assert-True ($preview.exit -eq 0) "uninstall preview failed for real package ${name}: $($preview.output)"
         $previewJson = Read-Json $preview.output
         $subdirectories = 0
@@ -208,20 +208,20 @@ try {
         Assert-True ($subdirectories -gt 0) "real package $name has no subdirectory shortcut evidence"
         $realShortcutEvidence[$name] = [pscustomobject]@{shortcuts=@($previewJson.exposure.shortcuts);subdirectories=$subdirectories}
     }
-    # Real Scoop installed clink is a BAT entry with only .cmd/sh wrappers. Coop must plan both its
+    # Real Scoop installed clink is a BAT entry with only .cmd/sh wrappers. Burrow must plan both its
     # update and uninstall from that evidence without a private record or an .exe/.shim pair.
-    $clinkPreview = Coop 'clink-update-preview' @('update','clink','--dry-run','--json')
+    $clinkPreview = Burrow 'clink-update-preview' @('update','clink','--dry-run','--json')
     Assert-True ($clinkPreview.exit -eq 0) "Scoop-installed clink update preview failed: $($clinkPreview.output)"
     $clinkPlan = Read-Json $clinkPreview.output
     Assert-True ($clinkPlan.execution_available -eq $true) "Scoop-installed BAT entry was not executable: $($clinkPreview.output)"
     Assert-True (@($clinkPlan.scoop_entry_wrappers | Where-Object { $_ -like '*\clink.cmd' }).Count -eq 1) 'update preview omitted the Scoop clink.cmd wrapper'
-    $clinkUninstallPreview = Coop 'clink-uninstall-preview' @('uninstall','clink','--dry-run','--json')
+    $clinkUninstallPreview = Burrow 'clink-uninstall-preview' @('uninstall','clink','--dry-run','--json')
     Assert-True ($clinkUninstallPreview.exit -eq 0) "Scoop-installed clink uninstall preview failed: $($clinkUninstallPreview.output)"
     $clinkUninstallPlan = Read-Json $clinkUninstallPreview.output
     Assert-True ($clinkUninstallPlan.execution_available -eq $true) 'Scoop-installed BAT entry was blocked from uninstall'
     Assert-True (@($clinkUninstallPlan.scoop_entry_wrappers).Count -ge 2) 'uninstall preview omitted the Scoop clink wrappers'
 
-    # Real Scoop reset rewrites the shared entries and shortcuts. Coop must keep identifying the
+    # Real Scoop reset rewrites the shared entries and shortcuts. Burrow must keep identifying the
     # installation, then uninstall only entries and shortcuts whose ownership it can confirm; Scoop's
     # script-host wrappers are removed only when their content points at the test package.
     $resetEvidence = [ordered]@{}
@@ -229,29 +229,29 @@ try {
         $reset = Scoop ($name+'-scoop-reset') @('reset',$name)
         Assert-True ($reset.exit -eq 0) "Scoop reset failed for ${name}: $($reset.output)"
         $afterReset = InstalledEntry $name
-        Assert-True ($null -ne $afterReset) "Coop stopped identifying $name after Scoop reset"
+        Assert-True ($null -ne $afterReset) "Burrow stopped identifying $name after Scoop reset"
         if ($name -eq 'lessmsi') {
             Assert-Shortcut $lessmsiShortcut "$ScoopRoot/apps/lessmsi/current/lessmsi-gui.exe" '' "$ScoopRoot/apps/lessmsi/current" | Out-Null
         }
         if ($name -eq 'red-view') {
             Assert-Shortcut (Join-Path $programs 'Red GUI Console.lnk') "$ScoopRoot/apps/red-view/current/red-view.exe" '' "$ScoopRoot/apps/red-view/current" | Out-Null
         }
-        $resetEvidence[$name] = [pscustomobject]@{coop_version=$afterReset.version;scoop_reset_exit=$reset.exit}
+        $resetEvidence[$name] = [pscustomobject]@{burrow_version=$afterReset.version;scoop_reset_exit=$reset.exit}
     }
     foreach ($name in $packages) {
-        $preview = Coop ($name+'-uninstall-preview') @('uninstall',$name,'--dry-run','--json')
+        $preview = Burrow ($name+'-uninstall-preview') @('uninstall',$name,'--dry-run','--json')
         Assert-True ($preview.exit -eq 0) "uninstall preview failed for ${name}: $($preview.output)"
         $previewJson = Read-Json $preview.output
-        $remove = Coop ($name+'-uninstall') @('uninstall',$name,'--json')
+        $remove = Burrow ($name+'-uninstall') @('uninstall',$name,'--json')
         Assert-True ($remove.exit -eq 0) "uninstall failed for ${name}: $($remove.output)"
         $installedByTest.Remove($name) | Out-Null
         Assert-True (-not (Test-Path "$ScoopRoot/apps/$name/current")) "uninstall left apps/$name/current"
-        Assert-True ($null -eq (InstalledEntry $name)) "Coop still lists $name after uninstall"
+        Assert-True ($null -eq (InstalledEntry $name)) "Burrow still lists $name after uninstall"
         foreach ($command in @($previewJson.package.commands)) {
             $commandName = [string]$command.name
             Assert-True (-not (Test-Path "$ScoopRoot/shims/$commandName.exe")) "uninstall left the $commandName launcher"
             Assert-True (-not (Test-Path "$ScoopRoot/shims/$commandName.shim")) "uninstall left the $commandName Scoop metadata"
-            Assert-True (-not (Test-Path "$ScoopRoot/shims/$commandName.coop-shim.json")) "uninstall left the $commandName Coop metadata"
+            Assert-True (-not (Test-Path "$ScoopRoot/shims/$commandName.burrow-shim.json")) "uninstall left the $commandName Burrow metadata"
             foreach ($wrapper in @("$commandName.cmd","$commandName.ps1",$commandName)) {
                 if (Test-Path "$ScoopRoot/shims/$wrapper") {
                     $text = Get-Content -LiteralPath "$ScoopRoot/shims/$wrapper" -Raw
@@ -264,16 +264,16 @@ try {
         $link = if ($name -eq 'lessmsi') { $lessmsiShortcut } else { Join-Path $programs 'Red GUI Console.lnk' }
         Assert-True (-not (Test-Path -LiteralPath $link)) "uninstall left the $name shortcut"
     }
-    $inventoryAfter = (Coop 'coop-list-after' @('list','--json')).output | ConvertFrom-Json
+    $inventoryAfter = (Burrow 'burrow-list-after' @('list','--json')).output | ConvertFrom-Json
     $beforeNames = @($inventoryBefore | ForEach-Object { "$($_.name)@$($_.version)" } | Sort-Object)
     $afterNames = @($inventoryAfter | ForEach-Object { "$($_.name)@$($_.version)" } | Sort-Object)
     Assert-True (($beforeNames -join '|') -eq ($afterNames -join '|')) 'the shared installation inventory changed outside the test packages'
     $evidence = [ordered]@{
         platform = (Get-CimInstance Win32_OperatingSystem).Caption
         scoop_root = $ScoopRoot
-        coop_exe = $CoopExe
-        coop_sha256 = (HashOf $CoopExe)
-        coop_version = (& $CoopExe --version | Out-String).Trim()
+        burrow_exe = $BurrowExe
+        burrow_sha256 = (HashOf $BurrowExe)
+        burrow_version = (& $BurrowExe --version | Out-String).Trim()
         scoop_version = $scoopVersion
         main_bucket_revision = $mainRevision
         java_home = $env:JAVA_HOME
@@ -303,7 +303,7 @@ try {
     if (Test-Path -LiteralPath $jarClass) { Remove-Item -LiteralPath $jarClass -Force -ErrorAction SilentlyContinue }
     foreach ($name in @($installedByTest)) {
         if (Test-Path "$ScoopRoot/apps/$name/current") {
-            $cleanup = Coop ($name+'-cleanup') @('uninstall',$name,'--json')
+            $cleanup = Burrow ($name+'-cleanup') @('uninstall',$name,'--json')
             if ($cleanup.exit -ne 0) { Write-Warning "Could not clean up test installation $name : $($cleanup.output)" }
         }
     }

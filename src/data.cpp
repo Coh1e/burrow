@@ -11,7 +11,7 @@
 #include <cwctype>
 #include <string>
 
-namespace coop {
+namespace burrow {
 namespace {
 bool extended_path(const std::wstring& value) {
     return value.starts_with(L"\\\\?\\") || value.starts_with(L"\\\\.\\");
@@ -44,7 +44,7 @@ std::wstring environment_value(const wchar_t* name) {
     value.resize(written);
     return value;
 }
-// COOP_STATE_DIR may carry %ROOT%; the replacement is per invocation because one test process can
+// BURROW_STATE_DIR may carry %ROOT%; the replacement is per invocation because one test process can
 // drive several roots. Comparison is ordinal case-insensitive, like Windows environment names.
 std::wstring expand_root_placeholder(std::wstring value, const std::wstring& root) {
     constexpr wchar_t marker[] = L"%ROOT%";
@@ -102,7 +102,7 @@ std::wstring wide(const std::string& value) {
 }
 std::string path_text(const fs::path& path) { return utf8(path.wstring()); }
 fs::path state_directory_for_root(const fs::path& root) {
-    const auto requested = environment_value(L"COOP_STATE_DIR");
+    const auto requested = environment_value(L"BURROW_STATE_DIR");
     if (!requested.empty()) {
         auto path = fs::path(expand_root_placeholder(requested,root.wstring()));
         if (!path.is_absolute()) path = root/path;
@@ -110,7 +110,7 @@ fs::path state_directory_for_root(const fs::path& root) {
     }
     const auto profile = environment_value(L"USERPROFILE");
     if (profile.empty())
-        throw std::runtime_error("USERPROFILE is not set; set COOP_STATE_DIR to choose where Coop keeps its state");
+        throw std::runtime_error("USERPROFILE is not set; set BURROW_STATE_DIR to choose where Burrow keeps its state");
     // One directory per root: its name plus eight hex digits of the SHA256 of the real root path.
     // The name is sanitised because a drive root has an empty filename and a colon is invalid.
     auto name = root.filename().wstring();
@@ -124,7 +124,7 @@ fs::path state_directory_for_root(const fs::path& root) {
     std::error_code canonical_error;
     const auto canonical = fs::weakly_canonical(root,canonical_error);
     if (canonical_error) throw std::runtime_error("Cannot resolve installation root for state: "+canonical_error.message());
-    const auto directory = fs::path(profile)/L".coop"/L"roots";
+    const auto directory = fs::path(profile)/L".burrow"/L"roots";
     const auto legacy_key = [&](const fs::path& spelling) {
         return operating_path(directory/(name+L"-"+wide(sha256_text(path_text(spelling)).substr(0,8))));
     };
@@ -137,13 +137,13 @@ fs::path state_directory_for_root(const fs::path& root) {
     for (const auto& candidate : {preferred,legacy_key(upper),legacy_key(lower)}) {
         if (!fs::exists(fs::symlink_status(candidate))) continue;
         if (!existing.empty() && !fs::equivalent(existing,candidate))
-            throw std::runtime_error("Conflicting Coop state directories: "+path_text(existing)+" and "+path_text(candidate));
+            throw std::runtime_error("Conflicting Burrow state directories: "+path_text(existing)+" and "+path_text(candidate));
         existing = candidate;
     }
     const auto supplied = legacy_key(root);
     if (fs::exists(fs::symlink_status(supplied)) &&
         (existing.empty() || !fs::equivalent(existing,supplied)))
-        throw std::runtime_error("Legacy Coop state requires reconciliation: "+path_text(supplied));
+        throw std::runtime_error("Legacy Burrow state requires reconciliation: "+path_text(supplied));
     return existing.empty() ? preferred : existing;
 }
 fs::path state_directory(const Context& context) { return state_directory_for_root(context.root); }
@@ -176,7 +176,7 @@ RootLock::RootLock(const Context& context) : handle_(INVALID_HANDLE_VALUE) {
     state_ = state_directory(context);
     const DWORD attributes = GetFileAttributesW(state_.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
-        throw std::runtime_error("Coop state directory cannot be a reparse point");
+        throw std::runtime_error("Burrow state directory cannot be a reparse point");
     fs::create_directories(state_);
     const auto lock_path = state_/L"write.lock";
     handle_ = CreateFileW(lock_path.c_str(), GENERIC_READ|GENERIC_WRITE, 0, nullptr,
@@ -206,7 +206,7 @@ RootLock::~RootLock() {
 Json bucket_sources(const Context& context) {
     Json sources = Json::array();
     auto registry = state_directory(context)/L"buckets.json";
-    if (!fs::exists(registry)) registry = context.root/L".coop"/L"buckets.json";
+    if (!fs::exists(registry)) registry = context.root/L".burrow"/L"buckets.json";
     if (fs::exists(registry)) sources = read_json(registry);
     if (!sources.is_array()) throw std::runtime_error("Invalid bucket registry");
     const auto buckets = context.root/L"buckets";
@@ -329,7 +329,7 @@ void move_tree(const fs::path& source, const fs::path& destination) {
 }
 void migrate_legacy_state(const Context& context) {
     const auto destination = state_directory(context);
-    const auto legacy = context.root/L".coop";
+    const auto legacy = context.root/L".burrow";
     const auto destination_text = path_text(destination);
     const auto legacy_text = path_text(legacy);
     const auto destination_wide = destination.wstring();
@@ -362,7 +362,7 @@ void migrate_legacy_state(const Context& context) {
         // Remove the old directory only when every entry moved; a skipped or failed entry keeps it.
         fs::remove(legacy,error);
     } catch (const std::exception& failure) {
-        std::cerr << "coop: could not migrate the old state directory " << legacy_text << " to "
+        std::cerr << "burrow: could not migrate the old state directory " << legacy_text << " to "
                   << destination_text << ": " << failure.what() << "; the old directory was kept\n";
     }
 }

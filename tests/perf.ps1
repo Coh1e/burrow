@@ -1,17 +1,17 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$TestRoot,
     [int]$Runs = 7
 )
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Performance test data must stay within the project test directory'
 }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-if (-not (Test-Path -LiteralPath $CoopExe)) { throw 'Coop executable is missing' }
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+if (-not (Test-Path -LiteralPath $BurrowExe)) { throw 'Burrow executable is missing' }
 Remove-Item -LiteralPath $TestRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null
 
@@ -20,7 +20,7 @@ function Assert([bool]$Condition, [string]$Message) {
 }
 # Full process start-to-exit measurement: no resident helper process and no in-process timing.
 function Invoke-Measured([string[]]$Arguments) {
-    $startInfo = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+    $startInfo = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
@@ -39,7 +39,7 @@ function Invoke-Measured([string[]]$Arguments) {
         ms = $watch.Elapsed.TotalMilliseconds
     }
 }
-function Measure-Coop([string]$Name, [string]$Target, [string[]]$Arguments) {
+function Measure-Burrow([string]$Name, [string]$Target, [string[]]$Arguments) {
     $samples = [System.Collections.Generic.List[double]]::new()
     $first = $null
     $last = $null
@@ -139,7 +139,7 @@ foreach ($size in $sizes) {
 New-InstallRoot (Join-Path $TestRoot 'installed-25') 25
 New-InstallRoot (Join-Path $TestRoot 'installed-100') 100
 
-# A process-start floor separates Coop's own work from Windows process creation cost.
+# A process-start floor separates Burrow's own work from Windows process creation cost.
 $floorSamples = [System.Collections.Generic.List[double]]::new()
 for ($index = 0; $index -lt $Runs; $index++) {
     $startInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $env:SystemRoot 'System32/cmd.exe'))
@@ -158,16 +158,16 @@ for ($index = 0; $index -lt $Runs; $index++) {
 $floor = @($floorSamples | Sort-Object)
 
 $measurements = [System.Collections.Generic.List[object]]::new()
-$measurements.Add((Measure-Coop 'version' 30 @('--version')))
+$measurements.Add((Measure-Burrow 'version' 30 @('--version')))
 foreach ($size in $sizes) {
-    $measurements.Add((Measure-Coop "info-scan-$size" 50 @('--root', $scanRoots[$size], 'info', 'main/pkg00042', '--json')))
-    $measurements.Add((Measure-Coop "search-scan-$size" 100 @('--root', $scanRoots[$size], 'search', 'pkg00042', '--json')))
-    $measurements.Add((Measure-Coop "info-index-$size" 50 @('--root', $indexRoots[$size], 'info', 'main/pkg00042', '--json')))
-    $measurements.Add((Measure-Coop "search-index-$size" 100 @('--root', $indexRoots[$size], 'search', 'pkg00042', '--json')))
+    $measurements.Add((Measure-Burrow "info-scan-$size" 50 @('--root', $scanRoots[$size], 'info', 'main/pkg00042', '--json')))
+    $measurements.Add((Measure-Burrow "search-scan-$size" 100 @('--root', $scanRoots[$size], 'search', 'pkg00042', '--json')))
+    $measurements.Add((Measure-Burrow "info-index-$size" 50 @('--root', $indexRoots[$size], 'info', 'main/pkg00042', '--json')))
+    $measurements.Add((Measure-Burrow "search-index-$size" 100 @('--root', $indexRoots[$size], 'search', 'pkg00042', '--json')))
 }
-$measurements.Add((Measure-Coop 'search-no-match-index-3000' 100 @('--root', $indexRoots[3000], 'search', 'absent-package-query', '--json')))
+$measurements.Add((Measure-Burrow 'search-no-match-index-3000' 100 @('--root', $indexRoots[3000], 'search', 'absent-package-query', '--json')))
 foreach ($count in 25, 100) {
-    $measurements.Add((Measure-Coop "list-$count" 50 @('--root', (Join-Path $TestRoot "installed-$count"), 'list', '--json')))
+    $measurements.Add((Measure-Burrow "list-$count" 50 @('--root', (Join-Path $TestRoot "installed-$count"), 'list', '--json')))
 }
 
 # Local query contract: indexed and scanned paths must return the same facts, diagnostics for
@@ -184,7 +184,7 @@ Assert (((& $facts $scanned[0]) | ConvertTo-Json -Compress) -eq ((& $facts $sear
 $broken = @(Get-JsonItems (Invoke-Measured @('--root', $indexRoots[200], 'search', 'broken', '--json')).output)
 Assert ($broken.Count -eq 1 -and @($broken[0].diagnostics).Count -eq 1) 'indexed search hid a malformed manifest diagnostic'
 $sourceSnapshot = @(Get-ChildItem -LiteralPath $sources[1500] -Recurse -File | ForEach-Object { $_.FullName + ':' + (Get-FileHash -LiteralPath $_.FullName).Hash })
-$queryRegistry = Join-Path $indexRoots[1500] '.coop/buckets.json'
+$queryRegistry = Join-Path $indexRoots[1500] '.burrow/buckets.json'
 $queryRegistryHash = (Get-FileHash -LiteralPath $queryRegistry).Hash
 $noMatch = Invoke-Measured @('--root', $indexRoots[1500], 'search', 'absent-package-query', '--json')
 Assert (@((ConvertFrom-Json $noMatch.output) | ForEach-Object { $_ }).Count -eq 0) 'search no-match returned a package'
@@ -194,7 +194,7 @@ Assert ((Get-FileHash -LiteralPath $queryRegistry).Hash -eq $queryRegistryHash) 
 
 # Index hit: rewriting an entry without touching the source must be served. This proves the
 # query read the index rather than rescanning the manifests.
-$indexPath = Join-Path $indexRoots[1500] '.coop/cache/index/main.json'
+$indexPath = Join-Path $indexRoots[1500] '.burrow/cache/index/main.json'
 Assert (Test-Path -LiteralPath $indexPath) 'bucket synchronization did not write a search index'
 $index = Get-Content -LiteralPath $indexPath -Raw | ConvertFrom-Json
 $entry = @($index.entries | Where-Object name -eq 'pkg00777')[0]
@@ -260,7 +260,7 @@ foreach ($file in Get-ChildItem -LiteralPath (Join-Path $sources[1500] 'bucket')
 }
 Invoke-FixtureGit @('init', '-b', 'trunk', ('--template=' + $gitTemplates), $repository) | Out-Null
 Invoke-FixtureGit @('-C', $repository, 'add', 'bucket') | Out-Null
-Invoke-FixtureGit @('-C', $repository, '-c', 'user.name=CoopPerf', '-c', 'user.email=coop@example.invalid', 'commit', '-m', 'initial') | Out-Null
+Invoke-FixtureGit @('-C', $repository, '-c', 'user.name=BurrowPerf', '-c', 'user.email=burrow@example.invalid', 'commit', '-m', 'initial') | Out-Null
 $repositoryUrl = ([uri]($repository.Replace('\', '/') + '/')).AbsoluteUri
 $gitRoot = Join-Path $TestRoot 'refresh-root'
 New-Item -ItemType Directory -Path $gitRoot -Force | Out-Null
@@ -268,10 +268,10 @@ $refreshFirst = Invoke-Measured @('--root', $gitRoot, 'bucket', 'add', 'main', $
 Assert ($refreshFirst.exit -eq 0) "git bucket add failed: $($refreshFirst.error)"
 $firstRecord = $refreshFirst.output | ConvertFrom-Json
 Assert ($firstRecord.changed -eq $true -and $firstRecord.first_refresh -eq $true -and $firstRecord.refresh_kind -eq 'first' -and $firstRecord.revision -eq (Invoke-FixtureGit @('-C', $repository, 'rev-parse', 'HEAD'))) 'git first fetch published the wrong revision or evidence'
-Assert (Test-Path -LiteralPath (Join-Path $gitRoot '.coop/cache/index/main.json')) 'git synchronization did not write a search index'
+Assert (Test-Path -LiteralPath (Join-Path $gitRoot '.burrow/cache/index/main.json')) 'git synchronization did not write a search index'
 Assert ($firstRecord.path -eq (Join-Path $gitRoot 'buckets/main') -and (Test-Path -LiteralPath (Join-Path $firstRecord.path '.git'))) 'git bucket is not a shared working tree'
-$gitRegistry = Join-Path $gitRoot '.coop/buckets.json'
-$gitIndexHashBefore = (Get-FileHash -LiteralPath (Join-Path $gitRoot '.coop/cache/index/main.json')).Hash
+$gitRegistry = Join-Path $gitRoot '.burrow/buckets.json'
+$gitIndexHashBefore = (Get-FileHash -LiteralPath (Join-Path $gitRoot '.burrow/cache/index/main.json')).Hash
 $registryHashBefore = (Get-FileHash -LiteralPath $gitRegistry).Hash
 $registryBefore = @(Get-Content -LiteralPath $gitRegistry -Raw | ConvertFrom-Json)[0]
 $refreshSame = Invoke-Measured @('--root', $gitRoot, 'bucket', 'update', 'main', '--json')
@@ -279,26 +279,26 @@ Assert ($refreshSame.exit -eq 0) "git no-change refresh failed: $($refreshSame.e
 $sameRecord = $refreshSame.output | ConvertFrom-Json
 $registryAfter = @(Get-Content -LiteralPath $gitRegistry -Raw | ConvertFrom-Json)[0]
 Assert ($sameRecord.changed -eq $false -and $sameRecord.refresh_kind -eq 'unchanged' -and $sameRecord.path -eq $firstRecord.path) 'unchanged revision was republished'
-Assert ((Get-FileHash -LiteralPath (Join-Path $gitRoot '.coop/cache/index/main.json')).Hash -eq $gitIndexHashBefore) 'no-change refresh rebuilt the search index'
+Assert ((Get-FileHash -LiteralPath (Join-Path $gitRoot '.burrow/cache/index/main.json')).Hash -eq $gitIndexHashBefore) 'no-change refresh rebuilt the search index'
 Assert ($registryAfter.revision -eq $registryBefore.revision -and $registryAfter.path -eq $registryBefore.path -and
     $registryAfter.files_count -eq $registryBefore.files_count) 'no-change refresh changed the shared bucket record'
 $registryMetadataRewritten = (Get-FileHash -LiteralPath $gitRegistry).Hash -ne $registryHashBefore
 $unchangedManifestBefore = Get-FileHash -LiteralPath (Join-Path $firstRecord.path 'bucket/pkg00042.json') -Algorithm SHA256
 New-ManifestFile (Join-Path $repository 'bucket/pkg09999.json') 'pkg09999' '3.0.0'
 Invoke-FixtureGit @('-C', $repository, 'add', 'bucket/pkg09999.json') | Out-Null
-Invoke-FixtureGit @('-C', $repository, '-c', 'user.name=CoopPerf', '-c', 'user.email=coop@example.invalid', 'commit', '-m', 'add pkg09999') | Out-Null
+Invoke-FixtureGit @('-C', $repository, '-c', 'user.name=BurrowPerf', '-c', 'user.email=burrow@example.invalid', 'commit', '-m', 'add pkg09999') | Out-Null
 $refreshChanged = Invoke-Measured @('--root', $gitRoot, 'bucket', 'update', 'main', '--json')
 Assert ($refreshChanged.exit -eq 0) "git changed refresh failed: $($refreshChanged.error)"
 $changedRecord = $refreshChanged.output | ConvertFrom-Json
 Assert ($changedRecord.changed -eq $true -and $changedRecord.refresh_kind -eq 'changed' -and $changedRecord.path -eq $firstRecord.path -and $changedRecord.previous_revision -eq $firstRecord.revision -and $changedRecord.changed_files -gt 0) 'new revision was not published in place with evidence'
 Assert ((Invoke-FixtureGit @('-C', $firstRecord.path, 'rev-parse', 'HEAD')) -eq $changedRecord.revision) 'shared working tree did not advance to the new revision'
-Assert ((Get-FileHash -LiteralPath (Join-Path $gitRoot '.coop/cache/index/main.json')).Hash -ne $gitIndexHashBefore) 'changed refresh did not rebuild the search index'
+Assert ((Get-FileHash -LiteralPath (Join-Path $gitRoot '.burrow/cache/index/main.json')).Hash -ne $gitIndexHashBefore) 'changed refresh did not rebuild the search index'
 $newPackage = Invoke-Measured @('--root', $gitRoot, 'info', 'main/pkg09999', '--json')
 Assert ($newPackage.exit -eq 0 -and @(Get-JsonItems $newPackage.output)[0].version -eq '3.0.0') 'new revision is not queryable'
 Assert ((Get-FileHash -LiteralPath (Join-Path $firstRecord.path 'bucket/pkg00042.json') -Algorithm SHA256).Hash -eq $unchangedManifestBefore.Hash) 'in-place refresh modified an unrelated manifest'
-$measurements.Add((Measure-Coop 'info-git-index-1500' 50 @('--root', $gitRoot, 'info', 'main/pkg00042', '--json')))
-$measurements.Add((Measure-Coop 'search-git-index-1500' 100 @('--root', $gitRoot, 'search', 'pkg00042', '--json')))
-# A repeat first fetch in a fresh root separates repository cache warm-up from Coop's own work.
+$measurements.Add((Measure-Burrow 'info-git-index-1500' 50 @('--root', $gitRoot, 'info', 'main/pkg00042', '--json')))
+$measurements.Add((Measure-Burrow 'search-git-index-1500' 100 @('--root', $gitRoot, 'search', 'pkg00042', '--json')))
+# A repeat first fetch in a fresh root separates repository cache warm-up from Burrow's own work.
 $warmRoot = Join-Path $TestRoot 'refresh-root-warm'
 New-Item -ItemType Directory -Path $warmRoot -Force | Out-Null
 $refreshFirstWarm = Invoke-Measured @('--root', $warmRoot, 'bucket', 'add', 'main', $repositoryUrl, '--branch', 'trunk', '--json')
@@ -323,9 +323,9 @@ $environment = [ordered]@{
     memory_bytes = (Get-CimInstance Win32_ComputerSystem | ForEach-Object { $_.TotalPhysicalMemory })
     disk = $disk
     powershell = $PSVersionTable.PSVersion.ToString()
-    coop_version = (& $CoopExe --version)
-    coop_sha256 = (Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash.ToLower()
-    coop_built = (Get-Item -LiteralPath $CoopExe).LastWriteTimeUtc.ToString('o')
+    burrow_version = (& $BurrowExe --version)
+    burrow_sha256 = (Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash.ToLower()
+    burrow_built = (Get-Item -LiteralPath $BurrowExe).LastWriteTimeUtc.ToString('o')
     git = (& $git --version)
     git_head = (Invoke-FixtureGit @('-C', (Split-Path $PSScriptRoot -Parent), 'rev-parse', 'HEAD'))
     cmake = $cmakeVersion
@@ -333,7 +333,7 @@ $environment = [ordered]@{
 }
 $refresh = [ordered]@{
     transport = 'file:// (offline libgit2 fixture; no external network)'
-    first = [ordered]@{ ms = [math]::Round($refreshFirst.ms, 1); received_bytes = $firstRecord.received_bytes; changed = $firstRecord.changed; revision = $firstRecord.revision; cache = 'first fetch after fixture creation (repository data not yet read by Coop)' }
+    first = [ordered]@{ ms = [math]::Round($refreshFirst.ms, 1); received_bytes = $firstRecord.received_bytes; changed = $firstRecord.changed; revision = $firstRecord.revision; cache = 'first fetch after fixture creation (repository data not yet read by Burrow)' }
     first_warm = [ordered]@{ ms = [math]::Round($refreshFirstWarm.ms, 1); received_bytes = $warmRecord.received_bytes; changed = $warmRecord.changed; revision = $warmRecord.revision; cache = 'repeat first fetch in a fresh root after the fixture is in the OS cache' }
     no_change = [ordered]@{ ms = [math]::Round($refreshSame.ms, 1); received_bytes = $sameRecord.received_bytes; changed = $sameRecord.changed; refresh_kind = $sameRecord.refresh_kind; index_rebuilt = $false; shared_path = $sameRecord.path; shared_files_unchanged = $true; registry_metadata_rewritten = $registryMetadataRewritten }
     changed = [ordered]@{ ms = [math]::Round($refreshChanged.ms, 1); received_bytes = $changedRecord.received_bytes; changed = $changedRecord.changed; refresh_kind = $changedRecord.refresh_kind; changed_files = $changedRecord.changed_files; index_rebuilt = $true; shared_path = $changedRecord.path; unrelated_manifest_unchanged = $true }

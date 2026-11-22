@@ -33,7 +33,7 @@
 
 以下三条来自实际发布事故（2026-10-30，`v0.2.2`），是判断而不是流程：
 
-1. **公共头不引入第三方依赖**。`src/app.hpp` 被所有目标包含；把 `nlohmann::json` 成员放进去，会让只拿到源码目录 include 的 IR 单测目标编译失败，而本地 `ninja coop` 完全看不见——CI 构建全部目标才会红。数据成员用标准类型，序列化留在实现文件里。
+1. **公共头不引入第三方依赖**。`src/app.hpp` 被所有目标包含；把 `nlohmann::json` 成员放进去，会让只拿到源码目录 include 的 IR 单测目标编译失败，而本地 `ninja burrow` 完全看不见——CI 构建全部目标才会红。数据成员用标准类型，序列化留在实现文件里。
 2. **脚本要能在 Windows PowerShell 5.1 上解析与运行**，不只是 PowerShell 7。5.1 没有三元运算符 `? :`；原生命令写到 stderr 的内容在 `$ErrorActionPreference='Stop'` 下会被当成终止错误。判断成败只看退出码。编码、行尾和捕获方式由 `check-source-hygiene.ps1` 检查，语义差异仍要审查。
 3. **用 shell 改文件必须当场统一行尾**。行尾混用由 `check-source-hygiene.ps1` 检查；它报出的文件往往不是你以为改过的那个，所以改完就核对，不要等提交。
 

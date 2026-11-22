@@ -21,7 +21,7 @@
 #include <stdexcept>
 #include <windows.h>
 
-namespace coop {
+namespace burrow {
 namespace {
 const char* action_name(ir::Action action) {
     switch (action) {
@@ -46,7 +46,7 @@ std::string join_text(const std::vector<std::string>& values, const std::string&
     return result;
 }
 // Saved dependent manifests are read through the IR adapter, so reverse-dependency evidence uses
-// the same normalized identity as forward dependency planning. Coop's own record is only a fallback
+// the same normalized identity as forward dependency planning. Burrow's own record is only a fallback
 // when the shared manifest is missing or unreadable.
 bool read_dependent_dependencies(const Context& context, const ir::InstalledFact& fact,
                                  std::vector<ir::Dependency>& dependencies, std::string& problem) {
@@ -165,7 +165,7 @@ bool has_nsis_payload(const ir::Package& package) {
 }
 bool declares_environment(const ir::Package& package) { return !package.environment.empty(); }
 // The permission and reboot facts are stated where the user reviews the plan, and they describe the
-// mechanism Coop actually uses rather than the vendor installer's own behaviour.
+// mechanism Burrow actually uses rather than the vendor installer's own behaviour.
 Json msi_extraction_json() {
     const auto database_api = msi_database_api();
     const auto fdi_api = cabinet_api();
@@ -174,9 +174,9 @@ Json msi_extraction_json() {
         {"cabinet_api",fdi_api ? path_text(*fdi_api) : std::string{}},
         {"msiexec_started",false},
         {"administrative_install",false},
-        {"elevation","not required for MSI image extraction; Coop writes only inside the selected root, and the read-only database view changes no system folder, registry, service or machine-wide state"},
+        {"elevation","not required for MSI image extraction; Burrow writes only inside the selected root, and the read-only database view changes no system folder, registry, service or machine-wide state"},
         {"reboot","not required for MSI image extraction; an administrative image is extracted, so the product installer's reboot scheduling is not executed"},
-        {"machine_cache","not written by the MSI image extraction: Coop opens the installer database read-only and never calls msiexec or registers a product"},
+        {"machine_cache","not written by the MSI image extraction: Burrow opens the installer database read-only and never calls msiexec or registers a product"},
         {"layout","administrative image layout from the Directory, Component, File and Media tables with long target names, then the declared extract_dir/extract_to"},
         {"external_cabinets","unsupported: an MSI whose Media table names an external cabinet, or a multi-part cabinet, fails before any file is published"},
         {"differences","the administrative-install copy of the MSI file itself and empty directories that only carry shortcuts are not written"}};
@@ -191,7 +191,7 @@ Json inno_setup_json(const Context& context) {
         {"helper_available",!helper.path.empty()},
         {"helper_problem",helper.problem},
         {"helper_lookup","apps/innounp-unicode/current/innounp.exe then apps/innounp/current/innounp.exe under the selected root and the optional global root"},
-        {"helper_policy","a separate software dependency of this package mechanism, not a Coop core dependency; Coop detects it and never downloads, installs or bundles it"},
+        {"helper_policy","a separate software dependency of this package mechanism, not a Burrow core dependency; Burrow detects it and never downloads, installs or bundles it"},
         {"arguments","-x -d<destination> <setup.exe> -y -c<selection>, exactly as Scoop 0.6.0's Expand-InnoArchive"},
         {"selection","-c{app} when no extract_dir is declared, -c{app}\\<extract_dir> for a relative extract_dir, and the declared {path} when extract_dir starts with '{'"},
         {"installer_executed",false},
@@ -199,7 +199,7 @@ Json inno_setup_json(const Context& context) {
         {"reboot","not required: no vendor installer process is started, so its reboot scheduling cannot run"},
         {"installer_effects","not executed: the vendor installer's [Run], [Registry], services, Start Menu entries and uninstall registration are outside this extraction"},
         {"layout","the files below the selected Inno directory, then the declared extract_dir/extract_to; file contents and timestamps are what innounp writes"},
-        {"limitations","encrypted installers need a password Coop does not supply, and an Inno Setup version the installed innounp cannot read fails with a named non-zero error before a version is published"}};
+        {"limitations","encrypted installers need a password Burrow does not supply, and an Inno Setup version the installed innounp cannot read fails with a named non-zero error before a version is published"}};
 }
 // An NSIS installer payload is a self-extracting executable that the Manifest declares as an
 // archive (Scoop's `#/dl.7z` idiom). The declared suffix cannot decide the real container, so the
@@ -209,13 +209,13 @@ Json nsis_extraction_json(const Context& context) {
     const auto helper = nsis_helper(context);
     return {{"mechanism","external 7-Zip helper using Scoop's Expand-7zipArchive arguments"},
         {"payload","an executable self-extractor declared as an archive payload (for example `#/dl.7z`)"},
-        {"content_detection","after digest verification Coop inspects the payload bytes: only an NSIS installer uses the helper, every other payload stays with the native archive reader"},
+        {"content_detection","after digest verification Burrow inspects the payload bytes: only an NSIS installer uses the helper, every other payload stays with the native archive reader"},
         {"signature","NSIS FirstHeader magic DE AD BE EF followed by the ASCII marker NullsoftInst; the byte offset is recorded in the transaction journal"},
         {"helper",path_text(helper.path)},
         {"helper_available",!helper.path.empty()},
         {"helper_problem",helper.problem},
         {"helper_lookup","apps/7zip/current/7z.exe under the selected root and the optional global root"},
-        {"helper_policy","a separate 7-Zip software dependency of this package mechanism, not a Coop core dependency; Coop detects it and never downloads, installs or bundles it"},
+        {"helper_policy","a separate 7-Zip software dependency of this package mechanism, not a Burrow core dependency; Burrow detects it and never downloads, installs or bundles it"},
         {"arguments","x <payload> -o<destination> -xr!*.nsis -y, plus -ir!<extract_dir>\\* when extract_dir is declared, exactly as Scoop 0.6.0's Expand-7zipArchive"},
         {"installer_executed",false},
         {"elevation","not requested: 7-Zip unpacks files into the selected root and the vendor setup.exe never runs"},
@@ -258,7 +258,7 @@ Json package_json(const Context& context, const ir::Package& package) {
         {"context",Json::array({"$app","$bucket","$version","$architecture","$fname","$dir","$original_dir","$persist_dir","$bucketsdir","$scoopdir","$cachedir","$global","$manifest","$purge (uninstall only)"})},
         {"undefined_context",Json::array({"$cmd (Scoop 0.6.0 never defines it, so `if ($cmd -eq 'uninstall')` blocks behave identically)"})},
         {"host","real PowerShell child process that loads the pinned Scoop compatibility library; no embedded interpreter and no script-text whitelist"},
-        {"working_directory","the hook child inherits the invoking Coop process directory, like Scoop's in-process hooks; scripts must address the package through $dir"},
+        {"working_directory","the hook child inherits the invoking Burrow process directory, like Scoop's in-process hooks; scripts must address the package through $dir"},
         {"library_version",host.library_version},
         {"library_path",host.library ? path_text(*host.library) : std::string{}},
         {"interpreter",host.interpreter ? path_text(*host.interpreter) : std::string{}},
@@ -320,7 +320,7 @@ ir::Package parse_package(const fs::path& path, const std::string& name, const s
     return ir::adapt_manifest(path,name,bucket,architecture);
 }
 // `install <URL>` and `install <file.json>` are Scoop's ad-hoc manifest forms: the package is not in
-// any bucket, so its source is recorded as `<auto-generated>`. A URL is copied into the Coop
+// any bucket, so its source is recorded as `<auto-generated>`. A URL is copied into the Burrow
 // state directory's `manifests` folder first, because the plan keeps pointing at a local file afterwards.
 static bool request_is_manifest(const std::string& request) {
     if (request.find("://") != std::string::npos) return true;
@@ -385,7 +385,7 @@ Plan make_plan(const Context& context, ir::Action action, const std::string& req
             if (action != ir::Action::install)
                 throw std::runtime_error("global-scope-readonly: package '"+name+"' is installed only in the "
                     "read-only system-level root "+path_text(*context.global_root)+
-                    "; Coop does not update or remove system-level installations");
+                    "; Burrow does not update or remove system-level installations");
         }
     }
     const auto read_installed = [&]() {
@@ -451,15 +451,15 @@ Plan make_plan(const Context& context, ir::Action action, const std::string& req
             const auto expected_stamp = record.value("tree_stamp",std::string{});
             if (!expected_manifest.empty() && expected_manifest != evidence.value("manifest_sha256",std::string{}))
                 plan.diagnostics.push_back({ir::Layer::verification,"retained-version-modified",
-                    "Retained Manifest changed after Coop recorded this version; rollback is refused"});
+                    "Retained Manifest changed after Burrow recorded this version; rollback is refused"});
             if (!expected_install.empty() && expected_install != evidence.value("install_record_sha256",std::string{}))
                 plan.diagnostics.push_back({ir::Layer::verification,"retained-version-modified",
-                    "Retained installation record changed after Coop recorded this version; rollback is refused"});
+                    "Retained installation record changed after Burrow recorded this version; rollback is refused"});
             if (!expected_stamp.empty()) {
                 try {
                     if (version_tree_stamp(directory) != expected_stamp)
                         plan.diagnostics.push_back({ir::Layer::verification,"retained-version-modified",
-                            "Retained version contents changed after Coop recorded them; rollback is refused"});
+                            "Retained version contents changed after Burrow recorded them; rollback is refused"});
                 } catch (const std::exception& error) {
                     plan.diagnostics.push_back({ir::Layer::verification,"retained-version-modified",
                         std::string("Retained version contents cannot be inspected: ")+error.what()});
@@ -559,7 +559,7 @@ Plan make_plan(const Context& context, ir::Action action, const std::string& req
         std::vector<std::string> names;
         for (const auto& command : installed_facts.entries) names.push_back(command.alias);
         plan.scoop_entry_wrappers = scoop_entry_wrappers(context,installed_facts.name,names);
-        // Entry files an older Coop build published for script aliases (its own launcher metadata
+        // Entry files an older Burrow build published for script aliases (its own launcher metadata
         // and the .shim view it used to write) are retired by this operation. They are added here
         // so the preview lists them and the preconditions cover them, instead of the executor
         // discovering them behind the plan's back.
@@ -570,7 +570,7 @@ Plan make_plan(const Context& context, ir::Action action, const std::string& req
                     return equal_name(other.alias,command.alias) &&
                         launcher_kind(fs::path(wide(other.target))) == LauncherKind::direct;
                 });
-            for (const auto& suffix : {std::wstring(L".shim"),std::wstring(L".coop-shim.json"),std::wstring(L".coop-shim")}) {
+            for (const auto& suffix : {std::wstring(L".shim"),std::wstring(L".burrow-shim.json"),std::wstring(L".burrow-shim")}) {
                 // The .shim of a shared alias belongs to the executable family and is removed as
                 // that entry's metadata, not as a script wrapper.
                 if (suffix == L".shim" && shares_alias_with_direct) continue;
@@ -662,7 +662,7 @@ static Json describe_plan(const Context& context, const Plan& plan) {
         purge["reason"] = "--purge is only supported by uninstall";
     } else if (plan.purge) {
         // The purge scope comes from the installed package's own declarations and the verified
-        // links; a Coop private record is not a precondition for removing declared data.
+        // links; a Burrow private record is not a precondition for removing declared data.
         try {
             purge["scope"] = purge_scope(context,plan.package,plan.local.directory);
         } catch (const std::exception& error) {
@@ -814,7 +814,7 @@ static Json describe_plan(const Context& context, const Plan& plan) {
     for (const auto& item : plan.package.warnings)
         result["warnings"].push_back({{"category",categories[static_cast<int>(item.layer)]},{"code",item.code},{"message",item.message}});
     if (!plan.blocker.empty()) result["diagnostics"].push_back({{"category","capability"},{"code","execution-blocked"},{"message",plan.blocker}});
-    result["diagnostics"].push_back({{"category","verification"},{"code","lifecycle-verification"},{"message","Native lifecycle coverage: single-file, multi-artifact, renamed-artifact, ZIP, tar, 7z, MSI, Inno Setup and NSIS installer-payload archive packages, including packages that combine pre_install/installer/post_install scripts with declared installer/uninstaller programs; MSI artifacts are extracted from a read-only Windows Installer database view with the Windows cabinet decompression API (administrative image layout, no msiexec process, no product registration, no elevation, no reboot and no %WINDIR%\\Installer machine-cache write; external cabinets are reported as unsupported); Inno Setup .exe artifacts are unpacked by the separately installed innounp helper with Scoop's Expand-InnoArchive arguments and layout (the vendor installer is never executed, the helper is detected and never downloaded, and its own [Run]/[Registry]/service/shortcut effects are outside the extraction); an executable self-extractor declared as an archive payload is inspected by content after verification and, when it is an NSIS installer, unpacked by the separately installed 7-Zip helper with Scoop's Expand-7zipArchive arguments (ordinary 7z, ZIP and tar payloads stay native, the vendor setup.exe is never executed, and the helper is detected and never downloaded); declared SHA256, SHA512, SHA1 and MD5 digests, architecture-specific Manifest sections, persist mappings, installed dependencies, EXE/COM/BAT/CMD/PS1/JAR/PY command entries and Scoop's bash else-branch (extensionless, .config and other targets) with argument forwarding, Windows shortcuts and declared environment exposure in the current user's persistent environment plus Coop command processes are supported, while persist mapping changes remain unverified; every declared lifecycle hook (pre_install, installer, post_install, pre_uninstall, uninstaller, post_uninstall) runs as trusted script text in a real PowerShell host that loads the pinned Scoop compatibility library (v0.6.0) with the Scoop context and helpers, so script text is not whitelisted and a legitimate Manifest edit still executes, while declared installer/uninstaller programs run through the same real PowerShell host and pinned Scoop Invoke-Installer with the $dir/$global/$version argument substitution, keep semantics and external side effects Coop never claims to roll back"}});
+    result["diagnostics"].push_back({{"category","verification"},{"code","lifecycle-verification"},{"message","Native lifecycle coverage: single-file, multi-artifact, renamed-artifact, ZIP, tar, 7z, MSI, Inno Setup and NSIS installer-payload archive packages, including packages that combine pre_install/installer/post_install scripts with declared installer/uninstaller programs; MSI artifacts are extracted from a read-only Windows Installer database view with the Windows cabinet decompression API (administrative image layout, no msiexec process, no product registration, no elevation, no reboot and no %WINDIR%\\Installer machine-cache write; external cabinets are reported as unsupported); Inno Setup .exe artifacts are unpacked by the separately installed innounp helper with Scoop's Expand-InnoArchive arguments and layout (the vendor installer is never executed, the helper is detected and never downloaded, and its own [Run]/[Registry]/service/shortcut effects are outside the extraction); an executable self-extractor declared as an archive payload is inspected by content after verification and, when it is an NSIS installer, unpacked by the separately installed 7-Zip helper with Scoop's Expand-7zipArchive arguments (ordinary 7z, ZIP and tar payloads stay native, the vendor setup.exe is never executed, and the helper is detected and never downloaded); declared SHA256, SHA512, SHA1 and MD5 digests, architecture-specific Manifest sections, persist mappings, installed dependencies, EXE/COM/BAT/CMD/PS1/JAR/PY command entries and Scoop's bash else-branch (extensionless, .config and other targets) with argument forwarding, Windows shortcuts and declared environment exposure in the current user's persistent environment plus Burrow command processes are supported, while persist mapping changes remain unverified; every declared lifecycle hook (pre_install, installer, post_install, pre_uninstall, uninstaller, post_uninstall) runs as trusted script text in a real PowerShell host that loads the pinned Scoop compatibility library (v0.6.0) with the Scoop context and helpers, so script text is not whitelisted and a legitimate Manifest edit still executes, while declared installer/uninstaller programs run through the same real PowerShell host and pinned Scoop Invoke-Installer with the $dir/$global/$version argument substitution, keep semantics and external side effects Burrow never claims to roll back"}});
     return result;
 }
 struct PackageOutcome {
@@ -830,7 +830,7 @@ std::string first_diagnostic(const std::vector<ir::Diagnostic>& diagnostics) {
 // machine-readable contract is not mixed with human-readable lines.
 void print_warnings(const Context& context, const ir::Package& package) {
     if (context.json_output) return;
-    for (const auto& warning : package.warnings) std::cerr << "coop: warning: " << warning.message << '\n';
+    for (const auto& warning : package.warnings) std::cerr << "burrow: warning: " << warning.message << '\n';
 }
 void print_json(const Json& value) {
     std::cout << value.dump(2,' ',false,Json::error_handler_t::replace) << '\n';
@@ -1130,7 +1130,7 @@ int install_single(const Context& context, const std::string& request, const std
         else {
             print_preview(outcome.value);
             // A blocked preview must still name its reason on stderr, as the executor does.
-            if (outcome.failed && !outcome.reason.empty()) std::cerr << "coop: " << outcome.reason << '\n';
+            if (outcome.failed && !outcome.reason.empty()) std::cerr << "burrow: " << outcome.reason << '\n';
         }
         return outcome.failed ? 1 : 0;
     }
@@ -1141,7 +1141,7 @@ int install_single(const Context& context, const std::string& request, const std
     const auto outcome = install_execute_plan(context,plan,request);
     if (context.json_output) print_json(outcome.value);
     // Text mode already reported each package as it finished; only a failure needs a closing line.
-    else if (outcome.failed) std::cerr << "coop: " << outcome.reason << '\n';
+    else if (outcome.failed) std::cerr << "burrow: " << outcome.reason << '\n';
     return outcome.failed ? 1 : 0;
 }
 int install_batch(const Context& context, const std::vector<std::wstring>& names, const std::string& architecture, bool dry_run) {
@@ -1163,7 +1163,7 @@ int install_batch(const Context& context, const std::vector<std::wstring>& names
     // trailing summary, the same contract simple_batch follows. A failure still says why, on stderr.
     else {
         for (const auto& item : results)
-            if (item.contains("reason")) std::cerr << "coop: " << item.at("reason").get<std::string>() << '\n';
+            if (item.contains("reason")) std::cerr << "burrow: " << item.at("reason").get<std::string>() << '\n';
     }
     return failed ? 1 : 0;
 }
@@ -1174,7 +1174,7 @@ int simple_single(const Context& context, ir::Action action, const std::string& 
         else {
             print_preview(outcome.value);
             // A blocked preview must still name its reason on stderr, as the executor does.
-            if (outcome.failed && !outcome.reason.empty()) std::cerr << "coop: " << outcome.reason << '\n';
+            if (outcome.failed && !outcome.reason.empty()) std::cerr << "burrow: " << outcome.reason << '\n';
         }
         return outcome.failed ? 1 : 0;
     }
@@ -1212,7 +1212,7 @@ int simple_batch(const Context& context, ir::Action action, const std::vector<st
         // Each command prints its own Scoop-shaped closing line as it finishes, so the batch only
         // has to surface a failure; an extra status line would be output Scoop never writes.
         if (!context.json_output) {
-            if (!outcome.reason.empty()) std::cerr << "coop: " << outcome.reason << '\n';
+            if (!outcome.reason.empty()) std::cerr << "burrow: " << outcome.reason << '\n';
             std::cout.flush();
         }
     }
@@ -1233,9 +1233,9 @@ int package_command(const Context& context, const std::wstring& command, const s
             if (purge) throw UsageError("--purge was specified more than once");
             purge = true;
         } else if (arg == L"-u" || arg == L"--no-update-scoop") {
-            // Scoop updates itself before an install unless this flag is given. Coop never
+            // Scoop updates itself before an install unless this flag is given. Burrow never
             // self-updates, so the flag's condition already holds; refusing it would fail a command
-            // that is asking for something Coop does anyway.
+            // that is asking for something Burrow does anyway.
         } else if (arg == L"-a" || arg == L"--all") {
             if (command != L"cleanup") throw UsageError("-a/--all is only supported by cleanup");
             // `cleanup -a` is the long form of "every app", which a bare cleanup already means.
@@ -1243,14 +1243,14 @@ int package_command(const Context& context, const std::wstring& command, const s
             if (command != L"cleanup") throw UsageError("-k/--cache is only supported by cleanup");
             cache_cleanup = true;
         } else if (arg == L"--transactions") {
-            // Coop-specific: the evidence of finished writes is not Scoop state, so it is cleaned on
+            // Burrow-specific: the evidence of finished writes is not Scoop state, so it is cleaned on
             // request rather than automatically, and a pending transaction is never touched.
             if (command != L"cleanup") throw UsageError("--transactions is only supported by cleanup");
             transaction_cleanup = true;
         } else if (arg == L"-g" || arg == L"--global") {
             // A system-level write is a product boundary, not an unknown switch. Scoop users type `-g`
             // and must read the boundary instead of "unknown option".
-            throw std::runtime_error("global-scope-readonly: Coop does not write a system-level installation; "
+            throw std::runtime_error("global-scope-readonly: Burrow does not write a system-level installation; "
                                      "use --global-root to read one");
         } else if (arg.starts_with(L"--")) throw UsageError("Unknown package option: "+utf8(arg));
         else names.push_back(arg);
@@ -1273,7 +1273,7 @@ int package_command(const Context& context, const std::wstring& command, const s
 }
 // `import` consumes a Scoopfile: missing buckets are registered, then every declared app is installed
 // through the same batch path `install a b c` uses. A `Global install` entry is a system-level write,
-// which Coop refuses by design; it is reported and skipped instead of failing the whole import.
+// which Burrow refuses by design; it is reported and skipped instead of failing the whole import.
 static std::string lowercase_name(std::string value) {
     for (auto& character : value) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
     return value;
@@ -1306,7 +1306,7 @@ int import_command(const Context& context, const std::vector<std::wstring>& args
         if (registered.contains(lowercase_name(name))) continue;
         const auto repository = bucket.value("Source",std::string{});
         if (repository.empty()) {
-            std::cerr << "coop: bucket '"<<name<<"' has no source and is not registered here; skipped\n";
+            std::cerr << "burrow: bucket '"<<name<<"' has no source and is not registered here; skipped\n";
             continue;
         }
         try {
@@ -1314,7 +1314,7 @@ int import_command(const Context& context, const std::vector<std::wstring>& args
             if (bucket_command(context,add,true) != 0) result = 1;
             else registered.insert(lowercase_name(name));
         } catch (const std::exception& error) {
-            std::cerr << "coop: bucket '"<<name<<"': "<<error.what()<<'\n';
+            std::cerr << "burrow: bucket '"<<name<<"': "<<error.what()<<'\n';
             result = 1;
         }
     }
@@ -1324,7 +1324,7 @@ int import_command(const Context& context, const std::vector<std::wstring>& args
         const auto name = app.at("Name").get<std::string>();
         const auto info = app.value("Info",std::string{});
         if (info.find("Global install") != std::string::npos) {
-            std::cerr << "coop: '"<<name<<"' is a global install; global-scope-readonly skips it\n";
+            std::cerr << "burrow: '"<<name<<"' is a global install; global-scope-readonly skips it\n";
             continue;
         }
         const auto bucket = app.value("Source",std::string{});

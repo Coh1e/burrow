@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 // Pinned upstream version of assets/scoop-lib. Recorded in the host, the journal and the preview
 // so hook evidence names the exact compatibility baseline instead of "current Scoop".
@@ -32,12 +32,12 @@ std::optional<std::wstring> environment_value(const wchar_t* name) {
 }
 struct LibraryLookup {
     std::optional<fs::path> path;
-    // An explicit COOP_SCOOP_LIB that does not contain core.ps1 is a configuration error, not a
+    // An explicit BURROW_SCOOP_LIB that does not contain core.ps1 is a configuration error, not a
     // reason to silently fall back to the copy beside the executable.
     bool override_invalid = false;
 };
 LibraryLookup scoop_library() {
-    if (const auto configured = environment_value(L"COOP_SCOOP_LIB")) {
+    if (const auto configured = environment_value(L"BURROW_SCOOP_LIB")) {
         const fs::path candidate(*configured);
         if (!fs::is_regular_file(candidate/L"core.ps1")) return {std::nullopt,true};
         return {candidate,false};
@@ -51,7 +51,7 @@ LibraryLookup scoop_library() {
 }
 std::optional<fs::path> powershell_interpreter() {
     wchar_t configured[32768]{};
-    const auto configured_length = GetEnvironmentVariableW(L"COOP_POWERSHELL",configured,static_cast<DWORD>(std::size(configured)));
+    const auto configured_length = GetEnvironmentVariableW(L"BURROW_POWERSHELL",configured,static_cast<DWORD>(std::size(configured)));
     if (configured_length && configured_length < std::size(configured)) {
         const fs::path candidate(configured);
         if (fs::is_regular_file(candidate)) return candidate;
@@ -187,7 +187,7 @@ void write_script_file(const fs::path& path, const std::string& text) {
     if (!output) throw std::runtime_error("Cannot finish hook script");
 }
 
-// Every PowerShell host Coop starts (hook scripts and installer/uninstaller programs) shares the
+// Every PowerShell host Burrow starts (hook scripts and installer/uninstaller programs) shares the
 // native child-process capture in native.cpp; the host only composes its argument list.
 struct ProcessCapture {
     int exit_code = 1;
@@ -214,11 +214,11 @@ ScriptHostInfo script_host() {
     info.library = library.path;
     info.library_version = scoop_compat_version;
     if (!info.interpreter)
-        info.problem = "A PowerShell runtime (pwsh.exe or Windows PowerShell) is required for lifecycle hook scripts; Coop does not install PowerShell automatically";
+        info.problem = "A PowerShell runtime (pwsh.exe or Windows PowerShell) is required for lifecycle hook scripts; Burrow does not install PowerShell automatically";
     else if (library.override_invalid)
-        info.problem = "COOP_SCOOP_LIB is set but does not contain core.ps1, so the pinned Scoop compatibility library needed by hook scripts is not available";
+        info.problem = "BURROW_SCOOP_LIB is set but does not contain core.ps1, so the pinned Scoop compatibility library needed by hook scripts is not available";
     else if (!info.library)
-        info.problem = "The pinned Scoop compatibility library (scoop-lib/core.ps1) was not found beside coop.exe and COOP_SCOOP_LIB is not set, so hook scripts cannot get the Scoop context and helpers";
+        info.problem = "The pinned Scoop compatibility library (scoop-lib/core.ps1) was not found beside burrow.exe and BURROW_SCOOP_LIB is not set, so hook scripts cannot get the Scoop context and helpers";
     return info;
 }
 std::string script_json_text(const std::string& value) {

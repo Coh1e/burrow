@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 // `create` derives a name and a version guess from the URL alone: it never downloads, so it works
 // offline and cannot fail on a slow server. The output goes to stdout, because writing into a bucket
@@ -60,7 +60,7 @@ int virustotal_command(const Context& context,const std::vector<std::wstring>& a
         if (argument == L"-n" || argument == L"--no-depends") continue;
         if (argument == L"-u" || argument == L"--no-update-scoop") continue;
         if (argument == L"-s" || argument == L"--scan")
-            throw std::runtime_error("Uploading a package for analysis (-s) is not implemented in Coop yet");
+            throw std::runtime_error("Uploading a package for analysis (-s) is not implemented in Burrow yet");
         if (argument.starts_with(L"-")) throw UsageError("Unknown virustotal option: "+utf8(argument));
         names.push_back(argument);
     }
@@ -69,20 +69,20 @@ int virustotal_command(const Context& context,const std::vector<std::wstring>& a
     // shared configuration file; the configured value is the persistent form.
     std::string key;
     wchar_t key_buffer[256]{};
-    if (const auto key_length = GetEnvironmentVariableW(L"COOP_VIRUSTOTAL_KEY",key_buffer,256); key_length && key_length < 256)
+    if (const auto key_length = GetEnvironmentVariableW(L"BURROW_VIRUSTOTAL_KEY",key_buffer,256); key_length && key_length < 256)
         key = utf8(std::wstring(key_buffer,key_length));
     if (key.empty()) key = config_value("virustotal_api_key");
     if (key.empty()) {
-        std::cerr << "coop: VirusTotal API key is not configured\n"
+        std::cerr << "burrow: VirusTotal API key is not configured\n"
                      "You could get one from https://www.virustotal.com/gui/my-apikey and set with\n"
-                     "coop config virustotal_api_key <API key>\n";
+                     "burrow config virustotal_api_key <API key>\n";
         return 1;
     }
     std::string base = "https://www.virustotal.com/api/v3";
     // The API root is overridable so the report parsing can be exercised against a local response
     // without a network or a live key; production runs use the default above.
     wchar_t api_root[32768]{};
-    if (const auto length = GetEnvironmentVariableW(L"COOP_VIRUSTOTAL_API",api_root,32768); length && length < 32768)
+    if (const auto length = GetEnvironmentVariableW(L"BURROW_VIRUSTOTAL_API",api_root,32768); length && length < 32768)
         base = utf8(std::wstring(api_root,length));
     if (all) {
         names.clear();
@@ -103,7 +103,7 @@ int virustotal_command(const Context& context,const std::vector<std::wstring>& a
             if (lowercase_text(entry.name) == lowercase_text(name) &&
                 (bucket.empty() || lowercase_text(entry.bucket) == lowercase_text(bucket))) found = &entry;
         if (!found) {
-            std::cerr << "coop: couldn't find manifest for '"<<name<<"'\n";
+            std::cerr << "burrow: couldn't find manifest for '"<<name<<"'\n";
             result = 1;
             continue;
         }
@@ -113,12 +113,12 @@ int virustotal_command(const Context& context,const std::vector<std::wstring>& a
             if (!package.downloads.empty() && package.downloads.front().digest.algorithm == ir::DigestAlgorithm::sha256)
                 hash = package.downloads.front().digest.value;
         } catch (const std::exception& error) {
-            std::cerr << "coop: "<<name<<": "<<error.what()<<'\n';
+            std::cerr << "burrow: "<<name<<": "<<error.what()<<'\n';
             result = 1;
             continue;
         }
         if (hash.empty()) {
-            std::cerr << "coop: '"<<name<<"' declares no SHA256 digest; VirusTotal is keyed by it\n";
+            std::cerr << "burrow: '"<<name<<"' declares no SHA256 digest; VirusTotal is keyed by it\n";
             result = 1;
             continue;
         }
@@ -147,12 +147,12 @@ int virustotal_command(const Context& context,const std::vector<std::wstring>& a
                     std::cout << name<<": "<<malicious<<" malicious, "<<suspicious<<" suspicious out of "
                               <<total<<" engines\n";
             } catch (const std::exception&) {
-                std::cerr << "coop: "<<name<<": the VirusTotal response is not readable JSON\n";
+                std::cerr << "burrow: "<<name<<": the VirusTotal response is not readable JSON\n";
                 result = 1;
                 continue;
             }
         } else {
-            std::cerr << "coop: "<<name<<": VirusTotal answered HTTP "<<status<<"\n";
+            std::cerr << "burrow: "<<name<<": VirusTotal answered HTTP "<<status<<"\n";
             result = 1;
             continue;
         }

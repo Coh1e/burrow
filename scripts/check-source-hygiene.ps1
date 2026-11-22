@@ -92,19 +92,19 @@ foreach ($relative in $files) {
         [void]$violations.Add("$relative : calls FlushFileBuffers directly; use durable_flush() from data.hpp")
     }
 
-    # ADR-0008: a capture goes through tests/invoke-coop.ps1. `2>&1` and `2>file` throw on 5.1 the moment
+    # ADR-0008: a capture goes through tests/invoke-burrow.ps1. `2>&1` and `2>file` throw on 5.1 the moment
     # the child writes a diagnostic, so a CTest test must not use them. The helper itself owns those
     # primitives, and the manual real-machine scripts are pwsh-7-only per the ADR.
-    if ($relative -like 'tests/*.ps1' -and $relative -ne 'tests/invoke-coop.ps1' -and $relative -notlike 'tests/real-scoop-*') {
+    if ($relative -like 'tests/*.ps1' -and $relative -ne 'tests/invoke-burrow.ps1' -and $relative -notlike 'tests/real-scoop-*') {
         $lineNumber = 0
         foreach ($line in ($text -split "`n")) {
             $lineNumber++
             if ($line.TrimStart().StartsWith('#')) { continue }
             if ($line -match '2>&1' -and $line -match '&\s') {
-                [void]$violations.Add("$relative : line $lineNumber captures stderr with 2>&1; use tests/invoke-coop.ps1")
+                [void]$violations.Add("$relative : line $lineNumber captures stderr with 2>&1; use tests/invoke-burrow.ps1")
             }
             if ($line -match '2>\s*(?!\$null|&)') {
-                [void]$violations.Add("$relative : line $lineNumber redirects stderr to a file; use tests/invoke-coop.ps1")
+                [void]$violations.Add("$relative : line $lineNumber redirects stderr to a file; use tests/invoke-burrow.ps1")
             }
         }
     }

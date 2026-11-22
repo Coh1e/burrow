@@ -3,8 +3,8 @@
 #include "data.hpp"
 #include <optional>
 
-namespace coop {
-// Lifecycle hooks are trusted Manifest script text. Coop does not interpret, rewrite or whitelist
+namespace burrow {
+// Lifecycle hooks are trusted Manifest script text. Burrow does not interpret, rewrite or whitelist
 // that text: a real PowerShell host runs it with the same session Scoop uses. The session is built
 // from the pinned Scoop compatibility library in assets/scoop-lib, so `ensure`, `info`, `warn`,
 // `error`, `abort`, `success`, `appdir`, `env_add_path`, `env_set`, `Expand-*Archive`,

@@ -6,7 +6,7 @@
 // Package IR: the normalized contract between a package source adapter, the IR validator, the
 // planner and every backend. It deliberately contains no Scoop JSON types, no Windows API handles
 // and no execution policy, so a second source adapter or backend can reuse it.
-namespace coop::ir {
+namespace burrow::ir {
 
 // Every diagnostic names the layer that owns the constraint. Query and planning report all layers
 // instead of hiding a package because one later stage cannot execute it.
@@ -15,7 +15,7 @@ const char* layer_name(Layer layer);
 
 struct Diagnostic { Layer layer; std::string code; std::string message; };
 
-// Some source declarations are accepted by Scoop with semantics Coop must reproduce but that do not
+// Some source declarations are accepted by Scoop with semantics Burrow must reproduce but that do not
 // describe a gap: a repeated derived command alias, for example, is overwritten by the last
 // declaration. Those observations are warnings, not diagnostics, so they stay visible in query and
 // preview without turning an executable package into a blocked one.
@@ -53,7 +53,7 @@ struct Download {
 // Command entries are identified by their package-relative target and alias. The IR stores only
 // the source-declared target so the exposure layer remains the single owner of launcher kinds.
 // The adapter's own `direct_launcher_target` helper only models Scoop's shim-family split (which
-// files Scoop rewrites); it is not the Coop host selection.
+// files Scoop rewrites); it is not the Burrow host selection.
 struct Entry { std::string target; std::string alias; std::string arguments; };
 struct Shortcut { std::string target; std::string name; std::string arguments; std::string icon; };
 
@@ -115,7 +115,7 @@ struct Package {
 };
 
 // Installation facts come from the shared Scoop layout (apps/<name>/current plus its saved
-// manifest and install records). Coop's own records are never consulted here, so a missing, stale
+// manifest and install records). Burrow's own records are never consulted here, so a missing, stale
 // or corrupt private record cannot hide or block an installed package.
 struct InstalledFact {
     bool present = false;

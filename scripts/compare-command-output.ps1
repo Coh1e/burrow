@@ -1,25 +1,25 @@
 param(
-    [string]$CoopExe = (Join-Path $PSScriptRoot '../.local/build/coop.exe'),
+    [string]$BurrowExe = (Join-Path $PSScriptRoot '../.local/build/burrow.exe'),
     [string]$ScoopSource = (Join-Path $PSScriptRoot '../.local/scoop-baseline/root/apps/scoop/current'),
     [string]$Output = (Join-Path $PSScriptRoot '../.local/command-output')
 )
 # Capture both real CLIs, including host/table output, with all writable state in a new local root.
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = @([Environment]::GetEnvironmentVariable('PSModulePath','Machine'),[Environment]::GetEnvironmentVariable('PSModulePath','User')) -join ';'
-. (Join-Path $PSScriptRoot '../tests/invoke-coop.ps1')
+. (Join-Path $PSScriptRoot '../tests/invoke-burrow.ps1')
 $project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 $Output = [IO.Path]::GetFullPath($Output)
 if (-not ($Output.TrimEnd('\')+'\').StartsWith($project+'\.local\',[StringComparison]::OrdinalIgnoreCase)) {
     throw 'Output must be below the project .local directory'
 }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopSource = [IO.Path]::GetFullPath($ScoopSource)
 if (-not (Test-Path "$ScoopSource/bin/scoop.ps1")) { throw 'Scoop source with bin/scoop.ps1 is required' }
 $run = Join-Path $Output ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $run -Force | Out-Null
 $utf8 = [Text.UTF8Encoding]::new($false)
 $metadata = [ordered]@{
-    coop_sha256 = (Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    burrow_sha256 = (Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash.ToLowerInvariant()
     scoop_source = $ScoopSource
     scoop_core_sha256 = (Get-FileHash -LiteralPath "$ScoopSource/lib/core.ps1" -Algorithm SHA256).Hash.ToLowerInvariant()
     operating_system = [Environment]::OSVersion.VersionString
@@ -84,19 +84,19 @@ function Capture([string]$client,[string]$label,[string[]]$arguments) {
     # Scoop must see shims on PATH already, otherwise install persists it to the user's PATH.
     $info.EnvironmentVariables['PATH'] = [IO.Path]::GetFullPath("$root/shims") + ';' + $env:PATH
     $info.EnvironmentVariables['PSModulePath'] = @([Environment]::GetEnvironmentVariable('PSModulePath','Machine'),[Environment]::GetEnvironmentVariable('PSModulePath','User')) -join ';'
-    foreach ($key in @('SCOOP','SCOOP_GLOBAL','SCOOP_CACHE','XDG_CONFIG_HOME','COOP_STATE_DIR','TEMP','TMP')) {
+    foreach ($key in @('SCOOP','SCOOP_GLOBAL','SCOOP_CACHE','XDG_CONFIG_HOME','BURROW_STATE_DIR','TEMP','TMP')) {
         $value = switch ($key) {
             'SCOOP' { $root }
             'SCOOP_GLOBAL' { "$root/global" }
             'SCOOP_CACHE' { "$root/cache" }
             'XDG_CONFIG_HOME' { "$root/xdg" }
-            'COOP_STATE_DIR' { "$root/state" }
+            'BURROW_STATE_DIR' { "$root/state" }
             default { "$root/temp" }
         }
         $info.EnvironmentVariables[$key] = $value
     }
-    if ($client -eq 'coop') {
-        $info.FileName = $CoopExe
+    if ($client -eq 'burrow') {
+        $info.FileName = $BurrowExe
         foreach ($argument in @('--root',$root,'--global-root',"$root/global") + $arguments) { Add-ProcessArgument $info $argument }
     } else {
         $info.FileName = "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -113,10 +113,10 @@ function Capture([string]$client,[string]$label,[string[]]$arguments) {
     $results.Add($record)
 }
 foreach ($command in $commands) {
-    foreach ($client in 'scoop','coop') { Capture $client "$command-help" @('help',$command) }
+    foreach ($client in 'scoop','burrow') { Capture $client "$command-help" @('help',$command) }
     # Bare update refreshes buckets; exercise its missing-package path instead of touching a remote.
-    $arguments = if ($command -eq 'update') { @('update','coop-output-missing') } elseif ($command -eq 'status') { @('status','-l') } else { @($command) }
-    foreach ($client in 'scoop','coop') { Capture $client "$command-bare" $arguments }
+    $arguments = if ($command -eq 'update') { @('update','burrow-output-missing') } elseif ($command -eq 'status') { @('status','-l') } else { @($command) }
+    foreach ($client in 'scoop','burrow') { Capture $client "$command-bare" $arguments }
     Write-Host "Captured $command"
 }
 # Seed the same offline package in each root. Neither client needs a live server or helper.
@@ -124,29 +124,29 @@ $artifact = "$project/.local/deps/test-archives/jq-1.7.1-windows-amd64.exe"
 if (-not (Test-Path $artifact)) { throw "Missing fixture $artifact" }
 $hash = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
 function Seed([string]$version) {
-    $url = "https://example.invalid/coop-output-$version.exe"
+    $url = "https://example.invalid/burrow-output-$version.exe"
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $suffix = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($url)))).Replace('-','').ToLowerInvariant().Substring(0,7) } finally { $sha.Dispose() }
-    foreach ($client in 'scoop','coop') {
+    foreach ($client in 'scoop','burrow') {
         $root = Join-Path $run "$client-root"
         $shimDirectory = "$root/apps/scoop/current/supporting/shims/kiennq"
         New-Item -ItemType Directory -Path $shimDirectory -Force | Out-Null
         Copy-Item -LiteralPath "$project/.local/deps/test-fixtures/scoop-shim-kiennq.exe" -Destination "$shimDirectory/shim.exe" -Force
         New-Item -ItemType Directory -Path "$root/tools" -Force | Out-Null
         Copy-Item -LiteralPath $artifact -Destination "$root/tools/output.exe" -Force
-        $manifest = [ordered]@{version=$version;description='Command output fixture';homepage='https://example.invalid';license='MIT';url=$url;hash=$hash;bin=@(,@("coop-output-$version.exe",'coop-output'))}
-        [IO.File]::WriteAllText("$root/buckets/main/bucket/coop-output.json",($manifest | ConvertTo-Json -Depth 6),$utf8)
+        $manifest = [ordered]@{version=$version;description='Command output fixture';homepage='https://example.invalid';license='MIT';url=$url;hash=$hash;bin=@(,@("burrow-output-$version.exe",'burrow-output'))}
+        [IO.File]::WriteAllText("$root/buckets/main/bucket/burrow-output.json",($manifest | ConvertTo-Json -Depth 6),$utf8)
         [IO.File]::WriteAllText("$root/buckets/main/bucket/no-home.json",'{"version":"1.0"}',$utf8)
-        Copy-Item -LiteralPath $artifact -Destination "$root/cache/coop-output#$version#$suffix.exe"
+        Copy-Item -LiteralPath $artifact -Destination "$root/cache/burrow-output#$version#$suffix.exe"
     }
 }
 function Pair([string]$label,[string[]]$arguments) {
-    foreach ($client in 'scoop','coop') { Capture $client $label $arguments }
+    foreach ($client in 'scoop','burrow') { Capture $client $label $arguments }
     Write-Host "Captured $label"
 }
 Seed '1.0'
 Pair 'cache-populated' @('cache')
-Pair 'cache-filter' @('cache','coop-output')
+Pair 'cache-filter' @('cache','burrow-output')
 Pair 'bucket-list' @('bucket','list')
 Pair 'bucket-known' @('bucket','known')
 Pair 'alias-empty' @('alias','list')
@@ -156,57 +156,57 @@ Pair 'shim-info' @('shim','info','custom-output')
 Pair 'shim-list' @('shim','list')
 Pair 'shim-rm' @('shim','rm','custom-output')
 Pair 'shim-missing' @('shim','info','custom-output')
-Pair 'search-found' @('search','coop-output')
+Pair 'search-found' @('search','burrow-output')
 Pair 'search-empty' @('search','^nothing-matches$')
-Pair 'cat-found' @('cat','coop-output')
-Pair 'info-found' @('info','coop-output')
-Pair 'depends-found' @('depends','coop-output')
+Pair 'cat-found' @('cat','burrow-output')
+Pair 'info-found' @('info','burrow-output')
+Pair 'depends-found' @('depends','burrow-output')
 Pair 'create-invalid' @('create','not-a-url')
-Pair 'download-cached' @('download','coop-output','-u')
-Pair 'install-cached' @('install','coop-output','-u')
-Pair 'install-existing' @('install','coop-output','-u')
+Pair 'download-cached' @('download','burrow-output','-u')
+Pair 'install-cached' @('install','burrow-output','-u')
+Pair 'install-existing' @('install','burrow-output','-u')
 Pair 'list-installed' @('list')
 Pair 'list-filter-empty' @('list','nothing-matches')
-Pair 'prefix-found' @('prefix','coop-output')
-Pair 'which-found' @('which','coop-output')
+Pair 'prefix-found' @('prefix','burrow-output')
+Pair 'which-found' @('which','burrow-output')
 Pair 'status-current' @('status','-l')
-Pair 'reset-found' @('reset','coop-output')
-Pair 'reset-version' @('reset','coop-output@1.0')
+Pair 'reset-found' @('reset','burrow-output')
+Pair 'reset-version' @('reset','burrow-output@1.0')
 Seed '1.1'
 Pair 'status-outdated' @('status','-l')
-Pair 'update-cached' @('update','coop-output')
-Pair 'cleanup-found' @('cleanup','coop-output')
-Pair 'hold-found' @('hold','coop-output')
-Pair 'hold-again' @('hold','coop-output')
-Pair 'unhold-found' @('unhold','coop-output')
+Pair 'update-cached' @('update','burrow-output')
+Pair 'cleanup-found' @('cleanup','burrow-output')
+Pair 'hold-found' @('hold','burrow-output')
+Pair 'hold-again' @('hold','burrow-output')
+Pair 'unhold-found' @('unhold','burrow-output')
 Pair 'export-installed' @('export')
-Pair 'uninstall-found' @('uninstall','coop-output')
-Pair 'uninstall-missing' @('uninstall','coop-output')
-Pair 'cache-remove' @('cache','rm','coop-output')
+Pair 'uninstall-found' @('uninstall','burrow-output')
+Pair 'uninstall-missing' @('uninstall','burrow-output')
+Pair 'cache-remove' @('cache','rm','burrow-output')
 Pair 'alias-add' @('alias','add','output-test','Write-Output output-test','Output test')
 Pair 'alias-list' @('alias','list','-v')
 Pair 'alias-rm' @('alias','rm','output-test')
 Pair 'config-set' @('config','virustotal_api_key','output-test')
 Pair 'config-get' @('config','virustotal_api_key')
 Pair 'config-rm' @('config','rm','virustotal_api_key')
-foreach ($command in 'cat','depends','info','prefix','which','home','hold','unhold') { Pair "$command-missing" @($command,'coop-output-missing') }
+foreach ($command in 'cat','depends','info','prefix','which','home','hold','unhold') { Pair "$command-missing" @($command,'burrow-output-missing') }
 # Import an empty file in each client's working directory; do not launch a browser or call VT.
-foreach ($client in 'scoop','coop') {
+foreach ($client in 'scoop','burrow') {
     [IO.File]::WriteAllText("$run/$client-root/empty.json",'{"buckets":[],"apps":[]}', $utf8)
 }
 Pair 'import-empty' @('import','empty.json')
 Pair 'import-missing' @('import','absent.json')
-Pair 'virustotal-no-key' @('virustotal','coop-output')
+Pair 'virustotal-no-key' @('virustotal','burrow-output')
 Pair 'home-no-homepage' @('home','no-home')
 # Bucket lifecycle against a local Git repository, never the live user's buckets or network.
 $repository = Join-Path $run 'fixture-bucket'
 New-Item -ItemType Directory -Path "$repository/bucket" -Force | Out-Null
 [IO.File]::WriteAllText("$repository/bucket/output.json",'{"version":"1.0"}',$utf8)
 $git = (Get-Command git.exe -ErrorAction Stop).Source
-Invoke-CoopNative $git init --initial-branch=master $repository | Out-Null
+Invoke-BurrowNative $git init --initial-branch=master $repository | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize bucket fixture' }
-Invoke-CoopNative $git -C $repository add bucket | Out-Null
-Invoke-CoopNative $git -C $repository -c user.name=OutputTest -c user.email=output@example.invalid -c core.hooksPath=$run commit -m fixture | Out-Null
+Invoke-BurrowNative $git -C $repository add bucket | Out-Null
+Invoke-BurrowNative $git -C $repository -c user.name=OutputTest -c user.email=output@example.invalid -c core.hooksPath=$run commit -m fixture | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Cannot commit bucket fixture' }
 $url = ([uri]($repository.Replace('\','/')+'/')).AbsoluteUri
 Pair 'bucket-add' @('bucket','add','output-test',$url)

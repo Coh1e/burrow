@@ -1,18 +1,18 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # R12 / #33: real MSI artifact lifecycle through the real CLI in a project-local Scoop layout.
 # The MSI database is read read-only and embedded cabinets are decompressed by the Windows cabinet
 # API, so no msiexec process, elevation, reboot or Windows Installer machine-cache write is allowed
 # anywhere in this test. Real 7-Zip 26.05 and 26.03 MSI artifacts provide the install, update,
 # persist and uninstall evidence, and a truncated artifact provides an accurate extraction failure.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-$coopDirectory = Split-Path $CoopExe
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+$burrowDirectory = Split-Path $BurrowExe
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
-$guard = Join-Path $coopDirectory 'process_guard.exe'
+$guard = Join-Path $burrowDirectory 'process_guard.exe'
 $msi2605 = Join-Path $archives '7z2605-x64.msi'
 $msi2603 = Join-Path $archives '7z2603-x64.msi'
 $pwshPath = (Get-Process -Id $PID).Path
@@ -44,7 +44,7 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     foreach ($argument in $arguments) { Add-ProcessArgument $start ($argument) }
     $start.EnvironmentVariables['TEMP'] = "$root/temp"
     $start.EnvironmentVariables['TMP'] = "$root/temp"
-    $start.EnvironmentVariables['COOP_PROGRAMS_DIR'] = "$root/programs"
+    $start.EnvironmentVariables['BURROW_PROGRAMS_DIR'] = "$root/programs"
     foreach ($key in $environment.Keys) { $start.EnvironmentVariables[$key] = $environment[$key] }
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
@@ -56,17 +56,17 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ("$root/run-{0:d2}-{1}.json" -f $script:runs,$label) -Encoding utf8
     return $result
 }
-function Invoke-Coop([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $CoopExe $arguments $environment
+function Invoke-Burrow([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
+    return Invoke-Process $label $BurrowExe $arguments $environment
 }
 function Invoke-Guard([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $guard (@($CoopExe)+$arguments) $environment
+    return Invoke-Process $label $guard (@($BurrowExe)+$arguments) $environment
 }
 function Parse-Json([string]$label,$result) {
     try { return $result.output | ConvertFrom-Json } catch { throw "$label did not print JSON: $($result.output)" }
 }
 function Last-Journal([string]$package) {
-    $journals = @(Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
+    $journals = @(Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } |
         Where-Object { $_.package -eq $package })
@@ -125,7 +125,7 @@ Check ($plan.external_tools[0].limitation -match 'no msiexec\.exe process' -and 
 Check (@($plan.capabilities | Where-Object { $_.id -eq 'windows-installer' -and $_.supported -eq $true }).Count -eq 1) 'windows-installer capability is not reported as supported'
 Check (@($plan.diagnostics | Where-Object { $_.code -eq 'execution-blocked' }).Count -eq 0) 'MSI preview still reports an execution blocker'
 Check ($plan.lifecycle_checks.msi_extraction -match 'no elevation, reboot, msiexec process or machine-cache write') 'MSI lifecycle check does not state the boundary'
-Check (-not (Test-Path -LiteralPath "$root/apps/seven") -and -not (Test-Path -LiteralPath "$root/.coop/transactions")) 'MSI preview wrote installation state'
+Check (-not (Test-Path -LiteralPath "$root/apps/seven") -and -not (Test-Path -LiteralPath "$root/.burrow/transactions")) 'MSI preview wrote installation state'
 Assert-CacheUnchanged 'the MSI preview'
 
 # --- 2. Install the real 7-Zip 26.03 MSI artifact. ---------------------------
@@ -161,8 +161,8 @@ Check ($msiRecord.elevation -match 'not requested' -and $msiRecord.reboot -match
 Check ((@($msiRecord.cabinets) -join ',') -eq 'product.cab' -and $msiRecord.cabinet_files -eq 106 -and
     $msiRecord.files -eq 106 -and $msiRecord.uncompressed_streams -eq 0) 'MSI journal does not record the cabinet contents it read'
 Check ($msiRecord.bytes -eq 5900528) 'MSI journal byte count does not match the extracted image'
-$installedList = Invoke-Coop 'msi-list' @('--root',$root,'list','--json')
-Check ($installedList.exit -eq 0 -and $installedList.output -match 'seven') 'Coop list does not see the MSI installation'
+$installedList = Invoke-Burrow 'msi-list' @('--root',$root,'list','--json')
+Check ($installedList.exit -eq 0 -and $installedList.output -match 'seven') 'Burrow list does not see the MSI installation'
 Assert-CacheUnchanged 'the MSI install'
 Set-Content -LiteralPath "$root/persist/seven/Codecs/probe.txt" -Value 'msi-persist-probe' -Encoding ascii
 Check ((Get-Content -LiteralPath "$root/apps/seven/current/Codecs/probe.txt" -Raw).Trim() -eq 'msi-persist-probe') 'MSI persist store is not visible through current'
@@ -214,7 +214,7 @@ Check ((Get-Content -LiteralPath "$root/persist/seven/Codecs/probe.txt" -Raw).Tr
 Write-Manifest 'main' 'broken' @{version='1';url=(File-Uri $broken);hash=(File-Hash $broken);extract_dir='Files\7-Zip';bin='7z.exe'}
 $failedInstall = Invoke-Guard 'msi-broken-install' @('--root',$root,'install','main/broken','--json')
 Check ($failedInstall.exit -ne 0 -and $failedInstall.error -match 'MSI database') 'Corrupt MSI install did not fail at the database stage'
-Check (-not (Test-Path -LiteralPath "$root/apps/broken") -and -not (Test-Path -LiteralPath "$root/.coop/packages/broken.json")) 'Corrupt MSI install published state'
+Check (-not (Test-Path -LiteralPath "$root/apps/broken") -and -not (Test-Path -LiteralPath "$root/.burrow/packages/broken.json")) 'Corrupt MSI install published state'
 Assert-CacheUnchanged 'the MSI uninstall and corrupt MSI failures'
 
 # --- 6. Evidence ------------------------------------------------------------
@@ -224,7 +224,7 @@ $cacheAfter = @(Get-WindowsInstallerCacheState)
     root=$root
     checks=$script:checks
     runs=$script:runs
-    coop_sha256=(File-Hash $CoopExe)
+    burrow_sha256=(File-Hash $BurrowExe)
     powershell=$pwshPath
     artifacts=@(
         @{path=$msi2605;sha256=$hash2605;reported_version='26.05'},

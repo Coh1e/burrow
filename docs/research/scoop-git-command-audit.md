@@ -1,4 +1,4 @@
-# Scoop 的 Git 调用清单与 Coop 最小能力边界
+# Scoop 的 Git 调用清单与 Burrow 最小能力边界
 
 研究日期：2026-10-25。本文是静态源码调查，不是兼容性或性能测试结果。
 
@@ -12,13 +12,13 @@
 
 ## 结论
 
-**Coop 可以把“用户必须安装 git.exe”从包管理器核心要求中移除；这不等于能够无损省去 Scoop 的所有 Git 语义。** 核心需求应按行为拆分：bucket 获取与刷新、来源与修订识别、变更列表、可选历史 Manifest 读取。普通用户无需承担提交、推送、合并冲突处理和 Scoop 源码自更新的实现成本。
+**Burrow 可以把“用户必须安装 git.exe”从包管理器核心要求中移除；这不等于能够无损省去 Scoop 的所有 Git 语义。** 核心需求应按行为拆分：bucket 获取与刷新、来源与修订识别、变更列表、可选历史 Manifest 读取。普通用户无需承担提交、推送、合并冲突处理和 Scoop 源码自更新的实现成本。
 
 goop 的已有无 Git 路径、快照方案与候选设计对照见 [无 Git bucket 方案](git-free-buckets.md)。本文只负责固定版本 Scoop 调用审计。
 
 需要特别保留的兼容性问题是 **`package@version` 的历史 Manifest 查找**：Scoop 0.6.0 的历史 Git 查询默认开启，会查提交历史及父提交，不能将所有 `log/show` 都归为装饰性输出。[源码](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/manifest.ps1#L210-L274)
 
-“最小子集”建议指 Coop 内部的最小仓库能力接口，**不建议首先实现一个兼容 Git 命令行的微型 git.exe**。后者会把无关的参数、输出及仓库格式兼容承诺带入产品。
+“最小子集”建议指 Burrow 内部的最小仓库能力接口，**不建议首先实现一个兼容 Git 命令行的微型 git.exe**。后者会把无关的参数、输出及仓库格式兼容承诺带入产品。
 
 ## 调用包装器
 
@@ -28,17 +28,17 @@ goop 的已有无 Git 路径、快照方案与候选设计对照见 [无 Git buc
 
 下表中的参数省略变量名及通用 `-C`，保留影响行为的选项。
 
-| Scoop 使用处 | 实际 Git 命令/参数 | 目的 | Coop 最小行为 |
+| Scoop 使用处 | 实际 Git 命令/参数 | 目的 | Burrow 最小行为 |
 |---|---|---|---|
 | `bucket add` | `config --get remote.origin.url`；`ls-remote <repo>`；`clone <repo> <dir> -q` | 检查重复来源、检查远端、取得 bucket（未加 shallow/depth 参数） | 识别来源，解析目标分支/修订，获取一致的文件树；无需向用户暴露 Git |
 | `bucket list` | `config remote.origin.url`；`log --format=%aI -n 1` | 显示来源和最后提交时间 | 来源与同步修订属于有用元数据；提交时间不能和本地同步时间混用 |
-| 安装错误提示 | `config --get remote.origin.url` | 为自定义 bucket 生成上游 Issue 链接 | 从 Coop 的来源记录生成；不必运行 Git |
+| 安装错误提示 | `config --get remote.origin.url` | 为自定义 bucket 生成上游 Issue 链接 | 从 Burrow 的来源记录生成；不必运行 Git |
 | bucket 更新 | `rev-parse HEAD`；`pull -q` | 记住旧修订、更新工作树 | 获取新修订和文件树，安全替换/提交；若拒绝本地修改与分歧须明确报错 |
 | bucket 更新日志 | `--no-pager log --color --no-decorate --grep=^(chore) --invert-grep --abbrev=12 --format=... <old>..HEAD` | 显示提交摘要，过滤 chore | 可后置；不等同于包版本更新列表 |
 | bucket SQLite 缓存增量更新 | `diff --name-status <old>` | 收集新增、修改、重命名、删除文件，再更新 Manifest 缓存 | 对两份受控文件树/索引计算变更即可，不必兼容 Git diff 文本 |
 | `status` 的远端检查 | `fetch -q origin`；`branch --show-current`；`log HEAD..origin/<branch> --oneline` | 判断 Scoop/bucket 是否有上游提交 | 取得远端修订，和已同步修订比较；若仅比较“不相等”，与“是否存在上游新增提交”不是完全相同语义 |
 | `info` | `log -1 -s --format=%aI#%an <manifest-file>` | 显示该 Manifest 最后修改时间与作者 | 可作为可选详情；无历史时应明确缺失，不把同步时间/文件所有者伪称为上游作者信息 |
-| `--version` | `--no-pager log HEAD -1 --oneline`（非 master Scoop 分支、各本地 Git bucket） | 显示源码/bucket 提交摘要 | Coop 版本直接内置；bucket 修订从来源记录读取 |
+| `--version` | `--no-pager log HEAD -1 --oneline`（非 master Scoop 分支、各本地 Git bucket） | 显示源码/bucket 提交摘要 | Burrow 版本直接内置；bucket 修订从来源记录读取 |
 
 依据：[bucket add/list/错误来源](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/buckets.ps1#L104-L216)、[bucket 同步与缓存](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/libexec/scoop-update.ps1#L155-L258)、[日志格式](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/core.ps1#L281-L298)、[status](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/libexec/scoop-status.ps1#L11-L44)、[info](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/libexec/scoop-info.ps1#L123-L133)、[version](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/bin/scoop.ps1#L21-L39)。
 
@@ -57,11 +57,11 @@ goop 的已有无 Git 路径、快照方案与候选设计对照见 [无 Git buc
 
 历史查找编排先尝试已启用的 SQLite 缓存，再尝试默认开启的 Git 历史。此能力需要旧 Manifest 的真实内容，只有最新工作树快照不能完整替代。[历史 Git 实现](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/manifest.ps1#L210-L274)、[编排](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/manifest.ps1#L277-L300)
 
-Coop 可分别承诺：使用已安装版本中保存的 Manifest、使用已经缓存的精确历史 Manifest、访问远端/现有 Git 对象中的历史 Manifest。这三者覆盖范围不同。若第一版不实现第三项，必须明确拒绝无法取得精确历史 Manifest 的版本请求，不能把替换 URL 中版本字符串视为完全等价。
+Burrow 可分别承诺：使用已安装版本中保存的 Manifest、使用已经缓存的精确历史 Manifest、访问远端/现有 Git 对象中的历史 Manifest。这三者覆盖范围不同。若第一版不实现第三项，必须明确拒绝无法取得精确历史 Manifest 的版本请求，不能把替换 URL 中版本字符串视为完全等价。
 
 ## Scoop 自更新专用调用
 
-这些调用更新的是 Scoop 自身的 PowerShell 源码；Coop 不需要以同样方式分发自身，因此不应直接纳入 Coop bucket 最小子集。
+这些调用更新的是 Scoop 自身的 PowerShell 源码；Burrow 不需要以同样方式分发自身，因此不应直接纳入 Burrow bucket 最小子集。
 
 | 情况 | 命令 |
 |---|---|
@@ -79,7 +79,7 @@ Coop 可分别承诺：使用已安装版本中保存的 Manifest、使用已经
 
 - `bin/auto-pr.ps1` 使用 **hub**，不是直接写 `git`：包含 `checkout`（普通、`-b`、`-f`）、`rev-parse --verify`、`add`、`commit`、`push`、`reset`（普通、`--hard`）、`pull`（普通、`--rebase --autostash`）、`diff --name-only`、`status --porcelain -uno`、失败时 `rebase --abort`，以及 GitHub 专用 `pull-request`。这些属于维护 bucket/提交更新工作流，首版普通包管理器无需复制。[准备与提交](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/bin/auto-pr.ps1#L94-L163)、[同步与推送](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/bin/auto-pr.ps1#L167-L225)
 - 发布 workflow 使用 `git log -1 --format=%cs <previous-tag>` 和 `git log -1 --format=%cs HEAD` 构造发布日期区间，属于 Scoop 自身发布，不是终端用户的 bucket 更新要求。[release workflow](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/.github/workflows/release.yml#L35-L46)
-- 动态执行的 Manifest hook 或远程脚本可能额外调用 Git；本调查没有承诺该集合是封闭的。Coop 对明确声明的软件依赖与运行期 Git 需求仍须分别处理。
+- 动态执行的 Manifest hook 或远程脚本可能额外调用 Git；本调查没有承诺该集合是封闭的。Burrow 对明确声明的软件依赖与运行期 Git 需求仍须分别处理。
 
 ## 建议的最小内部接口（设计提案，未实现）
 
@@ -91,7 +91,7 @@ Coop 可分别承诺：使用已安装版本中保存的 Manifest、使用已经
 
 若底层继续采用 Git 仓库，前四项接近“读取配置/ref/object、远端引用发现、fetch/clone、受控工作树更新、树差异”的语义子集；日常 bucket 路径无需提供 Git add/commit/push/stash，也不必实现交互式 merge/rebase。若采用托管平台快照/API，同一接口可以保持，但历史查询、非托管平台来源、私有认证、带本地修改的 bucket 都是需要显式设计的兼容差异。
 
-不要将原地 `pull` 替换成无条件覆盖工作树：Scoop 的 `pull` 使用实际仓库配置与 Git 行为，本地提交、未提交修改、来源/分支变更、远端重写都可能影响结果。Coop 第一版可以选择对这些情形停止刷新并说明原因；这比默默丢弃本地修改更符合已确认的接管目标。
+不要将原地 `pull` 替换成无条件覆盖工作树：Scoop 的 `pull` 使用实际仓库配置与 Git 行为，本地提交、未提交修改、来源/分支变更、远端重写都可能影响结果。Burrow 第一版可以选择对这些情形停止刷新并说明原因；这比默默丢弃本地修改更符合已确认的接管目标。
 
 ## 验收建议与未运行项
 

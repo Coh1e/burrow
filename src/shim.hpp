@@ -2,7 +2,7 @@
 #include "app.hpp"
 #include <string>
 #include <vector>
-namespace coop {
+namespace burrow {
 // A shared Scoop .shim records only the target path and optional arguments. Unknown keys do not
 // make the entry unusable, because Scoop may add metadata; they are simply not interpreted.
 struct ShimMetadata {
@@ -14,7 +14,7 @@ ShimMetadata read_shim_metadata(const fs::path& path);
 // not a stable API (GUI patching and Scoop releases change it), so recognize the shim program by
 // its PE format and embedded shim markers instead of a fixed digest allowlist.
 bool looks_like_scoop_shim(const fs::path& path);
-// A copied coop launcher reads its .coop-shim.json (or adjacent Scoop .shim) metadata and forwards
+// A copied burrow launcher reads its .burrow-shim.json (or adjacent Scoop .shim) metadata and forwards
 // the call to the declared target with the correct host. Returns false when the running executable
 // is not a command launcher.
 bool run_shim(int argc, wchar_t** argv, int& result);

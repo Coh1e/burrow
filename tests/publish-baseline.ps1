@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$TestRoot,
     [switch]$Update
 )
@@ -9,11 +9,11 @@ param(
 # Snapshots live under tests/baseline/publish and are committed; -Update regenerates them after a
 # deliberate behaviour change, which makes such a change visible in review instead of silent.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $baseline = Join-Path $PSScriptRoot 'baseline/publish'
 
@@ -36,7 +36,7 @@ New-Item -ItemType Directory -Path "$root/buckets/test/bucket","$root/temp","$ro
 
 function File-Hash([string]$path) { return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLower() }
 function File-Uri([string]$path) { return ([Uri][IO.Path]::GetFullPath($path)).AbsoluteUri }
-# Hashtables enumerate in an order that changes between PowerShell processes, and Coop writes the
+# Hashtables enumerate in an order that changes between PowerShell processes, and Burrow writes the
 # Manifest it read back into the version directory, so an unsorted Manifest makes the record's bytes
 # differ per run. Sort the keys so the snapshot stays comparable.
 function Sort-Keys([hashtable]$value) {
@@ -48,8 +48,8 @@ function Write-Manifest([string]$name,[hashtable]$manifest) {
     [IO.File]::WriteAllText("$root/buckets/test/bucket/$name.json",
         ((Sort-Keys $manifest) | ConvertTo-Json -Depth 16),[Text.UTF8Encoding]::new($false))
 }
-function Invoke-Coop([string]$label,[string[]]$arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+function Invoke-Burrow([string]$label,[string[]]$arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -59,7 +59,7 @@ function Invoke-Coop([string]$label,[string[]]$arguments) {
     foreach ($argument in $arguments) { Add-ProcessArgument $start ($argument) }
     $start.EnvironmentVariables['TEMP'] = "$root/temp"
     $start.EnvironmentVariables['TMP'] = "$root/temp"
-    $start.EnvironmentVariables['COOP_PROGRAMS_DIR'] = "$root/programs"
+    $start.EnvironmentVariables['BURROW_PROGRAMS_DIR'] = "$root/programs"
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
@@ -74,7 +74,7 @@ function Invoke-Coop([string]$label,[string[]]$arguments) {
 }
 
 # One relative entry per published object, sorted, so a reordering of the tree is a visible diff.
-# The two install records are recorded by presence only: Coop writes the Manifest it read back
+# The two install records are recorded by presence only: Burrow writes the Manifest it read back
 # verbatim, and that Manifest carries the fixture's absolute file:// URL, so their bytes differ per
 # checkout path. Their content is compared through the structured fields in the snapshot instead.
 $record_files = @('scoop-install.json','scoop-manifest.json')
@@ -175,7 +175,7 @@ function Assert-Matches([string]$name,[string]$actual) {
 
 function Install-Case([string]$name,[hashtable]$manifest) {
     Write-Manifest $name $manifest
-    $run = Invoke-Coop $name @('--root',$root,'install',"test/$name",'--json')
+    $run = Invoke-Burrow $name @('--root',$root,'install',"test/$name",'--json')
     if ($run.exit -ne 0) { throw "install $name failed: $($run.error)$($run.output)" }
     $snapshot = Get-Snapshot $name
     Assert-Matches $name $snapshot
@@ -185,7 +185,7 @@ function Install-Case([string]$name,[hashtable]$manifest) {
 # The 7-Zip helper is provisioned the way Scoop gets it, by installing the package itself.
 Install-Case '7zip' @{version='26.05';url=(File-Uri $msi);hash=(File-Hash $msi);extract_dir='Files\7-Zip';bin=@('7z.exe')}
 
-# The innounp helper is a normal package in this root, never something Coop ships.
+# The innounp helper is a normal package in this root, never something Burrow ships.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 New-Item -ItemType Directory -Path "$root/apps/innounp/current" -Force | Out-Null
 [IO.Compression.ZipFile]::ExtractToDirectory($innounp,"$root/apps/innounp/current")
@@ -205,7 +205,7 @@ Install-Case 'apng' @{version='3.1.3';url=((File-Uri $apng)+'#/dl.7z');hash=(Fil
 # --- Failure characterisation: both must fail and publish no `current`. --------------------------
 function Assert-Failure([string]$name,[hashtable]$manifest) {
     Write-Manifest $name $manifest
-    $run = Invoke-Coop $name @('--root',$root,'install',"test/$name",'--json')
+    $run = Invoke-Burrow $name @('--root',$root,'install',"test/$name",'--json')
     if ($run.exit -eq 0) { throw "install $name unexpectedly succeeded" }
     $current = "$root/apps/$name/current"
     if (Test-Path -LiteralPath $current) { throw "install $name published a current link despite failing" }

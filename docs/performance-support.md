@@ -10,25 +10,25 @@
 
 - 每个样本测量完整进程启动到退出：`Process.Start` 到 `WaitForExit` 的挂钟时间，包含进程创建、加载、CLI 工作与退出；没有常驻服务、进程内计时或预热缓存填充。
 - `tests/perf.ps1`（CTest `performance`）对每个场景执行 7 次，报告首跑 `first_ms` 与后续 `p50`/`p90`/`p95`/`min`/`max`。`p95` 取热样本的最近秩。
-- 进程创建地板：同一测量方式运行 `cmd.exe /d /c exit 0`，本轮最终构建两次运行为 p50 33.5–34.8ms（此前多次运行 29.1–42.8ms）。`coop.exe` 的启动工作必须与这个地板区分。
-- 合成数据：Manifest 约 0.6KB，bucket 规模 200/1500/3000（约精选 bucket、Scoop Main、Main+Extras）。安装根 25/100 个包，每第 4 个包另有 2 个旧版本且无 Coop 记录，代表未接管的既有安装。
+- 进程创建地板：同一测量方式运行 `cmd.exe /d /c exit 0`，本轮最终构建两次运行为 p50 33.5–34.8ms（此前多次运行 29.1–42.8ms）。`burrow.exe` 的启动工作必须与这个地板区分。
+- 合成数据：Manifest 约 0.6KB，bucket 规模 200/1500/3000（约精选 bucket、Scoop Main、Main+Extras）。安装根 25/100 个包，每第 4 个包另有 2 个旧版本且无 Burrow 记录，代表未接管的既有安装。
 - bucket 读取分三种路径：未注册目录（扫描）、`bucket add` 注册的本地目录（本地索引）、Git 共享工作树（按已发布 revision 校验索引）。
-- `tests/perf-real.ps1` 在真实根 `C:\Users\Neo\scoop` 上测量查询与刷新：`main` 1,701 个 Manifest、`nerd-fonts` 367 个、实际安装 15 个包，`.coop/transactions` 中累计 636 份已结算日志（journal.json 合计 4.4MB，来自此前真实操作）。查询前后核对注册表、索引、工作树 revision 与 `git status` 未变。
+- `tests/perf-real.ps1` 在真实根 `C:\Users\Neo\scoop` 上测量查询与刷新：`main` 1,701 个 Manifest、`nerd-fonts` 367 个、实际安装 15 个包，`.burrow/transactions` 中累计 636 份已结算日志（journal.json 合计 4.4MB，来自此前真实操作）。查询前后核对注册表、索引、工作树 revision 与 `git status` 未变。
 - 真实规模的首次/有变化/无变化刷新用真实 `main` 的项目内副本（1,783 个文件、约 64.7MB 对象）经 `file://` 顺序执行，避免额外网络负载；真实网络载荷用 `https://github.com/ScoopInstaller/Main` 的首次（固定到 `89b4cf80…`）、无变化刷新，以及本轮自然发生的上游前进有变化刷新（`3f71320…`→`dcb231e7…`）测量。
 - 缓存条件按场景标注：查询在索引刚由刷新写好后执行，文件多半已在 OS 缓存；重复首次刷新复用同一上游副本，只有每个系列的首个样本标为首次。Windows 待机列表清理需要管理员权限，本页不宣称系统级冷缓存。
-- 一次测量期间观察到构建输出路径上的 `coop.exe` 被环境扫描（同一文件复制到其他路径后 `--version` 从约 100ms 降到约 20ms），相关基线被作废并重新测量；下表的数值均在文件身份稳定后取得。真实机器上的杀毒/索引服务仍会影响单次数值，本页用多次热样本的 p50/p95 而不是单次最小值。
+- 一次测量期间观察到构建输出路径上的 `burrow.exe` 被环境扫描（同一文件复制到其他路径后 `--version` 从约 100ms 降到约 20ms），相关基线被作废并重新测量；下表的数值均在文件身份稳定后取得。真实机器上的杀毒/索引服务仍会影响单次数值，本页用多次热样本的 p50/p95 而不是单次最小值。
 - 同一机器上同时运行其他应用（浏览器、代理等）时，同一二进制、同一场景的 p50 可出现约 30–70% 波动。本页每个结论都绑定具体构建、运行次数和证据文件；不拿跨运行的最小值替换另一次运行的实测值，也不把单次低值当作稳定达成。
-- 环境：Windows 11 专业工作站版 N 10.0.26300 build 26300；AMD Ryzen 7 8845HS（16 逻辑处理器）；64GiB 内存；KIOXIA-EXCERIA G2 NVMe SSD；PowerShell 7.6.5；CMake 4.4.4；Ninja 1.13.2；git 2.56.0.windows.4；Scoop v0.6.0（2026-09-30）；`coop 0.1.0` Release（MSVC `/W4 /WX`）。
+- 环境：Windows 11 专业工作站版 N 10.0.26300 build 26300；AMD Ryzen 7 8845HS（16 逻辑处理器）；64GiB 内存；KIOXIA-EXCERIA G2 NVMe SSD；PowerShell 7.6.5；CMake 4.4.4；Ninja 1.13.2；git 2.56.0.windows.4；Scoop v0.6.0（2026-09-30）；`burrow 0.1.0` Release（MSVC `/W4 /WX`）。
 - 本页的代码版本绑定：
-  - **被测构建**：源码修订 `d1f80298d43a1d57d0ef9736860a7c3821ce2974`（`refactor(query): drop the unused catalogue entry point and assert real-scale refresh invariants (#44)`），`coop.exe` SHA256 `f9c0fff9…`，链接时间 2026-10-27T08:29:54Z；下方图表的查询/刷新数值来自这次构建的运行（`perf-report-measured-d1f8029.json`、`perf-real-head-d1f8029/perf-real-report.json`）。该提交之后只有测试与文档提交（测试修正提交 `29c5ea7f46baef253b6ffad3d36a75998830196a`），产品源码与 `coop.exe` `f9c0fff9…` 不变；最终完整测量运行 `perf-real-head-29c5ea7/perf-real-report.json` 记录 `git_head=29c5ea7`、`coop_sha256=f9c0fff9…`。
-  - **同一查询/列表实现的上一构建**：`fb34d338e461cfe66b9388e7171d967a5868bb98`，`coop.exe` SHA256 `1ec35fa5…`，链接时间 2026-10-27T08:02:19Z；`d1f8029` 相对它只删除了无调用者的 `catalog()` 入口和修正注释，查询/列表/刷新行为不变，因此用于展示同机波动范围。
-  - **基线**：`7a42d604f7c21684676797b389040d442479bff3`（本票起点，不含本票优化），`coop.exe` SHA256 `e03020f0…`；所以“优化前”一行对应 `7a42d60`，优化后数值不能绑定到该修订复现。
+  - **被测构建**：源码修订 `d1f80298d43a1d57d0ef9736860a7c3821ce2974`（`refactor(query): drop the unused catalogue entry point and assert real-scale refresh invariants (#44)`），`burrow.exe` SHA256 `f9c0fff9…`，链接时间 2026-10-27T08:29:54Z；下方图表的查询/刷新数值来自这次构建的运行（`perf-report-measured-d1f8029.json`、`perf-real-head-d1f8029/perf-real-report.json`）。该提交之后只有测试与文档提交（测试修正提交 `29c5ea7f46baef253b6ffad3d36a75998830196a`），产品源码与 `burrow.exe` `f9c0fff9…` 不变；最终完整测量运行 `perf-real-head-29c5ea7/perf-real-report.json` 记录 `git_head=29c5ea7`、`burrow_sha256=f9c0fff9…`。
+  - **同一查询/列表实现的上一构建**：`fb34d338e461cfe66b9388e7171d967a5868bb98`，`burrow.exe` SHA256 `1ec35fa5…`，链接时间 2026-10-27T08:02:19Z；`d1f8029` 相对它只删除了无调用者的 `catalog()` 入口和修正注释，查询/列表/刷新行为不变，因此用于展示同机波动范围。
+  - **基线**：`7a42d604f7c21684676797b389040d442479bff3`（本票起点，不含本票优化），`burrow.exe` SHA256 `e03020f0…`；所以“优化前”一行对应 `7a42d60`，优化后数值不能绑定到该修订复现。
 
 ## #44 当前结果
 
 ### 本地查询（合成规模，`tests/perf.ps1`）
 
-被测构建 `d1f8029`（`coop.exe` `f9c0fff9…`），本轮两次完整套件运行中的第一次，每个场景 7 次采样；目标列是规格目标，`达成` 按 p50 判定。第二次运行的数值用于标注波动（`perf-report-measured2-d1f8029.json`）。
+被测构建 `d1f8029`（`burrow.exe` `f9c0fff9…`），本轮两次完整套件运行中的第一次，每个场景 7 次采样；目标列是规格目标，`达成` 按 p50 判定。第二次运行的数值用于标注波动（`perf-report-measured2-d1f8029.json`）。
 
 | 场景 | 目标 | 首跑 ms | p50 ms | p90 ms | p95 ms | 达成 |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -56,7 +56,7 @@
 
 ### 真实根查询（`tests/perf-real.ps1`，7 次）
 
-被测构建 `d1f8029`（`coop.exe` `f9c0fff9…`）。同一二进制在提交前工作树上的另一次运行写在“重复运行 p50”列，用于显示同机波动；最终完整测量运行（`29c5ea7`）为 `list` 371.7/402.9ms、`info main/git` 53.7/55.3ms、`search git` 47.3/53.0ms、`info nerd-fonts` 54.9/68.1ms（p50/p95），同样处于上表的波动范围。
+被测构建 `d1f8029`（`burrow.exe` `f9c0fff9…`）。同一二进制在提交前工作树上的另一次运行写在“重复运行 p50”列，用于显示同机波动；最终完整测量运行（`29c5ea7`）为 `list` 371.7/402.9ms、`info main/git` 53.7/55.3ms、`search git` 47.3/53.0ms、`info nerd-fonts` 54.9/68.1ms（p50/p95），同样处于上表的波动范围。
 
 | 场景 | 目标 | 首跑 ms | p50 ms | p95 ms | 重复运行 p50 | 达成 |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -65,21 +65,21 @@
 | `search git` | 100 | 55.4 | 52.1 | 67.9 | 40.7 | 达成（跨运行 40.7–52.1ms） |
 | `info nerd-fonts/0xProto-NF-Mono`（跨 bucket） | 50 | 58.6 | 55.7 | 58.9 | 45.9 | 未稳定达成（跨运行 45.9–55.7ms） |
 
-同一真实根上的 `list` 成本分解（项目内以 junction 复用同一 `apps`/`buckets`，逐个排除 `.coop` 内容，7 次采样；该分解使用 `1ec35fa5…` 构建，查询/列表代码与 `d1f8029` 相同，`real-profile-final.log`）：
+同一真实根上的 `list` 成本分解（项目内以 junction 复用同一 `apps`/`buckets`，逐个排除 `.burrow` 内容，7 次采样；该分解使用 `1ec35fa5…` 构建，查询/列表代码与 `d1f8029` 相同，`real-profile-final.log`）：
 
 | 变体 | p50 ms | p95 ms |
 | --- | ---: | ---: |
-| 真实根（完整 `.coop` 历史） | 379.8 | 386.3 |
-| 不含事务历史与 Coop 旧版本记录的副本 | 52.1 | 67.5 |
+| 真实根（完整 `.burrow` 历史） | 379.8 | 386.3 |
+| 不含事务历史与 Burrow 旧版本记录的副本 | 52.1 | 67.5 |
 | 仅含事务历史（636 份日志）的副本 | 311.9 | 328.4 |
 
-结论：真实根 `list` 超标的主要原因是 `.coop/transactions` 累计的 636 份已结算日志被列表路径读取（约 270ms），其次是已记录旧版本的目录树证据（约 55ms）。不含这些历史时同一真实安装集合为 52.1ms，已接近目标；该历史在本机是此前真实操作留下的合法状态，不能通过删日志冒充达标。
+结论：真实根 `list` 超标的主要原因是 `.burrow/transactions` 累计的 636 份已结算日志被列表路径读取（约 270ms），其次是已记录旧版本的目录树证据（约 55ms）。不含这些历史时同一真实安装集合为 52.1ms，已接近目标；该历史在本机是此前真实操作留下的合法状态，不能通过删日志冒充达标。
 
 ### 刷新（#44）
 
 本票**没有修改刷新代码**：共用工作树的首次/有变化/无变化刷新实现来自 R02/#23。本票测量刷新在真实规模与真实网络下的完整进程耗时、载荷与工作树行为，并优化查询/列表路径。
 
-被测构建 `d1f8029`（`coop.exe` `f9c0fff9…`）。首次刷新与 HTTPS 首次刷新是单次/小样本，单独标注；括号内是 `1ec35fa5…` 构建（同一刷新代码）在同机的另一轮运行，用于显示波动。
+被测构建 `d1f8029`（`burrow.exe` `f9c0fff9…`）。首次刷新与 HTTPS 首次刷新是单次/小样本，单独标注；括号内是 `1ec35fa5…` 构建（同一刷新代码）在同机的另一轮运行，用于显示波动。
 
 | 场景 | 输入 | 样本 | 首跑 ms | p50 ms | p95 ms | 载荷 / 本地工作 |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -102,8 +102,8 @@
 
 1. **`info`/`search` 按条件过滤，不再先构建整份目录**（`src/query.cpp`）：旧实现先把所有 bucket 的全部条目构造成 JSON 数组再排序、再匹配，单个 `info` 的成本与整桶规模相同。现在边读边匹配，只构造命中条目，排序只作用于命中集；输出字段与顺序不变。同一机、同一夹具的优化前基线（`7a42d60`，`e03020f0…`）与优化后构建（`fb34d33`，`1ec35fa5…`）对比：3000 规模索引 `info` 的 p50 从 80.8ms 降到 49.0ms，索引 `search` 从 67.3ms 降到 48.2ms。最终构建（`d1f8029`，`f9c0fff9…`）在本轮两次完整套件运行为 58.0/63.9ms（`info`）与 63.6/62.5ms（`search`），同机噪声下 `info` 属边界、未稳定达成。
 2. **`info` 不再为架构选择构造完整安装清单**（`src/query.cpp`）：代码仍通过 `ir::read_installations` 读取根下所有已安装包的当前 Manifest 与安装记录（与 `list` 的安装事实读取相同），但不再叠加 `installed_packages` 为每个包执行的旧版本目录/记录/事务扫描。当前链接缺失时仍回退到完整列表，以保留未完成事务的既有语义；因此节省的是旧版本清单与重复事务扫描，而不是“只读一个包的文件”。
-3. **未记录的本地旧版本不再计算目录树证据**（`src/versions.cpp`）：`version_tree_stamp` 只在存在 Coop 版本记录、确实要比较记录指纹时计算。Scoop 自己维护的旧版本不是 Coop 的清理候选，旧实现对它们也整棵遍历，真实根上仅 Git 的旧版本就有 38,345 个文件。
-4. **`list` 每次运行只扫描一次事务历史**（`src/query.cpp`、`src/versions.cpp`）：旧实现为每个已安装包重新读取 `.coop/transactions` 并解析全部日志，636 份历史日志被读了约 17 遍。现在待恢复报告只生成一次，并复用为旧版本清单的“有未完成事务”保护标志。真实根 `list` 从 2.7s 降到 1.2s（中间构建测量）。
+3. **未记录的本地旧版本不再计算目录树证据**（`src/versions.cpp`）：`version_tree_stamp` 只在存在 Burrow 版本记录、确实要比较记录指纹时计算。Scoop 自己维护的旧版本不是 Burrow 的清理候选，旧实现对它们也整棵遍历，真实根上仅 Git 的旧版本就有 38,345 个文件。
+4. **`list` 每次运行只扫描一次事务历史**（`src/query.cpp`、`src/versions.cpp`）：旧实现为每个已安装包重新读取 `.burrow/transactions` 并解析全部日志，636 份历史日志被读了约 17 遍。现在待恢复报告只生成一次，并复用为旧版本清单的“有未完成事务”保护标志。真实根 `list` 从 2.7s 降到 1.2s（中间构建测量）。
 5. **目录树证据改用一次目录枚举**（`src/versions.cpp`）：`collect_tree_stamp` 原来对每个条目再调用 `GetFileAttributesW`/`GetFileAttributesExW`，相当于每个文件两次系统调用。改为 `FindFirstFileW`/`FindNextFileW`，大小与时间由枚举结果直接得到，reparse point 与目录判定不变，指纹材料格式不变。真实根 `list` 从 1.2s 降到 0.38s（中间构建测量；最终构建见上节 0.40–0.42s 与 `real-profile-final.log` 的 0.38–0.39s）。
 
 ### 历史（#19、#23）
@@ -138,17 +138,17 @@
 - 无变化从快照实现的 156.3ms 降到 82.1ms，有变化从 1154.9ms 降到 211.9ms；主要差别是不再导出并两次哈希整个 1500 文件快照。同一构建多次运行存在数十毫秒噪声；精确原始值见 #23 证据中的 `perf-report-042fac1.json`。
 - 真实 `main` bucket 的真实网络数据分两次构建采集，不能混为一个“最终构建”结果：
   - 中间修复构建（`re-register` 修复后、最终校验前，04:50:26Z 链接）在真实 `C:\Users\Neo\scoop` 上快进 `5cb1b7b9…` → `89b4cf80…`，`changed_files=8`、`received_bytes=5,331`。
-  - 最终构建（`0cbc39e` 的证据，`coop.exe` SHA256 `d0510faa…`）在真实根上的刷新是**无变化**（`received_bytes=0`、索引 SHA256 不变、`git status --porcelain` 为空、`adopted` 保持 true）；它的**有变化**刷新跑在项目内的真实 `main` 全量副本 `.local/pi/tasks/23/real-bucket-copy2` 上（`changed_files=8`、`received_bytes=5,186`）。#23 的 verifier-2 P3 指出的正是这条归因错误，本文已按实际构建修正。
+  - 最终构建（`0cbc39e` 的证据，`burrow.exe` SHA256 `d0510faa…`）在真实根上的刷新是**无变化**（`received_bytes=0`、索引 SHA256 不变、`git status --porcelain` 为空、`adopted` 保持 true）；它的**有变化**刷新跑在项目内的真实 `main` 全量副本 `.local/pi/tasks/23/real-bucket-copy2` 上（`changed_files=8`、`received_bytes=5,186`）。#23 的 verifier-2 P3 指出的正是这条归因错误，本文已按实际构建修正。
 - 本票（#44）在 `d1f8029`/`f9c0fff9…` 构建上重新采集了真实根与真实规模刷新（见上节），不再依赖 #23 的中间构建数字作为当前结果。
 
 ## 包体与落盘体积（2026-10-30）
 
-这一节是另一条轴：完整**产物**的字节数，不是查询耗时。主指标定为**安装后占用**（`coop.exe` + `scoop-lib` + `licenses` + `LICENSE` + `THIRD_PARTY.md` 的落盘总和），下载包（release zip）只作记录。口径与取舍见 [ADR-0005](adr/0005-binary-size-build-only.md)。
+这一节是另一条轴：完整**产物**的字节数，不是查询耗时。主指标定为**安装后占用**（`burrow.exe` + `scoop-lib` + `licenses` + `LICENSE` + `THIRD_PARTY.md` 的落盘总和），下载包（release zip）只作记录。口径与取舍见 [ADR-0005](adr/0005-binary-size-build-only.md)。
 
-- 方法：同一棵树、同一台机器、MSVC 工具集 14.51.36231，用 `scripts/build.ps1` 相同的 Release 配置各建一遍（`-DBUILD_TESTING=OFF` 只跳过测试夹具，不改变 `coop` 目标），每个变体取 `coop.exe` 长度、把 5 类落盘文件按发布布局拼成一份 `Compress-Archive` zip、并求和得安装占用。脚本、日志、linker map 与 CSV 在项目内 `.local/size-probe/`（`run-variants.ps1`、`run-o1.ps1`、`run-split.ps1`、`run-map.ps1`、`results.json`、`results-o1.json`、`attribution.csv`、`build-map/coop.map`）。
-- 已发布基线（CI 构建的 `v0.2.3` 产物）：`coop.exe` 4,660,224 B、安装占用 4,954,656 B、zip 2,374,047 B，其中 `coop.exe` 占压缩后载荷 96%。本机构建的同一源码基线为 4,732,928 B（+72,704 B），差异来自工具链，不改变下面各变体的相对结论。
+- 方法：同一棵树、同一台机器、MSVC 工具集 14.51.36231，用 `scripts/build.ps1` 相同的 Release 配置各建一遍（`-DBUILD_TESTING=OFF` 只跳过测试夹具，不改变 `burrow` 目标），每个变体取 `burrow.exe` 长度、把 5 类落盘文件按发布布局拼成一份 `Compress-Archive` zip、并求和得安装占用。脚本、日志、linker map 与 CSV 在项目内 `.local/size-probe/`（`run-variants.ps1`、`run-o1.ps1`、`run-split.ps1`、`run-map.ps1`、`results.json`、`results-o1.json`、`attribution.csv`、`build-map/burrow.map`）。
+- 已发布基线（CI 构建的 `v0.2.3` 产物）：`burrow.exe` 4,660,224 B、安装占用 4,954,656 B、zip 2,374,047 B，其中 `burrow.exe` 占压缩后载荷 96%。本机构建的同一源码基线为 4,732,928 B（+72,704 B），差异来自工具链，不改变下面各变体的相对结论。
 
-| 变体 | `coop.exe` B | 压缩后 exe B | 安装占用 B | 相对基线 |
+| 变体 | `burrow.exe` B | 压缩后 exe B | 安装占用 B | 相对基线 |
 | --- | ---: | ---: | ---: | ---: |
 | 基线（`/O2 /Ob2`） | 4,732,928 | 2,245,066 | 5,027,360 | — |
 | 全量 IPO（`/GL`+`/LTCG`，依赖一起开） | 4,638,720 | — | 4,933,152 | −2.0% |
@@ -157,33 +157,33 @@
 | 全量 IPO + `/O1` + `/Ob1` | 4,197,888 | — | 4,492,320 | −11.3% |
 | **仅 C++ 编译单元 `/O1`，C 依赖 `/O2`**（选定） | **4,281,856** | **2,057,184** | **4,576,288** | **−9.5%** |
 
-`coop.exe` 的 `.text` 归因（linker map，`/MAP`，47,868 个公共与静态符号按相邻地址差求和）：coop 自身 1,703 KB（47%）、libgit2 1,329 KB（36%）、libarchive 276 KB（8%）、静态 CRT 215 KB（6%）、zstd 62 KB、xz/liblzma 44 KB、bzip2 15 KB（合计约 3.6 MB，与 `.text` 3,598 KB 相符）。这也解释了 LTO 为什么只有 2%：静态库里没有“没人引用的整对象”可删，`/OPT:REF` 已经做过这件事。
+`burrow.exe` 的 `.text` 归因（linker map，`/MAP`，47,868 个公共与静态符号按相邻地址差求和）：burrow 自身 1,703 KB（47%）、libgit2 1,329 KB（36%）、libarchive 276 KB（8%）、静态 CRT 215 KB（6%）、zstd 62 KB、xz/liblzma 44 KB、bzip2 15 KB（合计约 3.6 MB，与 `.text` 3,598 KB 相符）。这也解释了 LTO 为什么只有 2%：静态库里没有“没人引用的整对象”可删，`/OPT:REF` 已经做过这件事。
 
 运行时代价（4 轮 × 每轮 10 次 `search --json git`、10 次 `list --json`、30 次 `--version`，真实根 `C:\Users\Neo\scoop`，1,704 个 Manifest）：基线 29.6 / 31.3 / 12.7 ms，仅 C++ `/O1` 为 30.5 / 31.3 / 12.9 ms，全量 `/O1` 为 29.7 / 31.2 / 13.0 ms。差异落在本页第 20 条记录的同机波动内，不宣称有可测的延迟代价。
 
-- 未运行：解压吞吐（选定方案把 zlib、liblzma、bzip2、zstd 全部留在 `/O2`，因此只影响 coop 自身的 C++ 路径，但仍没有实测）；CI 工具链上的绝对字节见下一小节。
-- 链接可复现性（本轮旁证）：同一构建目录连续两次重链接，`coop.exe` 都是 4,732,928 B，SHA256 却不同（`B6C74E6C…`→`3C23237D…`），所以体积守卫要按字节数判定，不能按哈希。
+- 未运行：解压吞吐（选定方案把 zlib、liblzma、bzip2、zstd 全部留在 `/O2`，因此只影响 burrow 自身的 C++ 路径，但仍没有实测）；CI 工具链上的绝对字节见下一小节。
+- 链接可复现性（本轮旁证）：同一构建目录连续两次重链接，`burrow.exe` 都是 4,732,928 B，SHA256 却不同（`B6C74E6C…`→`3C23237D…`），所以体积守卫要按字节数判定，不能按哈希。
 - 静态检查（本轮）：`gh` 读到的 `v0.2.3` 产物构成、PE 各节大小（`.text` 3,598 KB、`.rdata` 785 KB、`.pdata` 126 KB、`.data` 36 KB、`.rsrc` 0.5 KB）与上述 map 归因一致。
 - 归档能力证据（本轮，只读抽样）：`git clone --depth 1` 取 Main `5630299…`（1,702 份 Manifest）、Extras `fa8327d…`（2,449）、Versions `726377c…`（630），按 Manifest 的 `url`/`architecture.*.url` 扩展名分类：`.zst` 7、`.bz2` 0、`.xz` 12、`.lzma` 8、`.rar` 7、`.cab` 9、`.iso` 0、`.lha` 0；计数与样例在 `.local/size-probe/survey-counts.json`。
 
-### 落地：coop 自身 `/O1` 与安装后占用守卫（2026-10-31，CI 实测）
+### 落地：burrow 自身 `/O1` 与安装后占用守卫（2026-10-31，CI 实测）
 
-- 方法：同一个 `windows-latest` 运行器、同一棵树连续构建两次。第一次把 `CMakeLists.txt` 换回 `main` 的版本（落地前），第二次恢复改动后的版本（落地后）；两次都用 `scripts/check-size.ps1` 统计 `coop.exe` 与另外 4 类落盘文件，并按发布布局压缩一份 zip。测量命令：`./scripts/check-size.ps1 -LimitBytes 9000000 -ZipPath $env:RUNNER_TEMP/coop-pre.zip`，落地后一次把 `coop-pre.zip` 换成 `coop-post.zip`。临时工作流 `size-probe.yml` 只用于这次量测，取数后删除；证据为 CI run [41204109962](https://github.com/Coh1e/coop/actions/runs/41204109962)。下面的数值是历史结果，不能当成本机基线。
+- 方法：同一个 `windows-latest` 运行器、同一棵树连续构建两次。第一次把 `CMakeLists.txt` 换回 `main` 的版本（落地前），第二次恢复改动后的版本（落地后）；两次都用 `scripts/check-size.ps1` 统计 `burrow.exe` 与另外 4 类落盘文件，并按发布布局压缩一份 zip。测量命令：`./scripts/check-size.ps1 -LimitBytes 9000000 -ZipPath $env:RUNNER_TEMP/burrow-pre.zip`，落地后一次把 `burrow-pre.zip` 换成 `burrow-post.zip`。临时工作流 `size-probe.yml` 只用于这次量测，取数后删除；证据为 CI run [41204109962](https://github.com/Coh1e/burrow/actions/runs/41204109962)。下面的数值是历史结果，不能当成本机基线。
 - 结果：
 
 | 指标 | 落地前 | 落地后 | 变化 |
 | --- | ---: | ---: | ---: |
-| `coop.exe` | 4,759,552 | 4,302,848 | −9.6% |
+| `burrow.exe` | 4,759,552 | 4,302,848 | −9.6% |
 | 安装后占用 | 5,053,984 | 4,597,280 | −9.0% |
 | 下载 zip（只记录） | 2,346,997 | 2,156,551 | −8.1% |
 
-- 守卫：`scripts/check-size.ps1` 的默认阈值 = 落地后安装后占用 × 1.1 = **5,057,008 B**。超阈值以非零码退出并打印逐项字节；`scripts/release-check.ps1` 与 `.github/workflows/ci.yml` 调用同一脚本，不各写一份。判定按字节数，不按哈希：同一构建目录连续两次重链接，`coop.exe` 字节数不变而 SHA256 不同（见上一小节）。
-- 门槛：`coop.exe` 降 9.6%（要求 ≥ 9%），安装后占用降 9.0%（要求 ≥ 8%），门槛来自 #90 的验收标准；CI 的完整 `ctest` 与守卫在同一轮通过。
+- 守卫：`scripts/check-size.ps1` 的默认阈值 = 落地后安装后占用 × 1.1 = **5,057,008 B**。超阈值以非零码退出并打印逐项字节；`scripts/release-check.ps1` 与 `.github/workflows/ci.yml` 调用同一脚本，不各写一份。判定按字节数，不按哈希：同一构建目录连续两次重链接，`burrow.exe` 字节数不变而 SHA256 不同（见上一小节）。
+- 门槛：`burrow.exe` 降 9.6%（要求 ≥ 9%），安装后占用降 9.0%（要求 ≥ 8%），门槛来自 #90 的验收标准；CI 的完整 `ctest` 与守卫在同一轮通过。
 
 ## 验证状态
 
-- 本轮运行（#90，提交 `9c8f383`，CI run [41204109985](https://github.com/Coh1e/coop/actions/runs/41204109985)）：完整 CTest 82/82 通过（`powershell.exe` 5.1 基线，MSVC 14.51.36231、CMake 4.4.4、Ninja 1.13.2），`check-size.ps1` 随后打印安装占用 4,597,280 B 并通过；本机同一套件 82/82 通过。
-- 本轮运行（2026-10-31）：完整 CTest 在 Windows PowerShell 5.1 基线下 79/79 通过（CI run [41175777083](https://github.com/Coh1e/coop/actions/runs/41175777083)，提交 `a69934a`）。套件默认运行器为 `powershell.exe`；本机沙箱中的 HKCU/junction 限制不再作为通过依据。
+- 本轮运行（#90，提交 `9c8f383`，CI run [41204109985](https://github.com/Coh1e/burrow/actions/runs/41204109985)）：完整 CTest 82/82 通过（`powershell.exe` 5.1 基线，MSVC 14.51.36231、CMake 4.4.4、Ninja 1.13.2），`check-size.ps1` 随后打印安装占用 4,597,280 B 并通过；本机同一套件 82/82 通过。
+- 本轮运行（2026-10-31）：完整 CTest 在 Windows PowerShell 5.1 基线下 79/79 通过（CI run [41175777083](https://github.com/Coh1e/burrow/actions/runs/41175777083)，提交 `a69934a`）。套件默认运行器为 `powershell.exe`；本机沙箱中的 HKCU/junction 限制不再作为通过依据。
 - 本轮运行（#44，被测构建 `d1f8029` = `f9c0fff9…`）：`tests/perf.ps1` 两次通过（含索引命中/失效回退/损坏回退/重建、无变化刷新不重建、变化刷新原地更新共用工作树、查询不修改 bucket 源或注册表），报告 `.local/pi/tasks/44/evidence/perf-report-measured-d1f8029.json` 与 `perf-report-measured2-d1f8029.json`。
 - 本轮运行（#44）：`tests/perf-real.ps1` 通过，真实根查询前后注册表/索引/revision/工作树未变；真实根刷新在本轮先是 `changed`（真实 HTTPS，`3f71320…`→`dcb231e7…`，9 个文件/6,128 字节），随后全部为 `unchanged` 且零对象传输（真实根现为 `dcb231e7…`、`git status` 为空、registry 与索引同步，见 `real-root-after-change.log`）；真实规模副本的有变化刷新每轮断言刷新后工作树内无关 Manifest 的 SHA256 不变（并核对上游副本未被写入）、查询索引重建、新 Manifest 可由 `info` 查到。报告 `.local/pi/tasks/44/evidence/perf-real-head-29c5ea7/perf-real-report.json`（7 轮断言）与 `.local/pi/tasks/44/evidence/perf-real-probe3/perf-real-report.json`（真实 HTTPS `changed` 样本）。
 - 历史结果（#44，当时套件 45 个用例）：完整 CTest 45/45 通过（`.local/pi/tasks/44/evidence/ctest-full-d1f8029.log`，216.65s），含 `query`、`plan`、`ir_pipeline`、`cleanup`、`old_versions`、`recovery`、`recovery_matrix`、`lifecycle`、`update`、`versions_bucket` 等受影响路径；针对性套件 9/9 见 `ctest-targeted-2.log`。最终 head `b034f18` 在此代码上再次完整运行 45/45（`ctest-full-b034f18.log`，220.74s，构建为 no-op，二进制仍为 `f9c0fff9…`）。

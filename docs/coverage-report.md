@@ -13,7 +13,7 @@
 ## 结论
 
 - 分母为 Main 1701 + Extras 2448 = **4149 份 Manifest**。Main 使用本机共用工作树实际检出的 `5be7f8c702856c72800a0a4945b88fe6ea2bd52f`；Extras 使用本轮从官方仓库取得的 `0f8f4b5fd43bedccc7b233b77f4605bddba8085b`（本机 Scoop 根没有注册 Extras）。两份 bucket 都由项目内副本固定，Main 的 1701 份 Manifest 与共用工作树逐字节一致。
-- **读取：4149/4149 通过**（`coop info --json` 均返回有效 IR 校验结果），没有无法解析或无法生成诊断的 Manifest。
+- **读取：4149/4149 通过**（`burrow info --json` 均返回有效 IR 校验结果），没有无法解析或无法生成诊断的 Manifest。
 - **规划：4094/4149 的 64bit 安装预览可执行**；53 个包的预览明确 `execution_available=false`；另有 2 个 helper 包（`7zip`、`innounp`）在本次盘点根内表现为“已安装”，不计入缺口。
 - **运行验证：15/4149**。这 15 个包正是 [#40 逐项交替验收](history/real-machine-acceptance.md) 的本机实际安装集合；其安装 Manifest 的 SHA256 与本轮分母完全一致，程序运行退出码均为 0。其余 4134 个包没有本轮运行事实。
 - 53 个被阻塞的包归为 6 类机制缺口：`psmodule` 28、命令入口宿主 11、Manifest 形状/路径 6、依赖缺失 5、架构产物缺失 3、依赖自身不受支持 2；其中 2 个包各涉及两类，去重后 53。完整包名、诊断码与原文见下表与证据。
@@ -21,7 +21,7 @@
 
 ## 缺口去向与闭合
 
-53 个阻塞包已逐项归因并各自绑定子票与闭合状态，见[全量盘点缺口闭合与子票](compatibility-gap-closure.md)；机器账本为 [`tests/coverage/gaps.json`](../tests/coverage/gaps.json)，由 CTest `coverage_gaps` 守卫，减少条目、改投子票、删掉验收条件、把剩余项标成已解决都会失败。R25–R28（[#46](https://github.com/Coh1e/coop/issues/46)–[#49](https://github.com/Coh1e/coop/issues/49)）已全部完成并关闭：**49/55 行已解决**，剩余 6 行为 3 个 `external-host:python` 环境前提（`main/retdec`、`main/vapoursynth`、`extras/pdd`，需要真实 `python.exe`）和 3 个 arm64-only 包（64bit 按设计与 Scoop 一致拒绝，ARM64 生命周期为人类 2026-10-27 批准的例外、仍未运行）。全量分母复测（R28，Main `eebcee22…` + Extras `0f8f4b5f…`）为读取 4149/4149、计划可执行 4141、阻塞 6；本页下表仍是 #41 当时的基线，不因复测而改写。
+53 个阻塞包已逐项归因并各自绑定子票与闭合状态，见[全量盘点缺口闭合与子票](compatibility-gap-closure.md)；机器账本为 [`tests/coverage/gaps.json`](../tests/coverage/gaps.json)，由 CTest `coverage_gaps` 守卫，减少条目、改投子票、删掉验收条件、把剩余项标成已解决都会失败。R25–R28（[#46](https://github.com/Coh1e/burrow/issues/46)–[#49](https://github.com/Coh1e/burrow/issues/49)）已全部完成并关闭：**49/55 行已解决**，剩余 6 行为 3 个 `external-host:python` 环境前提（`main/retdec`、`main/vapoursynth`、`extras/pdd`，需要真实 `python.exe`）和 3 个 arm64-only 包（64bit 按设计与 Scoop 一致拒绝，ARM64 生命周期为人类 2026-10-27 批准的例外、仍未运行）。全量分母复测（R28，Main `eebcee22…` + Extras `0f8f4b5f…`）为读取 4149/4149、计划可执行 4141、阻塞 6；本页下表仍是 #41 当时的基线，不因复测而改写。
 
 ## 环境与修订
 
@@ -30,15 +30,15 @@
 | 平台 | Windows 11，x64（`10.0.26300.0`），PowerShell 7.6.5 |
 | 共用 Scoop | Scoop v0.6.0（2026-09-30），根 `C:\Users\Neo\scoop` |
 | Main 实际工作树修订 | `5be7f8c702856c72800a0a4945b88fe6ea2bd52f`（分支 `master`，1783 个文件） |
-| Main Coop 注册表记录 | `89b4cf8078b4968bca637b2ae226b16e8d04dbce`（2026-10-26T05:09:07Z，**与工作树不一致**） |
+| Main Burrow 注册表记录 | `89b4cf8078b4968bca637b2ae226b16e8d04dbce`（2026-10-26T05:09:07Z，**与工作树不一致**） |
 | Extras 盘点修订 | `0f8f4b5fd43bedccc7b233b77f4605bddba8085b`（官方 `master` HEAD，本轮克隆取得，2643 个文件） |
-| Coop | `coop 0.1.0`，SHA256 `76666fae4dad953acaf83c17f7270d3afad91dcd7a33efe5c0cab0dcc9588a79`；盘点代码提交 `8283e6a062f5044f8a180ede05634c0efca619c7`（本页与基线由该提交上的运行生成，之后的提交只更新文档与基线） |
+| Burrow | `burrow 0.1.0`，SHA256 `76666fae4dad953acaf83c17f7270d3afad91dcd7a33efe5c0cab0dcc9588a79`；盘点代码提交 `8283e6a062f5044f8a180ede05634c0efca619c7`（本页与基线由该提交上的运行生成，之后的提交只更新文档与基线） |
 | 盘点工具 | [`tests/real-scoop-coverage.ps1`](../tests/real-scoop-coverage.ps1) 与 [`tests/coverage-manifest-features.ps1`](../tests/coverage-manifest-features.ps1) |
-| 规划接口 | 真实 `coop.exe --root <项目内盘点根> --arch 64bit info <bucket/包名> --json` 与 `install <bucket/包名> --dry-run --json`，8 个并行读取工作进程 |
+| 规划接口 | 真实 `burrow.exe --root <项目内盘点根> --arch 64bit info <bucket/包名> --json` 与 `install <bucket/包名> --dry-run --json`，8 个并行读取工作进程 |
 
 ### 为什么修订以工作树为准
 
-`coop bucket list` 的 `revision` 是 Coop 上一次成功刷新的记录；本机 Scoop 此后推进过 `main` 工作树，因此记录停在 `89b4cf8…`。本轮没有把缓存记录当作实际数据：盘点脚本直接解析共用工作树 `.git/HEAD` 与引用，以实际检出的 `5be7f8c…` 克隆项目内副本，并逐份比较 1701 个 Manifest 的 SHA256（`missing=0`、`extra=0`、`mismatched=0`）。下一次显式 `coop bucket update main` 会按 #23 的刷新规则核对 HEAD 并补齐记录；本票只盘点，不刷新共用 bucket。
+`burrow bucket list` 的 `revision` 是 Burrow 上一次成功刷新的记录；本机 Scoop 此后推进过 `main` 工作树，因此记录停在 `89b4cf8…`。本轮没有把缓存记录当作实际数据：盘点脚本直接解析共用工作树 `.git/HEAD` 与引用，以实际检出的 `5be7f8c…` 克隆项目内副本，并逐份比较 1701 个 Manifest 的 SHA256（`missing=0`、`extra=0`、`mismatched=0`）。下一次显式 `burrow bucket update main` 会按 #23 的刷新规则核对 HEAD 并补齐记录；本票只盘点，不刷新共用 bucket。
 
 ### 盘点根与 helper
 
@@ -152,27 +152,27 @@ NSIS 安装器载荷不靠 Manifest 字段声明，而是 408 个包的 executab
 
 ## 真机已验证的 15 个包
 
-来源为 [#40](https://github.com/Coh1e/coop/issues/40) 的 `.local/pi/tasks/40/evidence/cohort-final3/cohort-20261026-201857/`。验证绑定条件：安装副本 `current/scoop-manifest.json` 的 SHA256 与本轮分母 Manifest 相同，并且存在与分母版本一致的 cohort 验证运行（`run_exit=0`）：优先使用 lifecycle 中的 `verification`/`coop_verify`/`scoop_verify`，没有匹配运行时才回退到 facts 快照。`summary.json` 的 `verified[*]` 同时记录 `verified_version`、`run_exit`、`run_source`、`run_log` 与两份来源文件。15/15 满足；这是**包级运行事实**，不是每个声明机制的生命周期证明。
+来源为 [#40](https://github.com/Coh1e/burrow/issues/40) 的 `.local/pi/tasks/40/evidence/cohort-final3/cohort-20261026-201857/`。验证绑定条件：安装副本 `current/scoop-manifest.json` 的 SHA256 与本轮分母 Manifest 相同，并且存在与分母版本一致的 cohort 验证运行（`run_exit=0`）：优先使用 lifecycle 中的 `verification`/`burrow_verify`/`scoop_verify`，没有匹配运行时才回退到 facts 快照。`summary.json` 的 `verified[*]` 同时记录 `verified_version`、`run_exit`、`run_source`、`run_log` 与两份来源文件。15/15 满足；这是**包级运行事实**，不是每个声明机制的生命周期证明。
 
 | 包 | 验证运行版本 | 真机操作（来自 #40 lifecycle） |
 | --- | --- | --- |
-| 7zip | 26.05 | Scoop reset；Coop 切到 26.03 再回当前 |
-| clink | 1.9.35 | Scoop reset；Coop 真实更新到 1.9.35；Scoop 卸载后 Coop 重装 |
+| 7zip | 26.05 | Scoop reset；Burrow 切到 26.03 再回当前 |
+| clink | 1.9.35 | Scoop reset；Burrow 真实更新到 1.9.35；Scoop 卸载后 Burrow 重装 |
 | cmake | 4.4.4 | Scoop reset |
-| fastfetch | 2.70.0 | Scoop reset；Coop 版本往返；Coop 卸载并重装 |
-| fd | 10.5.0 | Scoop reset；Coop 版本往返 |
-| fzf | 0.74.5 | Scoop reset；Coop 版本往返 |
+| fastfetch | 2.70.0 | Scoop reset；Burrow 版本往返；Burrow 卸载并重装 |
+| fd | 10.5.0 | Scoop reset；Burrow 版本往返 |
+| fzf | 0.74.5 | Scoop reset；Burrow 版本往返 |
 | gh | 2.103.2 | Scoop reset |
-| git | 2.56.0.4 | Scoop reset；Coop 版本往返；Scoop 真实更新到 2.56.0.4 后 Coop 识别 |
-| innounp | 2.71.2 | Scoop reset；Coop 版本往返 |
+| git | 2.56.0.4 | Scoop reset；Burrow 版本往返；Scoop 真实更新到 2.56.0.4 后 Burrow 识别 |
+| innounp | 2.71.2 | Scoop reset；Burrow 版本往返 |
 | ninja | 1.13.2 | Scoop reset |
 | pi-coding-agent | 1.4.0 | 只读记录（执行器自身运行中，不重写入口） |
-| ripgrep | 15.2.0 | Scoop reset；Coop 版本往返 |
-| starship | 1.27.0 | Scoop reset；Coop 版本往返 |
-| uv | 0.13.5 | Scoop reset；Coop 版本往返 |
-| zoxide | 0.10.0 | Scoop reset；Coop 版本往返 |
+| ripgrep | 15.2.0 | Scoop reset；Burrow 版本往返 |
+| starship | 1.27.0 | Scoop reset；Burrow 版本往返 |
+| uv | 0.13.5 | Scoop reset；Burrow 版本往返 |
+| zoxide | 0.10.0 | Scoop reset；Burrow 版本往返 |
 
-这 15 个包在安装态上覆盖 ZIP、7z、MSI、单文件产物以及命令入口、快捷方式、环境、持久化等对象；#40 实际执行的是 `scoop reset`、Coop 本地版本往返、真实更新、卸载重装和 Scoop 卸载后重装，并没有为每个包重新执行其全部脚本或安装器，也没有新装其余 4134 个包。`clink` 的 facts 快照版本是 1.9.34，`git` 是 2.56.0.3；它们的验证运行来自 lifecycle 的 `coop-real-update`（1.9.35）与 `scoop-real-update`（2.56.0.4），而不是把旧版本运行套到新 Manifest 上。`pi-coding-agent` 因执行器自身运行中只使用只读 facts 运行。逐项运行、入口、环境、数据与双方识别事实见[本机安装集的逐项交替验收](history/real-machine-acceptance.md)；Extras 没有任何本轮真机验证。
+这 15 个包在安装态上覆盖 ZIP、7z、MSI、单文件产物以及命令入口、快捷方式、环境、持久化等对象；#40 实际执行的是 `scoop reset`、Burrow 本地版本往返、真实更新、卸载重装和 Scoop 卸载后重装，并没有为每个包重新执行其全部脚本或安装器，也没有新装其余 4134 个包。`clink` 的 facts 快照版本是 1.9.34，`git` 是 2.56.0.3；它们的验证运行来自 lifecycle 的 `burrow-real-update`（1.9.35）与 `scoop-real-update`（2.56.0.4），而不是把旧版本运行套到新 Manifest 上。`pi-coding-agent` 因执行器自身运行中只使用只读 facts 运行。逐项运行、入口、环境、数据与双方识别事实见[本机安装集的逐项交替验收](history/real-machine-acceptance.md)；Extras 没有任何本轮真机验证。
 
 ## 历史真机样本（不计入本轮已验证数）
 
@@ -189,7 +189,7 @@ NSIS 安装器载荷不靠 Manifest 字段声明，而是 408 个包的 executab
 
 ```powershell
 ./scripts/build.ps1 -Action build
-pwsh -NoProfile -File tests/real-scoop-coverage.ps1 -CoopExe .local/build/coop.exe `
+pwsh -NoProfile -File tests/real-scoop-coverage.ps1 -BurrowExe .local/build/burrow.exe `
   -EvidenceDir .local/pi/tasks/41/evidence/coverage-<UTC> `
   -VerifiedFacts .local/pi/tasks/40/evidence/cohort-final3/cohort-20261026-201857/facts-all.json `
   -VerifiedLifecycle .local/pi/tasks/40/evidence/cohort-final3/cohort-20261026-201857/lifecycle.json
@@ -217,7 +217,7 @@ pwsh -NoProfile -File tests/real-scoop-coverage.ps1 -CoopExe .local/build/coop.e
 | 所有阻塞包与验证包的完整 `info`/`plan` 原文（#41 证据目录 68 个包；R28 运行目录 19 个样本包） | 该运行目录的 `samples/` |
 | 跨 bucket 依赖来源的逐包结果（声明、`dependency_order`、版本、是否可执行） | `cross-bucket-dependencies.json` |
 
-R28/#49 的本轮重跑运行目录为 `.local/pi/tasks/49/evidence/coverage-versions-final/coverage-20261027-054326/`（代码提交 `ce49eff`，`coop.exe` SHA256 `20e8fdb…`，退出 0），其中 `summary.json.cross_bucket_dependencies` 与 `cross-bucket-dependencies.json` 记录 5 个包的 `versions/*` 解析结果，`gaps` 不再包含 `dependency-missing`，共用根快照仍为 0 变化。
+R28/#49 的本轮重跑运行目录为 `.local/pi/tasks/49/evidence/coverage-versions-final/coverage-20261027-054326/`（代码提交 `ce49eff`，`burrow.exe` SHA256 `20e8fdb…`，退出 0），其中 `summary.json.cross_bucket_dependencies` 与 `cross-bucket-dependencies.json` 记录 5 个包的 `versions/*` 解析结果，`gaps` 不再包含 `dependency-missing`，共用根快照仍为 0 变化。
 
 已提交的 [`tests/coverage/baseline.json`](../tests/coverage/baseline.json) 是同一脚本生成的紧凑投影：固定修订、分母、总数、逐机制状态、缺口包名、产物/摘要算法计数与 15 个验证包；完整逐包记录仍只保存在项目内被忽略的证据目录。`baseline.json` 内的 `project_head` 是生成时的代码提交，本页提交只增加文档和该投影，不改变测量逻辑。
 
@@ -228,6 +228,6 @@ R28/#49 的本轮重跑运行目录为 `.local/pi/tasks/49/evidence/coverage-ver
 - arm64、32bit 没有实际执行；64bit 规划不能证明其他架构的入口、脚本或安装器行为。
 - `pi-coding-agent` 只记录运行版本，不重写入口或切换版本（执行器自身正在运行）。
 - R28 重跑时 `gh`、`uv` 的安装副本 Manifest 与实际 `eebcee22…` 分母不同，按绑定规则标为 `cohort-manifest-mismatch` 而不是本修订验证；本轮真机验证为 13，不是 15。
-- Coop 注册表的 Main 修订落后于实际工作树。本轮按实际数据盘点并把该差异写入 `baseline.json`；下一次显式 `bucket update` 会核对 HEAD 与记录。把缓存记录当实际修订会让分母指错版本，因此这里不使用它。
+- Burrow 注册表的 Main 修订落后于实际工作树。本轮按实际数据盘点并把该差异写入 `baseline.json`；下一次显式 `bucket update` 会核对 HEAD 与记录。把缓存记录当实际修订会让分母指错版本，因此这里不使用它。
 - `main/7zip` 与 `main/innounp` 在盘点根中因 helper junction 显示为“已安装”，其安装预览不是缺口的证据；两者已由 #40 真机覆盖。
 - 机制统计是“声明覆盖”，不是 Scoop 全部运行时语义的等价声明；例如企业安装器、系统级注册表/服务、私有 Git 来源、私有 PSModule 仓库仍不在本轮验证范围。

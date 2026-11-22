@@ -26,7 +26,7 @@
 `--jq` 表达式里带双引号时，参数会被拆开，报 `accepts 1 arg(s), received 2` 或 `accepts at most 1 arg(s), received 3`。表达式里不要写双引号，或者直接用 `ConvertFrom-Json`：
 
 ```powershell
-gh api repos/Coh1e/coop/commits/main | ConvertFrom-Json |
+gh api repos/Coh1e/burrow/commits/main | ConvertFrom-Json |
     ForEach-Object { "$($_.sha.Substring(0,7)) $($_.commit.message)" }
 ```
 

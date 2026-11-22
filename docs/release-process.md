@@ -10,15 +10,15 @@
 
 ## 步骤
 
-1. **改版本号并提交。** `CMakeLists.txt` 的 `project(coop VERSION <版本>)` 与 `README.md` 的当前版本两处同时改；单独提交为 `release: <版本>`，不夹带代码。
-2. **过门禁。** `./scripts/release-check.ps1 -Version <版本>`：构建全部 target、跑全套 CTest、核对 `coop --version`、检查安装占用。`-SkipTests` 只用于复验已发版本，不能用于首发。
-3. **打 tag 并推送。** `git tag -a v<版本> -m "coop v<版本>"`，再 `./scripts/push.ps1 origin main v<版本>`。裸 `git push` 在本机必失败，原因与替代路径见 [本机环境](agents/environment.md)。
+1. **改版本号并提交。** `CMakeLists.txt` 的 `project(burrow VERSION <版本>)` 与 `README.md` 的当前版本两处同时改；单独提交为 `release: <版本>`，不夹带代码。
+2. **过门禁。** `./scripts/release-check.ps1 -Version <版本>`：构建全部 target、跑全套 CTest、核对 `burrow --version`、检查安装占用。`-SkipTests` 只用于复验已发版本，不能用于首发。
+3. **打 tag 并推送。** `git tag -a v<版本> -m "burrow v<版本>"`，再 `./scripts/push.ps1 origin main v<版本>`。裸 `git push` 在本机必失败，原因与替代路径见 [本机环境](agents/environment.md)。
 4. **等 Release workflow。** tag 推送触发 [release.yml](../.github/workflows/release.yml)：构建、核对二进制版本、打包并解包 smoke test、创建 Release。**它不跑测试**，测试把关只来自第 2 步和 `main` 的 CI。
-5. **更新 Scoop bucket。** `Coh1e/scoop-bucket` 的 `bucket/coop.json` 改三处：`version`、`architecture.64bit.url`、`architecture.64bit.hash`（资产的 SHA256）。提交 `coop: update to <版本>` 并推送。**漏掉这步时 `scoop install` 仍拿旧版本。**
+5. **更新 Scoop bucket。** `Coh1e/scoop-bucket` 的 `bucket/burrow.json` 改三处：`version`、`architecture.64bit.url`、`architecture.64bit.hash`（资产的 SHA256）。提交 `burrow: update to <版本>` 并推送。**漏掉这步时 `scoop install` 仍拿旧版本。**
 6. **写发布说明。** workflow 生成的是英文提交列表；按项目习惯换成中文，先写到 `.local/release-notes-<版本>.md`（不提交），再 `gh release edit v<版本> --notes-file .local/release-notes-<版本>.md`。至少写清：本版内容、验证结果、已知未验证项、bucket 是否已同步。
 7. **复核四项。** 都对上才算发完：
    - `gh release view v<版本>` 有资产且大小合理；
-   - 下载资产解包后 `coop --version` 报 `coop <版本>`；
+   - 下载资产解包后 `burrow --version` 报 `burrow <版本>`；
    - `git ls-remote origin refs/tags/v<版本>` 指向发布提交；
    - bucket 清单的 `hash` 等于资产 SHA256。
 

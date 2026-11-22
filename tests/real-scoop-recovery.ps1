@@ -1,34 +1,34 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [string]$ScoopRoot = 'C:\Users\Neo\scoop'
 )
 # R16 real shared-root acceptance. It creates one test package in a temporary bucket inside the
-# human-selected Scoop root, alternates Coop and real Scoop on it, injects a real process crash
+# human-selected Scoop root, alternates Burrow and real Scoop on it, injects a real process crash
 # and a real failure at named execution stages, and removes every object it created in the finally
 # block. Existing installations, buckets, configuration, records and stores are not modified or
 # deleted; recovery is always scoped to the test package.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 $allowed = [IO.Path]::GetFullPath((Join-Path $projectRoot '.local')).TrimEnd('\') + '\'
 if (-not ($EvidenceDir.TrimEnd('\') + '\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Evidence must stay inside the project .local directory' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot)
 $scoop = (Get-Command scoop.ps1 -ErrorAction Stop).Source
 New-Item -ItemType Directory -Path $EvidenceDir -Force | Out-Null
 $commands = [System.Collections.Generic.List[object]]::new()
-$package = 'coop-r16-fixture'
-$bucketName = 'coop-r16-recovery'
+$package = 'burrow-r16-fixture'
+$bucketName = 'burrow-r16-recovery'
 $bucket = Join-Path $ScoopRoot "buckets/$bucketName"
 $app = Join-Path $ScoopRoot "apps/$package"
 $store = Join-Path $ScoopRoot "persist/$package"
-$marker = Join-Path $ScoopRoot 'coop-r16-hook-marker.txt'
-$faultFile = Join-Path $ScoopRoot '.coop/test-faults.json'
-$fixture1 = Join-Path (Split-Path $CoopExe) 'fixture-1.exe'
-$fixture2 = Join-Path (Split-Path $CoopExe) 'fixture-2.exe'
+$marker = Join-Path $ScoopRoot 'burrow-r16-hook-marker.txt'
+$faultFile = Join-Path $ScoopRoot '.burrow/test-faults.json'
+$fixture1 = Join-Path (Split-Path $BurrowExe) 'fixture-1.exe'
+$fixture2 = Join-Path (Split-Path $BurrowExe) 'fixture-2.exe'
 function Run([string]$name,[string]$exe,[string[]]$arguments,[string]$WorkingDirectory = '') {
     $log = Join-Path $EvidenceDir (($name -replace '[\\/:*?"<>|]','-')+'.log')
     $previous = (Get-Location).Path
@@ -41,14 +41,14 @@ function Run([string]$name,[string]$exe,[string[]]$arguments,[string]$WorkingDir
     $commands.Add([pscustomobject]@{name=$name;exe=$exe;arguments=$arguments;working_directory=$WorkingDirectory;exit=$exit;log=$log})
     return [pscustomobject]@{exit=$exit;output=$output;log=$log}
 }
-function Invoke-CoopFault([string]$name,[string[]]$arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+function Invoke-BurrowFault([string]$name,[string[]]$arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     $start.WorkingDirectory = $ScoopRoot
     foreach ($argument in @('--root',$ScoopRoot)+$arguments) { Add-ProcessArgument $start ($argument) }
-    $start.EnvironmentVariables['COOP_ALLOW_TEST_FAULTS'] = '1'
+    $start.EnvironmentVariables['BURROW_ALLOW_TEST_FAULTS'] = '1'
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
@@ -58,11 +58,11 @@ function Invoke-CoopFault([string]$name,[string[]]$arguments) {
     $process.Dispose()
     $log = Join-Path $EvidenceDir (($name -replace '[\\/:*?"<>|]','-')+'.log')
     Set-Content -LiteralPath $log -Value ($output+"`n"+$errorText) -Encoding utf8
-    $commands.Add([pscustomobject]@{name=$name;exe=$CoopExe;arguments=(@('--root',$ScoopRoot)+$arguments);
+    $commands.Add([pscustomobject]@{name=$name;exe=$BurrowExe;arguments=(@('--root',$ScoopRoot)+$arguments);
         working_directory=$ScoopRoot;exit=$result.exit;log=$log})
     return $result
 }
-function Coop([string]$name,[string[]]$arguments) { return Run $name $CoopExe (@('--root',$ScoopRoot)+$arguments) }
+function Burrow([string]$name,[string[]]$arguments) { return Run $name $BurrowExe (@('--root',$ScoopRoot)+$arguments) }
 function Scoop([string]$name,[string[]]$arguments) { return Run $name $scoop $arguments }
 function Assert-True([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
 function Read-Json([object]$output) {
@@ -97,12 +97,12 @@ function Set-Fault([ValidateSet('crash','fail')][string]$mode,[string]$stage) {
     @{ $mode = @($stage) } | ConvertTo-Json | Set-Content -LiteralPath $faultFile -Encoding utf8
 }
 function Clear-Fault { Remove-Item -LiteralPath $faultFile -Force -ErrorAction SilentlyContinue }
-function CoopEntry([string]$name) {
-    $items = (Coop ($name+'-list') @('list','--json')).output | ConvertFrom-Json
+function BurrowEntry([string]$name) {
+    $items = (Burrow ($name+'-list') @('list','--json')).output | ConvertFrom-Json
     return @($items | Where-Object { $_.name -eq $package })
 }
 function Pending-Journal {
-    $journals = @(Get-ChildItem "$ScoopRoot/.coop/transactions" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $journals = @(Get-ChildItem "$ScoopRoot/.burrow/transactions" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
         $path = Join-Path $_.FullName 'journal.json'
         if (-not (Test-Path -LiteralPath $path)) { return }
         $value = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
@@ -113,14 +113,14 @@ function Pending-Journal {
 }
 function Hook-Lines { if (-not (Test-Path -LiteralPath $marker)) { return 0 }; return @(Get-Content -LiteralPath $marker).Count }
 
-$summary = [ordered]@{scoop_root=$ScoopRoot;package=$package;bucket=$bucket;coop=$CoopExe;
-    coop_version=(& $CoopExe --version);
-    coop_sha256=(Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash.ToLower();
+$summary = [ordered]@{scoop_root=$ScoopRoot;package=$package;bucket=$bucket;burrow=$BurrowExe;
+    burrow_version=(& $BurrowExe --version);
+    burrow_sha256=(Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash.ToLower();
     scoop_source=$scoop;scenarios=[ordered]@{}}
 $installedBefore = $null
 $created = $false
 $faultFileExisted = Test-Path -LiteralPath $faultFile
-$existingPendingBefore = @(Get-ChildItem "$ScoopRoot/.coop/transactions" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+$existingPendingBefore = @(Get-ChildItem "$ScoopRoot/.burrow/transactions" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     $path = Join-Path $_.FullName 'journal.json'
     if (Test-Path -LiteralPath $path) {
         $value = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
@@ -134,62 +134,62 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $store)) "Test persist store already exists: $store"
     Assert-True (-not (Test-Path -LiteralPath $marker)) "Test hook marker already exists: $marker"
     Assert-True ($existingPendingBefore.Count -eq 0) "The real root already has pending transactions: $($existingPendingBefore -join ',')"
-    $installedBefore = (Coop 'list-before' @('list','--json')).output | ConvertFrom-Json
+    $installedBefore = (Burrow 'list-before' @('list','--json')).output | ConvertFrom-Json
     Save-Json 'installed-before.json' $installedBefore
     New-Item -ItemType Directory -Path (Join-Path $bucket 'bucket') -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $store 'config') -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $store 'config/settings.ini') -Value 'coop-r16-user-data' -NoNewline
+    Set-Content -LiteralPath (Join-Path $store 'config/settings.ini') -Value 'burrow-r16-user-data' -NoNewline
     New-Payload '1' $fixture1 (Join-Path $EvidenceDir 'payload-v1.zip') | Out-Null
     New-Payload '2' $fixture2 (Join-Path $EvidenceDir 'payload-v2.zip') | Out-Null
     Write-Manifest '1' (Join-Path $EvidenceDir 'payload-v1.zip')
     $created = $true
 
-    # --- 1. Coop installs v1 and Scoop continues to manage it. --------------------------------
-    $install = Coop 'install-v1' @('install',"$bucketName/$package",'--json')
-    Assert-True ($install.exit -eq 0) "Coop install failed: $($install.output)"
+    # --- 1. Burrow installs v1 and Scoop continues to manage it. --------------------------------
+    $install = Burrow 'install-v1' @('install',"$bucketName/$package",'--json')
+    Assert-True ($install.exit -eq 0) "Burrow install failed: $($install.output)"
     $installed = Read-Json $install.output
-    Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Coop v1 program did not run'
-    Assert-True ((& (Join-Path $ScoopRoot "shims/$package-tool.exe")) -eq 'fixture 1') 'Coop v1 second entry did not run'
-    Assert-True ((Hook-Lines) -eq 1) 'Coop install did not run the declared post_install hook exactly once'
+    Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Burrow v1 program did not run'
+    Assert-True ((& (Join-Path $ScoopRoot "shims/$package-tool.exe")) -eq 'fixture 1') 'Burrow v1 second entry did not run'
+    Assert-True ((Hook-Lines) -eq 1) 'Burrow install did not run the declared post_install hook exactly once'
     $scoopList = Scoop 'scoop-list-v1' @('list')
-    Assert-True ($scoopList.exit -eq 0 -and $scoopList.output -match [regex]::Escape($package)) 'Scoop did not list the Coop-installed package'
+    Assert-True ($scoopList.exit -eq 0 -and $scoopList.output -match [regex]::Escape($package)) 'Scoop did not list the Burrow-installed package'
     $scoopReset = Scoop 'scoop-reset-v1' @('reset',$package)
     Assert-True ($scoopReset.exit -eq 0) "Scoop reset v1 failed: $($scoopReset.output)"
-    Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Scoop reset v1 did not keep the Coop version runnable'
+    Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Scoop reset v1 did not keep the Burrow version runnable'
     $storeHash = (Get-FileHash -LiteralPath (Join-Path $store 'config/settings.ini') -Algorithm SHA256).Hash
-    $summary.scenarios.coop_install_then_scoop = @{version=$installed.version;hook_runs=(Hook-Lines);
+    $summary.scenarios.burrow_install_then_scoop = @{version=$installed.version;hook_runs=(Hook-Lines);
         scoop_list_exit=$scoopList.exit;scoop_reset_exit=$scoopReset.exit;store_hash=$storeHash}
 
     # --- 2. Real update crash at the extraction stage; Scoop then resets; recovery discards the
     # preparation and the retried update completes for both clients. -----------------------------
     Write-Manifest '2' (Join-Path $EvidenceDir 'payload-v2.zip')
     Set-Fault 'crash' 'after-extract'
-    $crash = Invoke-CoopFault 'update-crash' @('update',$package,'--json')
+    $crash = Invoke-BurrowFault 'update-crash' @('update',$package,'--json')
     Clear-Fault
     Assert-True ($crash.exit -eq -1073740791) "Injected real update crash did not terminate the process: exit $($crash.exit)"
     $pending = Pending-Journal
     Assert-True (@($pending.Value.created).Count -eq 0) 'Extraction-stage crash left published state in the journal'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $app '2'))) 'Extraction-stage crash published the target version'
-    $during = CoopEntry 'during'
-    Assert-True ($during.Count -eq 1 -and $during[0].version -eq '1' -and $during[0].last_operation -eq 'pending-recovery') "Coop query did not report v1 with pending recovery: $($during | ConvertTo-Json -Depth 8)"
+    $during = BurrowEntry 'during'
+    Assert-True ($during.Count -eq 1 -and $during[0].version -eq '1' -and $during[0].last_operation -eq 'pending-recovery') "Burrow query did not report v1 with pending recovery: $($during | ConvertTo-Json -Depth 8)"
     $scoopResetDuring = Scoop 'scoop-reset-during' @('reset',$package)
-    Assert-True ($scoopResetDuring.exit -eq 0) "Scoop could not operate on the installed package after the Coop crash: $($scoopResetDuring.output)"
-    Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Scoop reset after the Coop crash did not keep v1 runnable'
+    Assert-True ($scoopResetDuring.exit -eq 0) "Scoop could not operate on the installed package after the Burrow crash: $($scoopResetDuring.output)"
+    Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Scoop reset after the Burrow crash did not keep v1 runnable'
     Assert-True ((Hook-Lines) -eq 1) 'The interrupted update ran the v2 hook before the injected stage'
-    $dry = Read-Json (Coop 'recover-dry' @('recover',$package,'--dry-run','--json')).output
+    $dry = Read-Json (Burrow 'recover-dry' @('recover',$package,'--dry-run','--json')).output
     Assert-True ($dry[0].status -eq 'recoverable' -and @($dry[0].actions).Count -eq 0) 'The extraction-only transaction was not classified as a discardable preparation'
-    $recovered = Coop 'recover-after-crash' @('recover',$package,'--json')
+    $recovered = Burrow 'recover-after-crash' @('recover',$package,'--json')
     Assert-True ($recovered.exit -eq 0) "Recovery after the real crash failed: $($recovered.output)"
     $recoveredJson = Read-Json $recovered.output
     Assert-True ($recoveredJson[0].status -eq 'recovered') 'Recovery did not report a recovered transaction'
     Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Recovery changed the Scoop-reset v1 program'
     Assert-True ((Get-FileHash -LiteralPath (Join-Path $store 'config/settings.ini') -Algorithm SHA256).Hash -eq $storeHash) 'Recovery changed stored persistent data'
-    $retry = Coop 'update-retry' @('update',$package,'--json')
+    $retry = Burrow 'update-retry' @('update',$package,'--json')
     Assert-True ($retry.exit -eq 0) "Update retry after recovery failed: $($retry.output)"
     Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 2') 'Retried update did not publish v2'
     Assert-True ((Hook-Lines) -eq 2) 'Retried update did not run the v2 hook exactly once'
     $scoopResetV2 = Scoop 'scoop-reset-v2' @('reset',$package)
-    Assert-True ($scoopResetV2.exit -eq 0) "Scoop reset v2 failed after the Coop recovery: $($scoopResetV2.output)"
+    Assert-True ($scoopResetV2.exit -eq 0) "Scoop reset v2 failed after the Burrow recovery: $($scoopResetV2.output)"
     Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 2') 'Scoop reset v2 did not keep the updated program runnable'
     Assert-True ((Get-FileHash -LiteralPath (Join-Path $store 'config/settings.ini') -Algorithm SHA256).Hash -eq $storeHash) 'The update or Scoop reset moved the stored persistent data'
     $summary.scenarios.interrupted_update = @{crash_exit=$crash.exit;pending_stage=$pending.Value.stage;
@@ -197,13 +197,13 @@ try {
         scoop_reset_v2=$scoopResetV2.exit;hook_runs=(Hook-Lines);store_hash=$storeHash}
 
     # --- 3. Interrupted fresh install, then a real Scoop operation publishes the same package.
-    # Coop must diagnose the replaced Coop-created objects instead of deleting Scoop's state, and
+    # Burrow must diagnose the replaced Burrow-created objects instead of deleting Scoop's state, and
     # must read the real installation facts after the Scoop operation. ---------------------------
-    $uninstall = Coop 'uninstall-v2' @('uninstall',$package,'--json')
+    $uninstall = Burrow 'uninstall-v2' @('uninstall',$package,'--json')
     Assert-True ($uninstall.exit -eq 0) "Uninstall before the install-interruption scenario failed: $($uninstall.output)"
     # The uninstall keeps v2 as a retained local version; cleanup removes that test-owned version
     # so the next scenario starts from a fresh install instead of an update.
-    $preCleanup = Coop 'cleanup-before-install-crash' @('cleanup',$package,'--json')
+    $preCleanup = Burrow 'cleanup-before-install-crash' @('cleanup',$package,'--json')
     Assert-True ($preCleanup.exit -eq 0) "Cleanup of the retained test version failed: $($preCleanup.output)"
     if (Test-Path -LiteralPath $app) {
         $full = [IO.Path]::GetFullPath($app).TrimEnd('\')
@@ -214,7 +214,7 @@ try {
     }
     Write-Manifest '1' (Join-Path $EvidenceDir 'payload-v1.zip')
     Set-Fault 'crash' 'after-entry'
-    $installCrash = Invoke-CoopFault 'install-crash' @('install',"$bucketName/$package",'--json')
+    $installCrash = Invoke-BurrowFault 'install-crash' @('install',"$bucketName/$package",'--json')
     Clear-Fault
     Assert-True ($installCrash.exit -eq -1073740791) "Injected real install crash did not terminate the process: exit $($installCrash.exit)"
     $installPending = Pending-Journal
@@ -222,52 +222,52 @@ try {
     Assert-True (@($installPending.Value.created | Where-Object { $_.path -like '*shims*' }).Count -ge 1) 'The install crash did not create a command entry before the injected stage'
     $scoopResetAfterCrash = Scoop 'scoop-reset-after-install-crash' @('reset',$package)
     if ($scoopResetAfterCrash.exit -ne 0) {
-        # Scoop cannot reset an installation without the Coop-created current link; let the real
+        # Scoop cannot reset an installation without the Burrow-created current link; let the real
         # client remove and install the package so the conflict is still produced by Scoop itself.
         $scoopUninstall = Scoop 'scoop-uninstall-after-install-crash' @('uninstall',$package)
         Assert-True ($scoopUninstall.exit -eq 0) "Scoop could not remove the interrupted installation: $($scoopUninstall.output)"
         $scoopInstall = Scoop 'scoop-install-after-crash' @('install',"$bucketName/$package")
-        Assert-True ($scoopInstall.exit -eq 0) "Scoop could not install the package after the Coop crash: $($scoopInstall.output)"
+        Assert-True ($scoopInstall.exit -eq 0) "Scoop could not install the package after the Burrow crash: $($scoopInstall.output)"
     }
-    $factsAfterScoop = CoopEntry 'after-scoop-install'
-    Assert-True ($factsAfterScoop.Count -eq 1 -and $factsAfterScoop[0].version -eq '1') "Coop did not re-recognize the package Scoop installed: $($factsAfterScoop | ConvertTo-Json -Depth 8)"
-    Assert-True ($factsAfterScoop[0].last_operation -eq 'pending-recovery') 'Coop did not keep the interrupted transaction visible after the Scoop operation'
-    Assert-True ($factsAfterScoop[0].management -in @('none','unadopted')) 'Coop presented the Scoop-installed package as its own managed install'
-    $conflict = Coop 'recover-conflict' @('recover',$package,'--json')
+    $factsAfterScoop = BurrowEntry 'after-scoop-install'
+    Assert-True ($factsAfterScoop.Count -eq 1 -and $factsAfterScoop[0].version -eq '1') "Burrow did not re-recognize the package Scoop installed: $($factsAfterScoop | ConvertTo-Json -Depth 8)"
+    Assert-True ($factsAfterScoop[0].last_operation -eq 'pending-recovery') 'Burrow did not keep the interrupted transaction visible after the Scoop operation'
+    Assert-True ($factsAfterScoop[0].management -in @('none','unadopted')) 'Burrow presented the Scoop-installed package as its own managed install'
+    $conflict = Burrow 'recover-conflict' @('recover',$package,'--json')
     $conflictJson = Read-Json $conflict.output
-    Assert-True ($conflict.exit -ne 0 -and $conflictJson[0].mode -eq 'manual') 'Coop rolled back Coop-created objects that Scoop replaced instead of diagnosing a conflict'
-    Assert-True (@($conflictJson[0].conflicts | Where-Object { $_.code -in @('created-path-replaced','created-file-modified','created-link-repointed') }).Count -ge 1) "Coop did not report a stable created-object conflict code: $($conflict.output)"
-    Assert-True (Test-Path -LiteralPath "$app/current") 'Coop deleted the current link Scoop published'
-    Assert-True (Test-Path -LiteralPath (Join-Path $ScoopRoot "shims/$package.exe")) 'Coop deleted the command entry Scoop published'
+    Assert-True ($conflict.exit -ne 0 -and $conflictJson[0].mode -eq 'manual') 'Burrow rolled back Burrow-created objects that Scoop replaced instead of diagnosing a conflict'
+    Assert-True (@($conflictJson[0].conflicts | Where-Object { $_.code -in @('created-path-replaced','created-file-modified','created-link-repointed') }).Count -ge 1) "Burrow did not report a stable created-object conflict code: $($conflict.output)"
+    Assert-True (Test-Path -LiteralPath "$app/current") 'Burrow deleted the current link Scoop published'
+    Assert-True (Test-Path -LiteralPath (Join-Path $ScoopRoot "shims/$package.exe")) 'Burrow deleted the command entry Scoop published'
     Assert-True ((Get-Content -LiteralPath $installPending.Path -Raw | ConvertFrom-Json).state -eq 'pending') 'A diagnosed conflict resolved the pending journal'
-    Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Scoop installed program did not run after the Coop conflict diagnosis'
+    Assert-True ((& (Join-Path $ScoopRoot "shims/$package.exe")) -eq 'fixture 1') 'Scoop installed program did not run after the Burrow conflict diagnosis'
 
-    # Real client removes its installation; Coop then completes recovery without deleting anything.
+    # Real client removes its installation; Burrow then completes recovery without deleting anything.
     $scoopUninstallFinal = Scoop 'scoop-uninstall-final' @('uninstall',$package)
     Assert-True ($scoopUninstallFinal.exit -eq 0) "Scoop could not uninstall the test package: $($scoopUninstallFinal.output)"
-    $afterUninstall = CoopEntry 'after-scoop-uninstall'
-    Assert-True ($afterUninstall.Count -le 1) "Coop reported duplicate rows after Scoop removed the package: $($afterUninstall | ConvertTo-Json -Depth 8)"
+    $afterUninstall = BurrowEntry 'after-scoop-uninstall'
+    Assert-True ($afterUninstall.Count -le 1) "Burrow reported duplicate rows after Scoop removed the package: $($afterUninstall | ConvertTo-Json -Depth 8)"
     if ($afterUninstall.Count -eq 1) {
-        Assert-True ($afterUninstall[0].version -eq $null -and $afterUninstall[0].status -eq 'pending-recovery') "Coop still presented an installed version after Scoop removed it: $($afterUninstall | ConvertTo-Json -Depth 8)"
+        Assert-True ($afterUninstall[0].version -eq $null -and $afterUninstall[0].status -eq 'pending-recovery') "Burrow still presented an installed version after Scoop removed it: $($afterUninstall | ConvertTo-Json -Depth 8)"
     }
-    $finalRecovery = Coop 'recover-after-uninstall' @('recover',$package,'--json')
+    $finalRecovery = Burrow 'recover-after-uninstall' @('recover',$package,'--json')
     Assert-True ($finalRecovery.exit -eq 0) "Recovery after Scoop removed the installation failed: $($finalRecovery.output)"
     $finalJson = Read-Json $finalRecovery.output
     Assert-True ($finalJson[0].status -eq 'recovered') 'Final recovery did not resolve the pending install'
     Assert-True (@($finalJson[0].actions | Where-Object { $_.kind -eq 'remove' }).Count -eq 0) 'Final recovery removed objects Scoop had already deleted'
-    $afterFinalRecovery = CoopEntry 'after-final-recovery'
-    Assert-True ($afterFinalRecovery.Count -eq 0) "Coop still listed the removed test package after recovery: $($afterFinalRecovery | ConvertTo-Json -Depth 8)"
+    $afterFinalRecovery = BurrowEntry 'after-final-recovery'
+    Assert-True ($afterFinalRecovery.Count -eq 0) "Burrow still listed the removed test package after recovery: $($afterFinalRecovery | ConvertTo-Json -Depth 8)"
     $summary.scenarios.interrupted_install_conflict = @{install_crash_exit=$installCrash.exit;
         scoop_reset_exit=$scoopResetAfterCrash.exit;conflict_exit=$conflict.exit;
         conflict_codes=@($conflictJson[0].conflicts | ForEach-Object code);
         facts_version=$factsAfterScoop[0].version;facts_management=$factsAfterScoop[0].management;
         final_recovery_status=$finalJson[0].status;final_remove_actions=@($finalJson[0].actions | Where-Object { $_.kind -eq 'remove' }).Count}
 
-    $installedAfter = (Coop 'list-after' @('list','--json')).output | ConvertFrom-Json
+    $installedAfter = (Burrow 'list-after' @('list','--json')).output | ConvertFrom-Json
     $beforeNames = @($installedBefore | ForEach-Object name | Sort-Object)
     $afterNames = @($installedAfter | ForEach-Object name | Sort-Object)
     Assert-True (($beforeNames -join ',') -eq ($afterNames -join ',')) "Real-root inventory changed: before=$($beforeNames -join ',') after=$($afterNames -join ',')"
-    $pendingAfter = @(Get-ChildItem "$ScoopRoot/.coop/transactions" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $pendingAfter = @(Get-ChildItem "$ScoopRoot/.burrow/transactions" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
         $path = Join-Path $_.FullName 'journal.json'
         if (Test-Path -LiteralPath $path) {
             $value = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
@@ -281,17 +281,17 @@ try {
 } finally {
     Clear-Fault
     if (-not $faultFileExisted -and (Test-Path -LiteralPath (Split-Path $faultFile -Parent))) {
-        $coopState = Split-Path $faultFile -Parent
-        if (Test-Path -LiteralPath $coopState -PathType Container) {
-            $remaining = @(Get-ChildItem -LiteralPath $coopState -Force)
-            if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $coopState -Force }
+        $burrowState = Split-Path $faultFile -Parent
+        if (Test-Path -LiteralPath $burrowState -PathType Container) {
+            $remaining = @(Get-ChildItem -LiteralPath $burrowState -Force)
+            if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $burrowState -Force }
         }
     }
     if ($created) {
         try { Scoop 'cleanup-scoop-uninstall' @('uninstall',$package) | Out-Null } catch { }
         # Resolve any test transaction left pending by a failed scenario before removing objects.
-        try { Coop 'cleanup-recover' @('recover',$package,'--json') | Out-Null } catch { }
-        try { Coop 'cleanup-coop-uninstall' @('uninstall',$package,'--json') | Out-Null } catch { }
+        try { Burrow 'cleanup-recover' @('recover',$package,'--json') | Out-Null } catch { }
+        try { Burrow 'cleanup-burrow-uninstall' @('uninstall',$package,'--json') | Out-Null } catch { }
         foreach ($path in @($app,$store)) {
             if (Test-Path -LiteralPath $path) {
                 $full = [IO.Path]::GetFullPath($path).TrimEnd('\')
@@ -302,10 +302,10 @@ try {
         }
         if (Test-Path -LiteralPath $bucket) { Remove-Item -LiteralPath $bucket -Recurse -Force }
         if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
-        foreach ($path in @((Join-Path $ScoopRoot ".coop/packages/$package.json"),(Join-Path $ScoopRoot ".coop/retained/$package.json"))) {
+        foreach ($path in @((Join-Path $ScoopRoot ".burrow/packages/$package.json"),(Join-Path $ScoopRoot ".burrow/retained/$package.json"))) {
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
         }
-        foreach ($suffix in @('.exe','.shim','.coop-shim.json')) {
+        foreach ($suffix in @('.exe','.shim','.burrow-shim.json')) {
             $entry = Join-Path $ScoopRoot "shims/$package$suffix"
             if (Test-Path -LiteralPath $entry) { Remove-Item -LiteralPath $entry -Force }
             $tool = Join-Path $ScoopRoot "shims/$package-tool$suffix"
@@ -317,5 +317,5 @@ try {
     Save-Json 'summary.json' $summary
 }
 if ($summary.status -ne 'pass') { throw 'Real-root recovery acceptance did not complete' }
-Write-Output "PASS real Scoop/Coop interrupted mechanisms, recovery and conflict diagnosis: $ScoopRoot"
+Write-Output "PASS real Scoop/Burrow interrupted mechanisms, recovery and conflict diagnosis: $ScoopRoot"
 exit 0

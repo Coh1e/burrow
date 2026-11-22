@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 bool same_name(const Json& source, const std::string& name) {
     const auto existing = wide(source.at("name").get<std::string>());
@@ -107,7 +107,7 @@ void refresh_index(const Context& context, const Json& source, bool force) {
     try {
         if (force || !catalog_index_valid(context,source)) write_catalog_index(context,source);
     } catch (const std::exception& error) {
-        std::cerr << "coop: bucket " << source.value("name",std::string{}) << ": search index not updated: "
+        std::cerr << "burrow: bucket " << source.value("name",std::string{}) << ": search index not updated: "
                   << error.what() << '\n';
     }
 }
@@ -129,7 +129,7 @@ int bucket_command(const Context& context, const std::vector<std::wstring>& args
             result.push_back(std::move(source));
         }
         if (context.json_output) std::cout << result.dump(2) << '\n';
-        else if (result.empty()) std::cout << "WARN  No bucket found. Please run 'coop bucket add main' to add the default 'main' bucket.\n";
+        else if (result.empty()) std::cout << "WARN  No bucket found. Please run 'burrow bucket add main' to add the default 'main' bucket.\n";
         else {
             std::vector<std::vector<std::string>> rows;
             for (const auto& source : result) rows.push_back(bucket_row(source));
@@ -158,10 +158,10 @@ int bucket_command(const Context& context, const std::vector<std::wstring>& args
             std::cout << bucket << '\n';
         return 0;
     }
-    // `rm` is Scoop's documented spelling; `remove` stays as the original Coop form.
+    // `rm` is Scoop's documented spelling; `remove` stays as the original Burrow form.
     const bool remove = args[0] == L"remove" || args[0] == L"rm";
     if (args[0] != L"add" && !remove && args[0] != L"update")
-        throw std::runtime_error("coop bucket: cmd '"+utf8(args[0])+"' not supported\nUsage: coop bucket add|list|known|rm [<args>]");
+        throw std::runtime_error("burrow bucket: cmd '"+utf8(args[0])+"' not supported\nUsage: burrow bucket add|list|known|rm [<args>]");
     if (args[0] == L"add" && args.size() < 3) throw std::runtime_error("bucket add requires name and source");
     if (remove && args.size() != 2) throw std::runtime_error("bucket rm requires one name");
     if (args[0] == L"update" && args.size() > 2) throw std::runtime_error("bucket update accepts at most one name");
@@ -266,7 +266,7 @@ int bucket_command(const Context& context, const std::vector<std::wstring>& args
             if (!quiet_report) report_source(context,source);
         } catch (const std::exception& error) {
             failed = true;
-            std::cerr << "coop: bucket " << source.at("name").get<std::string>() << ": " << error.what() << '\n';
+            std::cerr << "burrow: bucket " << source.at("name").get<std::string>() << ": " << error.what() << '\n';
         }
     }
     return failed ? 1 : 0;

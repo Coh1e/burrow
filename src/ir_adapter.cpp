@@ -6,7 +6,7 @@
 #include <set>
 #include <stdexcept>
 
-namespace coop::ir {
+namespace burrow::ir {
 namespace {
 bool effective(const Json& value) {
     if (value.is_null()) return false;
@@ -250,7 +250,7 @@ Package adapt_manifest(const fs::path& path, const std::string& name, const std:
                 // Scoop's create_shims publishes every declaration in order. Repeating an alias
                 // inside one file family rewrites the same shim files, so the last declaration wins.
                 // A different family writes different files (.exe/.shim versus .cmd/wrapper), so
-                // Scoop keeps both and the .exe is the command that Windows resolves. Coop models
+                // Scoop keeps both and the .exe is the command that Windows resolves. Burrow models
                 // both outcomes with a visible warning instead of failing or silently dropping an
                 // entry.
                 const auto key = lower(entry.alias);

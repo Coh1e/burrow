@@ -1,13 +1,13 @@
-﻿param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+﻿param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
-# Coop keeps stdout/stderr UTF-8; state that explicitly instead of relying on the ANSI code page
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
+# Burrow keeps stdout/stderr UTF-8; state that explicitly instead of relying on the ANSI code page
 # that Windows PowerShell/PowerShell may inherit when the output is redirected.
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $session = Join-Path $TestRoot 'boundaries'
 if (Test-Path -LiteralPath $session) {
     # The deep-path section below builds paths past MAX_PATH, and .NET Framework (PowerShell 5.1) can
@@ -21,25 +21,25 @@ if (Test-Path -LiteralPath $session) {
 New-Item -ItemType Directory -Path $session -Force | Out-Null
 
 function Assert([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
-function Invoke-Coop([string[]]$arguments) {
+function Invoke-Burrow([string[]]$arguments) {
     # 5.1's `& exe` quotes a trailing backslash as `"....\"`, which escapes the quote; the raw
     # capture builds the command line itself, so roots that end in a separator survive.
-    $result = Invoke-CoopNativeRaw $CoopExe @arguments
+    $result = Invoke-BurrowNativeRaw $BurrowExe @arguments
     return [pscustomobject]@{ code = $result.code; text = (($result.out + $result.err) -join "`n") }
 }
 # Separate streams so a usage error can be checked for an empty stdout and a diagnostic stderr.
-function Invoke-CoopRaw([string[]]$arguments) {
-    $result = Invoke-CoopNativeRaw $CoopExe $arguments
+function Invoke-BurrowRaw([string[]]$arguments) {
+    $result = Invoke-BurrowNativeRaw $BurrowExe $arguments
     return [pscustomobject]@{ code = $result.code; out = $result.out; err = $result.err }
 }
-function Read-CoopJson([string[]]$arguments) {
-    $result = Invoke-Coop $arguments
-    if ($result.code -ne 0) { throw "coop $($arguments -join ' ') failed ($($result.code)): $($result.text)" }
+function Read-BurrowJson([string[]]$arguments) {
+    $result = Invoke-Burrow $arguments
+    if ($result.code -ne 0) { throw "burrow $($arguments -join ' ') failed ($($result.code)): $($result.text)" }
     return ($result.text | ConvertFrom-Json)
 }
 function New-FileManifest([string]$name) {
-    $uri = ([Uri]$CoopExe).AbsoluteUri
-    return @{version='0.1.0';url=$uri+'#/'+$name+'.exe';hash=(Get-FileHash $CoopExe -Algorithm SHA256).Hash.ToLower();bin="$name.exe"}
+    $uri = ([Uri]$BurrowExe).AbsoluteUri
+    return @{version='0.1.0';url=$uri+'#/'+$name+'.exe';hash=(Get-FileHash $BurrowExe -Algorithm SHA256).Hash.ToLower();bin="$name.exe"}
 }
 function Write-BucketManifest([string]$root,[string]$bucket,[string]$name,[hashtable]$manifest) {
     $directory = Join-Path $root "buckets/$bucket/bucket"
@@ -49,7 +49,7 @@ function Write-BucketManifest([string]$root,[string]$bucket,[string]$name,[hasht
 function New-InstalledFilePackage([string]$root,[string]$name) {
     $directory = Join-Path $root "apps/$name/1"
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
-    Copy-Item -LiteralPath $CoopExe -Destination (Join-Path $directory "$name.exe")
+    Copy-Item -LiteralPath $BurrowExe -Destination (Join-Path $directory "$name.exe")
     $manifest = New-FileManifest $name
     [IO.File]::WriteAllText((Join-Path $directory 'scoop-manifest.json'),($manifest | ConvertTo-Json -Depth 8))
     [IO.File]::WriteAllText((Join-Path $directory 'scoop-install.json'),'{"bucket":"test","architecture":"64bit"}')
@@ -71,74 +71,74 @@ function Get-ShortSHA256([string]$path) {
 }
 
 # --- 1. Exit codes and stream separation ------------------------------------------------
-$version = Invoke-CoopRaw @('--version')
-Assert ($version.code -eq 0 -and $version.out.Trim() -match '^coop \d+\.\d+\.\d+$' -and $version.err -eq '') "version contract changed: $($version.out) $($version.err)"
-$unknown = Invoke-CoopRaw @('unsupported-command')
+$version = Invoke-BurrowRaw @('--version')
+Assert ($version.code -eq 0 -and $version.out.Trim() -match '^burrow \d+\.\d+\.\d+$' -and $version.err -eq '') "version contract changed: $($version.out) $($version.err)"
+$unknown = Invoke-BurrowRaw @('unsupported-command')
 Assert ($unknown.code -eq 2 -and $unknown.out -eq '' -and $unknown.err -match 'unknown command') "unknown command did not exit 2 on stderr: $($unknown.code) $($unknown.out) $($unknown.err)"
-$missingRoot = Invoke-CoopRaw @('--root')
+$missingRoot = Invoke-BurrowRaw @('--root')
 Assert ($missingRoot.code -eq 2 -and $missingRoot.err -match 'requires a value') "a root option without a value was not a usage error: $($missingRoot.code) $($missingRoot.err)"
-$emptyRoot = Invoke-CoopRaw @('--root=','list')
+$emptyRoot = Invoke-BurrowRaw @('--root=','list')
 Assert ($emptyRoot.code -eq 2 -and $emptyRoot.err -match 'Root path must not be empty') "an empty root was not rejected: $($emptyRoot.code) $($emptyRoot.err)"
-$badArch = Invoke-CoopRaw @('--arch','x86','--root','.', 'list')
+$badArch = Invoke-BurrowRaw @('--arch','x86','--root','.', 'list')
 Assert ($badArch.code -eq 2 -and $badArch.err -match '--arch must be') "an invalid architecture was not a usage error: $($badArch.code) $($badArch.err)"
-$extraList = Invoke-CoopRaw @('--root=','list','extra')
+$extraList = Invoke-BurrowRaw @('--root=','list','extra')
 Assert ($extraList.code -eq 2) "list with an extra argument was not a usage error: $($extraList.code) $($extraList.text)"
-$noPackage = Invoke-CoopRaw @('--root',(Join-Path $session 'empty'),'install')
-Assert ($noPackage.code -eq 2 -and $noPackage.err -match 'ERROR <app> missing' -and $noPackage.err -match 'Usage: coop install <app>') "install without a package was not a usage error: $($noPackage.code) $($noPackage.err)"
-$badOption = Invoke-CoopRaw @('--root',(Join-Path $session 'empty'),'install','pkg','--bogus')
+$noPackage = Invoke-BurrowRaw @('--root',(Join-Path $session 'empty'),'install')
+Assert ($noPackage.code -eq 2 -and $noPackage.err -match 'ERROR <app> missing' -and $noPackage.err -match 'Usage: burrow install <app>') "install without a package was not a usage error: $($noPackage.code) $($noPackage.err)"
+$badOption = Invoke-BurrowRaw @('--root',(Join-Path $session 'empty'),'install','pkg','--bogus')
 Assert ($badOption.code -eq 2 -and $badOption.err -match 'Unknown package option') "an unknown package option was not a usage error: $($badOption.code) $($badOption.err)"
-$badInstall = Invoke-CoopRaw @('--root',(Join-Path $session 'empty'),'install','does-not-exist')
+$badInstall = Invoke-BurrowRaw @('--root',(Join-Path $session 'empty'),'install','does-not-exist')
 Assert ($badInstall.code -eq 1 -and $badInstall.err -match 'not found') "an operational failure did not exit 1: $($badInstall.code) $($badInstall.err)"
 Assert (-not (Test-Path -LiteralPath (Join-Path $session 'empty'))) 'a failed install created the installation root'
 
 # --- 2. Complex but valid Windows path forms ---------------------------------------------
 # Spaces, Chinese, '#', '&', '%', brackets and parentheses are all ordinary path characters.
 $complex = Join-Path $session 'root #1 [x] & 100% (复杂)'
-$complexInit = Read-CoopJson @(('--root='+$complex),'init','--json')
+$complexInit = Read-BurrowJson @(('--root='+$complex),'init','--json')
 Assert ($complexInit.root -eq $complex -and @($complexInit.created).Count -eq 5) "the --root=<path> form did not initialize the complex path: root='$($complexInit.root)' expected='$complex' created=$(@($complexInit.created).Count)"
-$trailing = Read-CoopJson @('--root',($complex+'\'),'init','--json')
+$trailing = Read-BurrowJson @('--root',($complex+'\'),'init','--json')
 Assert ($trailing.root -eq $complex -and @($trailing.created).Count -eq 0) "a trailing separator changed the root identity: $($trailing | ConvertTo-Json -Compress)"
-$dots = Read-CoopJson @('--root',($complex+'\.\apps\..'),'list','--json')
+$dots = Read-BurrowJson @('--root',($complex+'\.\apps\..'),'list','--json')
 Assert (@($dots).Count -eq 0) "dot segments were not normalized: $($dots | ConvertTo-Json -Compress)"
-$slashes = Read-CoopJson @('--root',($complex -replace '\\','/'),'list','--json')
+$slashes = Read-BurrowJson @('--root',($complex -replace '\\','/'),'list','--json')
 Assert (@($slashes).Count -eq 0) "forward slashes were not accepted: $($slashes | ConvertTo-Json -Compress)"
-$explicitExtended = Read-CoopJson @('--root',('\\?\'+$complex),'init','--json')
+$explicitExtended = Read-BurrowJson @('--root',('\\?\'+$complex),'init','--json')
 Assert ($explicitExtended.root -eq ('\\?\'+$complex) -and @($explicitExtended.existing).Count -eq 5) "an explicit extended-length root was not accepted: $($explicitExtended | ConvertTo-Json -Compress)"
 Push-Location $session
 try {
-    $relative = Read-CoopJson @('--root','relative 中文 root','init','--dry-run','--json')
+    $relative = Read-BurrowJson @('--root','relative 中文 root','init','--dry-run','--json')
     Assert ($relative.root -eq (Join-Path $session 'relative 中文 root')) "a relative root was not resolved against the current directory: $($relative.root)"
 } finally { Pop-Location }
 
 # Unicode bucket, package, executable and alias names survive the whole lifecycle.
-$unicodeManifest = @{version='0.1.0';url=([Uri]$CoopExe).AbsoluteUri+'#/工具.exe';
-    hash=(Get-FileHash $CoopExe -Algorithm SHA256).Hash.ToLower();bin=@(,@('工具.exe','工具 包'))}
+$unicodeManifest = @{version='0.1.0';url=([Uri]$BurrowExe).AbsoluteUri+'#/工具.exe';
+    hash=(Get-FileHash $BurrowExe -Algorithm SHA256).Hash.ToLower();bin=@(,@('工具.exe','工具 包'))}
 Write-BucketManifest $complex '测试源' '工具包' $unicodeManifest
-$unicodeInstall = Read-CoopJson @('--root',$complex,'install','测试源/工具包','--json')
+$unicodeInstall = Read-BurrowJson @('--root',$complex,'install','测试源/工具包','--json')
 Assert ($unicodeInstall.status -eq 'success') "the Unicode package did not install: $($unicodeInstall | ConvertTo-Json -Compress)"
 $unicodeVersion = & (Join-Path $complex 'shims/工具 包.exe') --version
-Assert ($LASTEXITCODE -eq 0 -and $unicodeVersion -match '^coop \d+\.\d+\.\d+$') "the Unicode command entry did not run: $unicodeVersion"
-$unicodeList = Read-CoopJson @('--root',$complex,'list','--json')
+Assert ($LASTEXITCODE -eq 0 -and $unicodeVersion -match '^burrow \d+\.\d+\.\d+$') "the Unicode command entry did not run: $unicodeVersion"
+$unicodeList = Read-BurrowJson @('--root',$complex,'list','--json')
 Assert (@($unicodeList | Where-Object { $_.name -eq '工具包' -and $_.version -eq '0.1.0' }).Count -eq 1) "the Unicode package is missing from list: $($unicodeList | ConvertTo-Json -Compress)"
-$unicodeRemove = Read-CoopJson @('--root',$complex,'uninstall','工具包','--json')
+$unicodeRemove = Read-BurrowJson @('--root',$complex,'uninstall','工具包','--json')
 Assert ($unicodeRemove.status -eq 'success' -and -not (Test-Path -LiteralPath (Join-Path $complex 'shims/工具 包.exe'))) 'the Unicode package did not uninstall cleanly'
 
 # --- 3. A root whose derived tree exceeds MAX_PATH ---------------------------------------
 $longRoot = Join-Path $session 'long'
 1..12 | ForEach-Object { $longRoot = Join-Path $longRoot ('深'*20) }
 [IO.Directory]::CreateDirectory("\\?\$longRoot") | Out-Null
-$longInit = Read-CoopJson @('--root',$longRoot,'init','--json')
+$longInit = Read-BurrowJson @('--root',$longRoot,'init','--json')
 Assert ($longInit.root -eq ('\\?\'+$longRoot)) "a long root was not converted to an extended-length path: $($longInit.root)"
-$deepManifest = @{version='0.1.0';url=([Uri]$CoopExe).AbsoluteUri+'#/deep.exe';
-    hash=(Get-FileHash $CoopExe -Algorithm SHA256).Hash.ToLower();bin='deep.exe'}
+$deepManifest = @{version='0.1.0';url=([Uri]$BurrowExe).AbsoluteUri+'#/deep.exe';
+    hash=(Get-FileHash $BurrowExe -Algorithm SHA256).Hash.ToLower();bin='deep.exe'}
 [IO.Directory]::CreateDirectory("\\?\$longRoot\buckets\main\bucket") | Out-Null
 [IO.File]::WriteAllText("\\?\$longRoot\buckets\main\bucket\deep.json",($deepManifest | ConvertTo-Json -Depth 8))
-$longInstall = Read-CoopJson @('--root',$longRoot,'install','deep','--json')
+$longInstall = Read-BurrowJson @('--root',$longRoot,'install','deep','--json')
 Assert ($longInstall.status -eq 'success') "a package did not install under a long root: $($longInstall | ConvertTo-Json -Compress)"
 $longArtifact = "\\?\$longRoot\apps\deep\current\deep.exe"
 Assert ([IO.File]::Exists($longArtifact)) 'the long-path installation artifact is missing'
-Assert ((Get-ShortSHA256 $longArtifact) -eq (Get-FileHash $CoopExe -Algorithm SHA256).Hash.ToLowerInvariant()) 'the long-path artifact bytes changed'
-$longList = Read-CoopJson @('--root',$longRoot,'list','--json')
+Assert ((Get-ShortSHA256 $longArtifact) -eq (Get-FileHash $BurrowExe -Algorithm SHA256).Hash.ToLowerInvariant()) 'the long-path artifact bytes changed'
+$longList = Read-BurrowJson @('--root',$longRoot,'list','--json')
 Assert (@($longList | Where-Object { $_.name -eq 'deep' -and $_.version -eq '0.1.0' }).Count -eq 1) "the long-path installation is missing from list: $($longList | ConvertTo-Json -Compress)"
 
 # .NET refuses to start an executable whose plain path exceeds MAX_PATH, so the actual Windows
@@ -191,8 +191,8 @@ $longOutput = Join-Path $session 'long-output.txt'
 $problem = ''
 $longExit = [LongPathRunner]::Run("\\?\$longRoot\shims\deep.exe",'--version',(Get-Location).Path,$longOutput,[ref]$problem)
 Assert ($longExit -eq 0 -and $problem -eq '') "the long-path command entry did not run: exit $longExit $problem"
-Assert (([IO.File]::ReadAllText($longOutput)).Trim() -match '^coop \d+\.\d+\.\d+$') 'the long-path command entry printed the wrong output'
-$longRemove = Read-CoopJson @('--root',($longRoot+'\'),'uninstall','deep','--json')
+Assert (([IO.File]::ReadAllText($longOutput)).Trim() -match '^burrow \d+\.\d+\.\d+$') 'the long-path command entry printed the wrong output'
+$longRemove = Read-BurrowJson @('--root',($longRoot+'\'),'uninstall','deep','--json')
 Assert ($longRemove.status -eq 'success' -and -not [IO.Directory]::Exists("\\?\$longRoot\apps\deep")) "the long-path package did not uninstall: $($longRemove | ConvertTo-Json -Compress)"
 
 # --- 4. Per-package batch outcomes and a read-only global scope --------------------------
@@ -200,7 +200,7 @@ $userRoot = Join-Path $session 'user'
 $globalRoot = Join-Path $session 'global'
 New-InstalledFilePackage $globalRoot 'globaltool'
 $globalBefore = Get-TreeSnapshot $globalRoot
-$globalList = Read-CoopJson @('--root',$userRoot,'--global-root',$globalRoot,'list','--json')
+$globalList = Read-BurrowJson @('--root',$userRoot,'--global-root',$globalRoot,'list','--json')
 Assert (@($globalList).Count -eq 1 -and $globalList[0].scope -eq 'global' -and $globalList[0].read_only -eq $true) "the global installation is not identified as read-only: $($globalList | ConvertTo-Json -Compress)"
 
 # update/uninstall/reset may not be reinterpreted as user-scope writes.
@@ -208,55 +208,55 @@ foreach ($arguments in @(
     @('uninstall','globaltool'),
     @('update','globaltool','--dry-run'),
     @('reset','globaltool@0.0.0','--dry-run'))) {
-    $refused = Invoke-CoopRaw (@('--root',$userRoot,'--global-root',$globalRoot)+$arguments)
+    $refused = Invoke-BurrowRaw (@('--root',$userRoot,'--global-root',$globalRoot)+$arguments)
     Assert ($refused.code -eq 1 -and ($refused.err+$refused.out) -match 'global-scope-readonly') "a global-only package was not refused for $($arguments -join ' '): $($refused.code) $($refused.err)$($refused.out)"
     Assert (@(Get-TreeSnapshot $globalRoot) -join "`n" -eq ($globalBefore -join "`n")) "a refused global operation changed the global root: $($arguments -join ' ')"
 }
 Assert (-not (Test-Path -LiteralPath $userRoot)) 'a refused global operation created user-scope state'
-Assert (-not (Test-Path -LiteralPath (Join-Path $globalRoot '.coop'))) 'a refused global operation created Coop state in the global root'
+Assert (-not (Test-Path -LiteralPath (Join-Path $globalRoot '.burrow'))) 'a refused global operation created Burrow state in the global root'
 
 # A new user-scope installation may be planned and executed while the global copy stays untouched;
 # the plan and result identify the read-only global installation instead of silently replacing it.
 Write-BucketManifest $userRoot 'test' 'globaltool' (New-FileManifest 'globaltool')
-$globalPreview = Read-CoopJson @('--root',$userRoot,'--global-root',$globalRoot,'install','globaltool','--dry-run','--json')
+$globalPreview = Read-BurrowJson @('--root',$userRoot,'--global-root',$globalRoot,'install','globaltool','--dry-run','--json')
 Assert ($globalPreview.global_installation.scope -eq 'global' -and $globalPreview.global_installation.read_only -eq $true) 'the user-scope plan did not identify the read-only global installation'
-$globalUserInstall = Read-CoopJson @('--root',$userRoot,'--global-root',$globalRoot,'install','globaltool','--json')
+$globalUserInstall = Read-BurrowJson @('--root',$userRoot,'--global-root',$globalRoot,'install','globaltool','--json')
 Assert ($globalUserInstall.status -eq 'success' -and $globalUserInstall.global_installation.read_only -eq $true) 'the user-scope install did not report the read-only global installation'
 $globalUserVersion = & (Join-Path $userRoot 'shims/globaltool.exe') --version
-Assert ($LASTEXITCODE -eq 0 -and $globalUserVersion -match '^coop \d+\.\d+\.\d+$') 'the user-scope installation is not runnable'
+Assert ($LASTEXITCODE -eq 0 -and $globalUserVersion -match '^burrow \d+\.\d+\.\d+$') 'the user-scope installation is not runnable'
 Assert (@(Get-TreeSnapshot $globalRoot) -join "`n" -eq ($globalBefore -join "`n")) 'a user-scope install changed the global root'
-$globalUserRemove = Read-CoopJson @('--root',$userRoot,'--global-root',$globalRoot,'uninstall','globaltool','--json')
+$globalUserRemove = Read-BurrowJson @('--root',$userRoot,'--global-root',$globalRoot,'uninstall','globaltool','--json')
 Assert ($globalUserRemove.status -eq 'success' -and -not (Test-Path -LiteralPath (Join-Path $userRoot 'shims/globaltool.exe'))) 'the user-scope uninstall failed'
 Assert (@(Get-TreeSnapshot $globalRoot) -join "`n" -eq ($globalBefore -join "`n")) 'the user-scope uninstall changed the global root'
 
 # A wholly successful batch reports every package and exits zero.
 Write-BucketManifest $userRoot 'test' 'alpha' (New-FileManifest 'alpha')
 Write-BucketManifest $userRoot 'test' 'beta' (New-FileManifest 'beta')
-$successBatch = Invoke-Coop @('--root',$userRoot,'install','alpha','beta','--json')
+$successBatch = Invoke-Burrow @('--root',$userRoot,'install','alpha','beta','--json')
 $successItems = ConvertFrom-JsonText $successBatch.text
 Assert ($successBatch.code -eq 0 -and $successItems.Count -eq 2 -and
     $successItems[0].package -eq 'alpha' -and $successItems[0].status -eq 'success' -and
     $successItems[1].package -eq 'beta' -and $successItems[1].status -eq 'success') "a successful batch did not report both packages: $($successBatch.text)"
 foreach ($name in @('alpha','beta')) {
     $runnable = & (Join-Path $userRoot "shims/$name.exe") --version
-    Assert ($LASTEXITCODE -eq 0 -and $runnable -match '^coop \d+\.\d+\.\d+$') "batch-installed $name is not runnable"
+    Assert ($LASTEXITCODE -eq 0 -and $runnable -match '^burrow \d+\.\d+\.\d+$') "batch-installed $name is not runnable"
 }
 Assert (@(Get-TreeSnapshot $globalRoot) -join "`n" -eq ($globalBefore -join "`n")) 'a user batch changed the global root'
 
 # A partially failing batch keeps the successful package, reports both items and exits non-zero.
 Write-BucketManifest $userRoot 'test' 'gamma' (New-FileManifest 'gamma')
-$partialBatch = Invoke-Coop @('--root',$userRoot,'install','gamma','ghostpkg','--json')
+$partialBatch = Invoke-Burrow @('--root',$userRoot,'install','gamma','ghostpkg','--json')
 $partialItems = ConvertFrom-JsonText $partialBatch.text
 Assert ($partialBatch.code -eq 1 -and $partialItems.Count -eq 2 -and
     $partialItems[0].package -eq 'gamma' -and $partialItems[0].status -eq 'success' -and
     $partialItems[1].package -eq 'ghostpkg' -and $partialItems[1].status -eq 'failed') "a partial batch did not report success and failure: $($partialBatch.text)"
-Assert ((& (Join-Path $userRoot 'shims/gamma.exe') --version) -match '^coop \d+\.\d+\.\d+$') 'the successful item of a partial batch is not runnable'
+Assert ((& (Join-Path $userRoot 'shims/gamma.exe') --version) -match '^burrow \d+\.\d+\.\d+$') 'the successful item of a partial batch is not runnable'
 Assert (-not (Test-Path -LiteralPath (Join-Path $userRoot 'shims/ghostpkg.exe'))) 'a failed batch item published an entry'
 
 # Text mode keeps per-package lines and prints no batch header or trailing count: Scoop reports each
 # package as it finishes and says nothing about the batch as a whole.
-Assert ((Read-CoopJson @('--root',$userRoot,'uninstall','gamma','--json')).status -eq 'success') 'could not reset gamma before the text batch'
-$textPartial = Invoke-CoopRaw @('--root',$userRoot,'install','gamma','ghosttwo')
+Assert ((Read-BurrowJson @('--root',$userRoot,'uninstall','gamma','--json')).status -eq 'success') 'could not reset gamma before the text batch'
+$textPartial = Invoke-BurrowRaw @('--root',$userRoot,'install','gamma','ghosttwo')
 Assert ($textPartial.code -eq 1 -and $textPartial.out -match "'gamma' \(0\.1\.0\) was installed successfully!" -and
     $textPartial.out -notmatch 'gamma: success' -and
     $textPartial.out -notmatch 'package\(s\)' -and
@@ -264,14 +264,14 @@ Assert ($textPartial.code -eq 1 -and $textPartial.out -match "'gamma' \(0\.1\.0\
 
 # Dry-run batches report a blocked item without writing the requested package.
 Write-BucketManifest $userRoot 'test' 'delta' (New-FileManifest 'delta')
-$dryBatch = Invoke-Coop @('--root',$userRoot,'install','delta','ghostpkg','--dry-run','--json')
+$dryBatch = Invoke-Burrow @('--root',$userRoot,'install','delta','ghostpkg','--dry-run','--json')
 $dryItems = ConvertFrom-JsonText $dryBatch.text
 Assert ($dryBatch.code -eq 1 -and $dryItems.Count -eq 2 -and $dryItems[0].status -eq 'planned' -and $dryItems[1].status -eq 'blocked') "a dry-run batch did not report planned and blocked items: $($dryBatch.text)"
 Assert (-not (Test-Path -LiteralPath (Join-Path $userRoot 'apps/delta'))) 'a dry-run batch installed a package'
 
 # A batch targeting a read-only global-only package and a user package reports both outcomes and
 # still removes only the user package.
-$mixedRemove = Invoke-Coop @('--root',$userRoot,'--global-root',$globalRoot,'uninstall','alpha','globaltool','--json')
+$mixedRemove = Invoke-Burrow @('--root',$userRoot,'--global-root',$globalRoot,'uninstall','alpha','globaltool','--json')
 $mixedItems = ConvertFrom-JsonText $mixedRemove.text
 Assert ($mixedRemove.code -eq 1 -and $mixedItems.Count -eq 2 -and
     $mixedItems[0].package -eq 'alpha' -and $mixedItems[0].status -eq 'success' -and
@@ -281,7 +281,7 @@ Assert (-not (Test-Path -LiteralPath (Join-Path $userRoot 'shims/alpha.exe'))) '
 Assert (@(Get-TreeSnapshot $globalRoot) -join "`n" -eq ($globalBefore -join "`n")) 'a mixed batch changed the global root'
 
 # A wholly successful multi-package uninstall exits zero.
-$successRemove = Invoke-Coop @('--root',$userRoot,'uninstall','beta','gamma','--json')
+$successRemove = Invoke-Burrow @('--root',$userRoot,'uninstall','beta','gamma','--json')
 $successRemoveItems = ConvertFrom-JsonText $successRemove.text
 Assert ($successRemove.code -eq 0 -and $successRemoveItems.Count -eq 2 -and
     $successRemoveItems[0].status -eq 'success' -and $successRemoveItems[1].status -eq 'success') "a successful batch uninstall failed: $($successRemove.text)"

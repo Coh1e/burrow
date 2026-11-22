@@ -4,12 +4,12 @@
 #include <string_view>
 #include <windows.h>
 
-namespace coop {
+namespace burrow {
 namespace {
-constexpr const char* enabled_variable = "COOP_ALLOW_TEST_FAULTS";
+constexpr const char* enabled_variable = "BURROW_ALLOW_TEST_FAULTS";
 bool environment_allows_faults() {
     wchar_t value[16]{};
-    const auto length = GetEnvironmentVariableW(L"COOP_ALLOW_TEST_FAULTS",value,
+    const auto length = GetEnvironmentVariableW(L"BURROW_ALLOW_TEST_FAULTS",value,
         static_cast<DWORD>(std::size(value)));
     if (!length || length >= std::size(value)) return false;
     return std::wstring_view(value,length) == L"1";
@@ -45,6 +45,6 @@ void test_fault_point(const Context& context, const std::string& stage) {
     // the next command (or the test) can use.
     if (listed("crash")) TerminateProcess(GetCurrentProcess(),0xC0000409u);
     if (listed("fail"))
-        throw std::runtime_error("Injected test fault at stage '"+stage+"' (COOP_ALLOW_TEST_FAULTS=1)");
+        throw std::runtime_error("Injected test fault at stage '"+stage+"' (BURROW_ALLOW_TEST_FAULTS=1)");
 }
 }

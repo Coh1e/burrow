@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # R14 / #35: real NSIS installer lifecycle through the real CLI in a project-local Scoop layout.
 # The vendor NSIS setup.exe is never executed: the 7-Zip helper that Scoop already installs in the
 # same root unpacks the payload with Scoop's Expand-7zipArchive arguments. Real apngasm 3.1.1/3.1.3
@@ -6,14 +6,14 @@ param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$Test
 # from the pinned 7-Zip 26.05 MSI so the root looks like a normal shared Scoop root, and it must
 # remain byte-identical afterwards.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-$coopDirectory = Split-Path $CoopExe
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+$burrowDirectory = Split-Path $BurrowExe
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
-$guard = Join-Path $coopDirectory 'process_guard.exe'
+$guard = Join-Path $burrowDirectory 'process_guard.exe'
 $apng313 = Join-Path $archives 'apngasm-3.1.3-AMD64.exe'
 $apng311 = Join-Path $archives 'apngasm-3.1.1-AMD64.exe'
 $elm = Join-Path $archives 'elm-0.19.3-installer.exe'
@@ -43,7 +43,7 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    # Coop emits UTF-8 JSON and diagnostics; decode both streams as UTF-8 so a test root with
+    # Burrow emits UTF-8 JSON and diagnostics; decode both streams as UTF-8 so a test root with
     # non-ASCII characters is reported, not mangled by the console code page.
     $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
     $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
@@ -51,7 +51,7 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     foreach ($argument in $arguments) { Add-ProcessArgument $start ($argument) }
     $start.EnvironmentVariables['TEMP'] = "$root/temp"
     $start.EnvironmentVariables['TMP'] = "$root/temp"
-    $start.EnvironmentVariables['COOP_PROGRAMS_DIR'] = "$root/programs"
+    $start.EnvironmentVariables['BURROW_PROGRAMS_DIR'] = "$root/programs"
     foreach ($key in $environment.Keys) { $start.EnvironmentVariables[$key] = $environment[$key] }
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
@@ -63,23 +63,23 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ("$root/run-{0:d2}-{1}.json" -f $script:runs,$label) -Encoding utf8
     return $result
 }
-function Invoke-Coop([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $CoopExe $arguments $environment
+function Invoke-Burrow([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
+    return Invoke-Process $label $BurrowExe $arguments $environment
 }
 # The guard observes the real process tree. Install and update legitimately start the declared
 # 7-Zip helper, so children are allowed but must be named; previews, the blocked operation and
 # uninstall must start no child at all. A vendor NSIS setup executable is never allowed.
 function Invoke-Guarded([string]$label,[string[]]$arguments,[bool]$allowHelper) {
-    $previousTimeout = $env:COOP_PROCESS_GUARD_TIMEOUT_MS
-    $previousChildren = $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN
-    $env:COOP_PROCESS_GUARD_TIMEOUT_MS = '120000'
-    if ($allowHelper) { $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN = '1' }
-    try { return Invoke-Process $label $guard (@($CoopExe)+$arguments) @{} }
+    $previousTimeout = $env:BURROW_PROCESS_GUARD_TIMEOUT_MS
+    $previousChildren = $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN
+    $env:BURROW_PROCESS_GUARD_TIMEOUT_MS = '120000'
+    if ($allowHelper) { $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN = '1' }
+    try { return Invoke-Process $label $guard (@($BurrowExe)+$arguments) @{} }
     finally {
-        if ($null -eq $previousTimeout) { Remove-Item Env:COOP_PROCESS_GUARD_TIMEOUT_MS -ErrorAction SilentlyContinue }
-        else { $env:COOP_PROCESS_GUARD_TIMEOUT_MS = $previousTimeout }
-        if ($null -eq $previousChildren) { Remove-Item Env:COOP_PROCESS_GUARD_ALLOW_CHILDREN -ErrorAction SilentlyContinue }
-        else { $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN = $previousChildren }
+        if ($null -eq $previousTimeout) { Remove-Item Env:BURROW_PROCESS_GUARD_TIMEOUT_MS -ErrorAction SilentlyContinue }
+        else { $env:BURROW_PROCESS_GUARD_TIMEOUT_MS = $previousTimeout }
+        if ($null -eq $previousChildren) { Remove-Item Env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN -ErrorAction SilentlyContinue }
+        else { $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN = $previousChildren }
     }
 }
 function Workload-Names($result) {
@@ -88,7 +88,7 @@ function Workload-Names($result) {
 function Assert-Workloads($result,[string[]]$allowed = @()) {
     $names = @(Workload-Names $result)
     Check ($names.Count -eq (1+$allowed.Count)) "unexpected workload processes: $($names -join '; ') ($($result.error))"
-    Check ($names[0] -match 'coop\.exe$') "first workload process is not coop.exe: $($names -join '; ')"
+    Check ($names[0] -match 'burrow\.exe$') "first workload process is not burrow.exe: $($names -join '; ')"
     Check (-not ($names -match '(?i)msiexec|setup\.exe|apngasm\.exe')) "a vendor installer process was started: $($names -join '; ')"
     $observed = @($names | Select-Object -Skip 1)
     foreach ($pattern in $allowed) {
@@ -105,7 +105,7 @@ function Parse-Json([string]$label,$result) {
     } catch { throw "$label did not print JSON: $($result.output)" }
 }
 function Last-Journal([string]$package) {
-    $journals = @(Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
+    $journals = @(Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } |
         Where-Object { $_.package -eq $package })
@@ -146,7 +146,7 @@ $helperBefore = @(Get-TreeSnapshot "$root/apps/7zip/26.05")
 
 # --- 1. Preview states the NSIS route, the helper and the vendor-installer boundary. -------------
 Write-Manifest 'apng' (& $apngManifest '3.1.1' $apng311 $hash311)
-$transactionsBefore = @(Get-ChildItem "$root/.coop/transactions" -Directory -ErrorAction SilentlyContinue).Count
+$transactionsBefore = @(Get-ChildItem "$root/.burrow/transactions" -Directory -ErrorAction SilentlyContinue).Count
 $preview = Invoke-Guarded 'nsis-preview' @('--root',$root,'install','main/apng','--dry-run','--json') $false
 Check ($preview.exit -eq 0) "NSIS preview failed: $($preview.error)"
 Assert-Workloads $preview @()
@@ -159,7 +159,7 @@ $facts = $plan.package.nsis_extraction
 Check ($facts.mechanism -match '7-Zip' -and $facts.helper_available -eq $true -and $facts.installer_executed -eq $false) 'NSIS preview does not describe the external helper mechanism'
 Check (Same-Path $facts.helper $helperExecutable) "NSIS preview does not name the helper in the selected root: $($facts.helper)"
 Check ($facts.content_detection -match 'after digest verification' -and $facts.signature -match 'NullsoftInst') 'NSIS preview does not describe content detection'
-Check ($facts.helper_policy -match 'software dependency' -and $facts.helper_policy -match 'never downloads') 'NSIS preview does not separate the helper from Coop core dependencies'
+Check ($facts.helper_policy -match 'software dependency' -and $facts.helper_policy -match 'never downloads') 'NSIS preview does not separate the helper from Burrow core dependencies'
 Check ($facts.arguments -match '-xr!\*\.nsis' -and $facts.arguments -match '-ir!' -and $facts.arguments -match '-y') 'NSIS preview does not describe the Expand-7zipArchive arguments'
 Check ($facts.elevation -match 'not requested' -and $facts.reboot -match 'not required' -and
     $facts.installer_effects -match 'not executed') 'NSIS preview does not state the permission, reboot and effect boundary'
@@ -172,7 +172,7 @@ Check (@($plan.diagnostics | Where-Object { $_.code -eq 'execution-blocked' }).C
 Check ($plan.lifecycle_checks.nsis_extraction -match '7-Zip') 'NSIS lifecycle check does not name the helper'
 Check ((@($plan.ir_operations | ForEach-Object { $_.operation }) -join ',') -eq 'download,verify,extract,hook,publish-current,entries,commit-state') 'NSIS plan does not carry the expected operation order'
 Check (-not (Test-Path -LiteralPath "$root/apps/apng") -and
-    @(Get-ChildItem "$root/.coop/transactions" -Directory -ErrorAction SilentlyContinue).Count -eq $transactionsBefore) 'NSIS preview wrote installation state'
+    @(Get-ChildItem "$root/.burrow/transactions" -Directory -ErrorAction SilentlyContinue).Count -eq $transactionsBefore) 'NSIS preview wrote installation state'
 Check (((Get-TreeSnapshot "$root/apps/7zip/26.05") -join "`n") -eq ($helperBefore -join "`n")) 'the preview changed the helper package'
 
 # --- 2. Install the real 3.1.1 NSIS installer payload. -----------------------------------------
@@ -208,8 +208,8 @@ Check ($nsisRecord.installer_executed -eq $false -and $nsisRecord.elevation -mat
 Check ($nsisRecord.files -eq 16 -and $nsisRecord.bytes -eq 2543602) "NSIS journal extraction totals are wrong: $($nsisRecord.files) files, $($nsisRecord.bytes) bytes"
 Check ($nsisRecord.stdout_tail -match 'Everything is Ok') 'NSIS journal does not keep the helper output'
 Check (((Get-TreeSnapshot "$root/apps/7zip/26.05") -join "`n") -eq ($helperBefore -join "`n")) 'the install changed the helper package'
-$installedList = Invoke-Coop 'nsis-list' @('--root',$root,'list','--json')
-Check ($installedList.exit -eq 0 -and $installedList.output -match 'apng') 'Coop list does not see the NSIS installation'
+$installedList = Invoke-Burrow 'nsis-list' @('--root',$root,'list','--json')
+Check ($installedList.exit -eq 0 -and $installedList.output -match 'apng') 'Burrow list does not see the NSIS installation'
 $image311 = Get-TreeSnapshot $versionDirectory
 
 # --- 3. Update to the real 3.1.3 NSIS installer and keep the old version. -----------------------
@@ -264,8 +264,8 @@ try {
     Check ($missing.exit -ne 0) 'missing-helper install unexpectedly succeeded'
     Check ($missing.error -match '7-Zip helper' -and $missing.error -match 'never downloads') "missing-helper failure is not explicit: $($missing.error)"
     Assert-Workloads $missing @()
-    Check (-not (Test-Path -LiteralPath "$root/apps/apngnsis") -and -not (Test-Path -LiteralPath "$root/.coop/packages/apngnsis.json")) 'missing-helper install wrote package state'
-    Check (-not (Test-Path -LiteralPath "$root/apps/7zip")) 'Coop downloaded or recreated the helper'
+    Check (-not (Test-Path -LiteralPath "$root/apps/apngnsis") -and -not (Test-Path -LiteralPath "$root/.burrow/packages/apngnsis.json")) 'missing-helper install wrote package state'
+    Check (-not (Test-Path -LiteralPath "$root/apps/7zip")) 'Burrow downloaded or recreated the helper'
 } finally {
     Rename-Item -LiteralPath "$root/apps/7zip-absent" -NewName '7zip'
 }
@@ -280,15 +280,15 @@ Check (-not (Test-Path -LiteralPath "$root/shims/apngasm.exe")) 'NSIS uninstall 
 Check (-not (Test-Path -LiteralPath "$root/shims/apngasm-cli.exe")) 'NSIS uninstall left the aliased command entry'
 Check (-not (Test-Path -LiteralPath "$root/apps/apng/3.1.3")) 'NSIS uninstall left the current version directory'
 Check (Test-Path -LiteralPath "$root/apps/apng/3.1.1") 'NSIS uninstall deleted the retained previous version instead of keeping it for cleanup'
-Check (-not (Test-Path -LiteralPath "$root/.coop/packages/apng.json")) 'NSIS uninstall left the managed package record'
+Check (-not (Test-Path -LiteralPath "$root/.burrow/packages/apng.json")) 'NSIS uninstall left the managed package record'
 Check (-not (Test-Path -LiteralPath "$root/apps/apngnsis")) 'the blocked NSIS install left an application directory'
-$finalList = Invoke-Coop 'nsis-list-final' @('--root',$root,'list','--json')
+$finalList = Invoke-Burrow 'nsis-list-final' @('--root',$root,'list','--json')
 Check ($finalList.exit -eq 0) "final list failed: $($finalList.error)"
 $finalEntries = @(Parse-Json 'nsis-list-final' $finalList)
 $apngEntry = @($finalEntries | Where-Object { $_.name -eq 'apng' })
 Check ($apngEntry.Count -eq 1 -and $apngEntry[0].status -eq 'uninstalled' -and $null -eq $apngEntry[0].version -and
     @($apngEntry[0].old_versions).Count -eq 1 -and @($apngEntry[0].old_versions)[0].version -eq '3.1.1' -and
-    @($apngEntry[0].old_versions)[0].status -eq 'cleanable') 'Coop does not report the uninstalled NSIS package and its retained cleanable version accurately'
+    @($apngEntry[0].old_versions)[0].status -eq 'cleanable') 'Burrow does not report the uninstalled NSIS package and its retained cleanable version accurately'
 Check (((Get-TreeSnapshot "$root/apps/7zip/26.05") -join "`n") -eq ($helperBefore -join "`n")) 'the lifecycle changed the helper package'
 
 # --- 7. A real NSIS package with extract_dir: Scoop's Expand-7zipArchive -ir! selection. ---------
@@ -328,7 +328,7 @@ Check (((Get-TreeSnapshot "$root/apps/7zip/26.05") -join "`n") -eq ($helperBefor
     root=$root
     checks=$script:checks
     runs=$script:runs
-    coop_sha256=(File-Hash $CoopExe)
+    burrow_sha256=(File-Hash $BurrowExe)
     powershell=$pwshPath
     helper=@{path=$helperExecutable;sha256=$helperHash;
         version=@(($helperVersion.output -split "`r?`n") | Where-Object { $_.Trim() })[0].Trim();

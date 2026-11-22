@@ -1,13 +1,13 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # #58: the line shapes of reset, uninstall and cleanup, taken from the recorded Scoop output
 # (docs/research/scoop-cli-output.md). Each command is asserted as a whole block, because the order
 # of the lines is part of the contract.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $tidy = Join-Path $archives 'tidy-5.8.0-win64.zip'
 if (-not (Test-Path -LiteralPath $tidy)) { throw "Missing fixed test input: $tidy; run scripts/fetch-deps.ps1" }
@@ -23,8 +23,8 @@ function Write-Manifest([string]$version) {
     [IO.File]::WriteAllText("$root/buckets/test/bucket/tidy.json",
         ($ordered | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 }
-function Invoke-Coop([string[]]$arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+function Invoke-Burrow([string[]]$arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -37,11 +37,11 @@ function Invoke-Coop([string[]]$arguments) {
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'coop timed out' }
+    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'burrow timed out' }
     $result = [pscustomobject]@{ exit = $process.ExitCode
         output = $stdout.GetAwaiter().GetResult(); error = $stderr.GetAwaiter().GetResult() }
     $process.Dispose()
-    if ($result.exit -ne 0) { throw "coop $($arguments -join ' ') failed: $($result.error)$($result.output)" }
+    if ($result.exit -ne 0) { throw "burrow $($arguments -join ' ') failed: $($result.error)$($result.output)" }
     return $result
 }
 function Get-Lines([string]$text) { return @($text -split "`r?`n") }
@@ -55,12 +55,12 @@ function Assert-Block([string]$label,[string[]]$expected,[string]$text) {
 }
 
 Write-Manifest '5.8.0'
-Invoke-Coop @('--root',$root,'install','test/tidy','--json') | Out-Null
+Invoke-Burrow @('--root',$root,'install','test/tidy','--json') | Out-Null
 Write-Manifest '5.8.1'
-Invoke-Coop @('--root',$root,'update','tidy','--json') | Out-Null
+Invoke-Burrow @('--root',$root,'update','tidy','--json') | Out-Null
 
 # reset: no quotes around the package name, and no closing line.
-$reset = Invoke-Coop @('--root',$root,'reset','tidy@5.8.0')
+$reset = Invoke-Burrow @('--root',$root,'reset','tidy@5.8.0')
 Assert-Block 'reset' @(
     'Resetting tidy (5.8.0).'
     "Linking $root\apps\tidy\current => $root\apps\tidy\5.8.0"
@@ -68,7 +68,7 @@ Assert-Block 'reset' @(
 ) $reset.output
 
 # cleanup: what it removed, a blank line, then the fixed closing sentence.
-$cleanup = Invoke-Coop @('--root',$root,'cleanup')
+$cleanup = Invoke-Burrow @('--root',$root,'cleanup')
 Assert-Block 'cleanup' @(
     'Removing tidy:'
     ' 5.8.1'
@@ -77,7 +77,7 @@ Assert-Block 'cleanup' @(
 ) $cleanup.output
 
 # uninstall: entries before the link, and one closing line that names the package.
-$uninstall = Invoke-Coop @('--root',$root,'uninstall','tidy')
+$uninstall = Invoke-Burrow @('--root',$root,'uninstall','tidy')
 Assert-Block 'uninstall' @(
     "Uninstalling 'tidy' (5.8.0)."
     "Removing shim 'tidy.shim'."

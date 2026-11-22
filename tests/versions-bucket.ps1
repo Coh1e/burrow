@@ -1,10 +1,10 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$fixture1 = Join-Path (Split-Path $CoopExe) 'fixture-1.exe'
-$fixture2 = Join-Path (Split-Path $CoopExe) 'fixture-2.exe'
+$fixture1 = Join-Path (Split-Path $BurrowExe) 'fixture-1.exe'
+$fixture2 = Join-Path (Split-Path $BurrowExe) 'fixture-2.exe'
 foreach ($path in @($fixture1,$fixture2)) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing fixed test input: $path" } }
 # The five real Main/Extras packages whose declared dependency lives in the official Versions
 # bucket. The fixture reproduces their exact dependency identities (bucket-qualified, unqualified
@@ -25,8 +25,8 @@ function Write-Manifest([string]$root,[string]$bucket,[string]$name,[string]$ver
     [IO.File]::WriteAllText("$root/buckets/$bucket/bucket/$name.json",($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 }
 function Read-Json([object]$output) { return (($output -join "`n") | ConvertFrom-Json) }
-function CoopPlan([string]$root,[string]$id) {
-    $text = & $CoopExe --root $root --arch 64bit install $id --dry-run --json 2>$null
+function BurrowPlan([string]$root,[string]$id) {
+    $text = & $BurrowExe --root $root --arch 64bit install $id --dry-run --json 2>$null
     $exit = $LASTEXITCODE
     return [pscustomobject]@{ exit=$exit; plan=(Read-Json $text); text=($text -join "`n") }
 }
@@ -71,24 +71,24 @@ $expected = @{
     'extras/rabbitmqadmin' = @('python27','versions','2.7.18')
 }
 foreach ($id in $versionsPackages) {
-    $preview = CoopPlan $root $id
+    $preview = BurrowPlan $root $id
     if ($preview.exit -ne 0) { throw "$id preview failed: $($preview.text)" }
     if (-not $preview.plan.execution_available) { throw "$id preview was not executable with the versions bucket registered" }
     $spec = $expected[$id]
     $entry = Assert-VersionsDependency $preview.plan $id $spec[0] $spec[1] $spec[2]
     if ($entry.request -ne ("{0}/{1}" -f $spec[1],$spec[0])) { throw "$id reported request '$($entry.request)' instead of the resolved $($spec[1])/$($spec[0])" }
-    if ((Test-Path "$root/apps") -or (Test-Path "$root/shims") -or (Test-Path "$root/.coop")) { throw "$id dependency preview changed product state" }
+    if ((Test-Path "$root/apps") -or (Test-Path "$root/shims") -or (Test-Path "$root/.burrow")) { throw "$id dependency preview changed product state" }
 }
-$nodeOrder = @((CoopPlan $root 'extras/node-compiler').plan.dependency_order | ForEach-Object package)
+$nodeOrder = @((BurrowPlan $root 'extras/node-compiler').plan.dependency_order | ForEach-Object package)
 if (($nodeOrder -join ',') -ne 'python27,squashfs-tools,node-compiler') { throw "transitive cross-bucket order is wrong: $($nodeOrder -join ',')" }
 
 # An installed versions dependency is reused instead of downloaded and installed again, and it
 # keeps the position it must have: before the requested package.
-$installDependency = & $CoopExe --root $root install versions/python27 --json
+$installDependency = & $BurrowExe --root $root install versions/python27 --json
 if ($LASTEXITCODE -ne 0) { throw "installing the versions dependency failed: $($installDependency -join "`n")" }
-$recordPath = "$root/.coop/packages/python27.json"
+$recordPath = "$root/.burrow/packages/python27.json"
 $recordBefore = (Get-FileHash -LiteralPath $recordPath -Algorithm SHA256).Hash
-$reusePreview = CoopPlan $root 'main/buck'
+$reusePreview = BurrowPlan $root 'main/buck'
 if ($reusePreview.exit -ne 0) { throw "reuse preview failed: $($reusePreview.text)" }
 $reuse = @($reusePreview.plan.dependency_order)
 $reused = $reuse[0]
@@ -97,7 +97,7 @@ if ($reused.package -ne 'python27' -or $reused.installed -ne $true -or $reused.s
     @($reused.ir_operations).Count -ne 0) { throw 'installed versions dependency was not reused with its source and version' }
 if ('python27' -in @($reusePreview.plan.planned_dependencies)) { throw 'reuse preview still planned to install the satisfied dependency' }
 if ($reuse[1].package -ne 'buck' -or $reuse[1].status -ne 'planned' -or @($reuse[1].ir_operations).Count -eq 0) { throw 'reuse preview lost the requested package plan' }
-$reuseInstall = & $CoopExe --root $root install main/buck --json
+$reuseInstall = & $BurrowExe --root $root install main/buck --json
 if ($LASTEXITCODE -ne 0) { throw "install with a reused versions dependency failed: $($reuseInstall -join "`n")" }
 $reuseResult = Read-Json $reuseInstall
 $reusePackages = @($reuseResult.packages)
@@ -117,9 +117,9 @@ $conflictRoot = New-TestRoot @('main','versions')
 Write-Manifest $conflictRoot 'versions' 'python27' '2.7.18' $fixture1 'python.exe' $null
 Write-Manifest $conflictRoot 'main' 'python27' '2.7.18' $fixture2 'python.exe' $null
 Write-Manifest $conflictRoot 'main' 'needsversions' '1' $fixture1 'needsversions.exe' 'versions/python27'
-$mainInstall = & $CoopExe --root $conflictRoot install main/python27 --json
+$mainInstall = & $BurrowExe --root $conflictRoot install main/python27 --json
 if ($LASTEXITCODE -ne 0) { throw "installing the same package from main failed: $($mainInstall -join "`n")" }
-$conflict = CoopPlan $conflictRoot 'main/needsversions'
+$conflict = BurrowPlan $conflictRoot 'main/needsversions'
 if ($conflict.exit -eq 0) { throw 'preview accepted an installed dependency from a different bucket than versions' }
 if ($conflict.plan.execution_available -ne $false -or @($conflict.plan.diagnostics | Where-Object code -eq 'dependency-bucket-conflict').Count -eq 0) {
     throw 'cross-bucket installed conflict was not reported as dependency-bucket-conflict'
@@ -132,19 +132,19 @@ Write-Manifest $absentRoot 'main' 'buck' '2021.01.12.01' $fixture2 'buck.exe' 'v
 Write-Manifest $absentRoot 'extras' 'squashfs-tools' '43' $fixture1 'mksquashfs.exe' $null
 Write-Manifest $absentRoot 'extras' 'node-compiler' '1.5.0' $fixture2 'nodec.exe' @('versions/python27','extras/squashfs-tools')
 Write-Manifest $absentRoot 'extras' 'repeatedmissing' '1' $fixture1 'repeatedmissing.exe' @('versions/absent-tool','versions/absent-tool')
-$absent = CoopPlan $absentRoot 'main/buck'
+$absent = BurrowPlan $absentRoot 'main/buck'
 if ($absent.exit -eq 0 -or $absent.plan.execution_available -ne $false) { throw 'preview without the versions bucket unexpectedly succeeded' }
 $absentDiagnostics = @($absent.plan.diagnostics | Where-Object code -eq 'dependency-missing')
 if ($absentDiagnostics.Count -ne 1 -or $absentDiagnostics[0].message -notmatch 'versions/python27') {
     throw "missing versions dependency was reported $($absentDiagnostics.Count) times instead of once with its source"
 }
-$repeated = CoopPlan $absentRoot 'extras/repeatedmissing'
+$repeated = BurrowPlan $absentRoot 'extras/repeatedmissing'
 $repeatedDiagnostics = @($repeated.plan.diagnostics | Where-Object code -eq 'dependency-missing')
 if ($repeated.exit -eq 0 -or $repeatedDiagnostics.Count -ne 1) {
     throw "a dependency declared twice was reported $($repeatedDiagnostics.Count) times instead of one deduplicated diagnostic"
 }
 if ($repeatedDiagnostics[0].message -notmatch 'versions/absent-tool') { throw 'deduplicated diagnostic lost the declared source identity' }
-$absentNode = CoopPlan $absentRoot 'extras/node-compiler'
+$absentNode = BurrowPlan $absentRoot 'extras/node-compiler'
 $absentCodes = @($absentNode.plan.diagnostics | Where-Object code -eq 'dependency-missing')
 if ($absentNode.exit -eq 0 -or $absentCodes.Count -ne 1 -or $absentCodes[0].message -notmatch 'versions/python27' -or
     $absentCodes[0].message -match 'squashfs-tools') { throw 'only the unavailable versions source should be reported missing' }

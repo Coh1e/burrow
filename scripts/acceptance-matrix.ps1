@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [string]$Output = (Join-Path $PSScriptRoot '../.local/acceptance')
 )
 # #55: produces the acceptance evidence the matrix document quotes. Everything runs against a project-
@@ -7,7 +7,7 @@ param(
 # records the exact command, its exit code and its output.
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'transcript-text.ps1')
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $Output = [IO.Path]::GetFullPath($Output)
 if (Test-Path -LiteralPath $Output) { throw "Output path already exists: $Output. Choose a new path with -Output." }
 New-Item -ItemType Directory -Path $Output | Out-Null
@@ -16,7 +16,7 @@ $tidy = Join-Path $archives 'tidy-5.8.0-win64.zip'
 if (-not (Test-Path -LiteralPath $tidy)) { throw "Missing fixed test input: $tidy; run scripts/fetch-deps.ps1" }
 
 $root = Join-Path $Output 'root'
-New-Item -ItemType Directory -Path "$root/buckets/test/bucket","$root/.coop" -Force | Out-Null
+New-Item -ItemType Directory -Path "$root/buckets/test/bucket","$root/.burrow" -Force | Out-Null
 
 function File-Hash([string]$path) { return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLower() }
 function Write-Manifest([string]$name,[string]$version,[string]$url = $null) {
@@ -28,7 +28,7 @@ function Write-Manifest([string]$name,[string]$version,[string]$url = $null) {
         ($ordered | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 }
 function Invoke-Recorded([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -47,7 +47,7 @@ function Invoke-Recorded([string]$label,[string[]]$arguments,[hashtable]$environ
         output = $stdout.GetAwaiter().GetResult(); error = $stderr.GetAwaiter().GetResult() }
     $process.Dispose()
     $transcript = @(
-        "COMMAND: coop $($arguments -join ' ')"
+        "COMMAND: burrow $($arguments -join ' ')"
         "EXIT: $($result.exit)"
         '--- stdout ---'
         (Format-TranscriptText $result.output)
@@ -58,7 +58,7 @@ function Invoke-Recorded([string]$label,[string[]]$arguments,[hashtable]$environ
     return $result
 }
 function Latest-Timings {
-    $records = @(Get-ChildItem -LiteralPath "$root/.coop/timings" -Filter '*.json' -File | Sort-Object LastWriteTime)
+    $records = @(Get-ChildItem -LiteralPath "$root/.burrow/timings" -Filter '*.json' -File | Sort-Object LastWriteTime)
     if ($records.Count -eq 0) { return $null }
     return (Get-Content -LiteralPath $records[-1].FullName -Raw | ConvertFrom-Json)
 }
@@ -83,9 +83,9 @@ $uninstall = Invoke-Recorded '07-uninstall' @('--root',$root,'uninstall','test/c
 
 # --- recover (crash injection, then rollback) ----------------------------------------------------
 Write-Manifest 'crashy' '1.0.0'
-Set-Content -LiteralPath "$root/.coop/test-faults.json" -Value '{"crash":["after-extract"]}' -Encoding utf8
-$crash = Invoke-Recorded '08-install-crash' @('--root',$root,'install','test/crashy','--json') @{ 'COOP_ALLOW_TEST_FAULTS' = '1' }
-Remove-Item -LiteralPath "$root/.coop/test-faults.json" -Force
+Set-Content -LiteralPath "$root/.burrow/test-faults.json" -Value '{"crash":["after-extract"]}' -Encoding utf8
+$crash = Invoke-Recorded '08-install-crash' @('--root',$root,'install','test/crashy','--json') @{ 'BURROW_ALLOW_TEST_FAULTS' = '1' }
+Remove-Item -LiteralPath "$root/.burrow/test-faults.json" -Force
 $recover = Invoke-Recorded '09-recover' @('--root',$root,'recover')
 
 # --- cache self-healing --------------------------------------------------------------------------
@@ -109,7 +109,7 @@ $offline = Invoke-Recorded '16-offline-install' @('--root',$root,'install','test
 
 # --- summary -------------------------------------------------------------------------------------
 $summary = [ordered]@{
-    coop = (& $CoopExe --version)
+    burrow = (& $BurrowExe --version)
     machine = "$env:COMPUTERNAME / $([Environment]::OSVersion.VersionString)"
     fixture = $tidy
     fixture_sha256 = (File-Hash $tidy)

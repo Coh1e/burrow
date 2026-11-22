@@ -1,5 +1,5 @@
 ﻿param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [string]$ScoopRoot = (Join-Path $env:USERPROFILE 'scoop'),
     [string]$InventoryRoot = '',
@@ -15,7 +15,7 @@
 #     root, alternating with the real Scoop client, then the original installation list and raw
 #     user Path are verified unchanged.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -24,12 +24,12 @@ $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 $allowed = [IO.Path]::GetFullPath((Join-Path $projectRoot '.local')).TrimEnd('\') + '\'
 if (-not ($EvidenceDir.TrimEnd('\') + '\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Evidence must stay inside the project .local directory' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot)
 if (-not $InventoryRoot) { $InventoryRoot = Join-Path $projectRoot '.local/coverage/root' }
 $InventoryRoot = [IO.Path]::GetFullPath($InventoryRoot)
 if (-not ($InventoryRoot.TrimEnd('\') + '\').StartsWith($projectRoot.TrimEnd('\') + '\',[StringComparison]::OrdinalIgnoreCase)) { throw 'InventoryRoot must stay inside the project directory' }
-if (-not (Test-Path -LiteralPath $CoopExe)) { throw "Coop executable not found: $CoopExe" }
+if (-not (Test-Path -LiteralPath $BurrowExe)) { throw "Burrow executable not found: $BurrowExe" }
 if (-not (Test-Path -LiteralPath $ScoopRoot)) { throw "Shared Scoop root not found: $ScoopRoot" }
 if (-not (Test-Path -LiteralPath $InventoryRoot)) { throw "Inventory root not found: $InventoryRoot" }
 $scoop = (Get-Command scoop.ps1 -ErrorAction Stop).Source
@@ -44,7 +44,7 @@ function Run([string]$name,[string]$exe,[string[]]$arguments) {
     $commands.Add([ordered]@{name=$name;exe=$exe;arguments=$arguments;exit=$exit;log=[IO.Path]::GetFileName($log)})
     return [pscustomobject]@{exit=$exit;output=$output;log=$log}
 }
-function Coop([string]$name,[string[]]$arguments) { return Run $name $CoopExe (@('--root',$ScoopRoot) + $arguments) }
+function Burrow([string]$name,[string[]]$arguments) { return Run $name $BurrowExe (@('--root',$ScoopRoot) + $arguments) }
 function Scoop([string]$name,[string[]]$arguments) { return Run $name $scoop $arguments }
 function Read-Json([string]$text) { return ($text | ConvertFrom-Json) }
 function Assert-True([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
@@ -68,11 +68,11 @@ function Read-ShimArguments([string]$alias) {
     return ($line -replace '^args = ','')
 }
 function Test-Installed([string]$name) {
-    $entry = @((& $CoopExe --root $ScoopRoot list --json | Out-String | ConvertFrom-Json) | Where-Object { $_.name -eq $name -and $_.status -ne 'uninstalled' })
+    $entry = @((& $BurrowExe --root $ScoopRoot list --json | Out-String | ConvertFrom-Json) | Where-Object { $_.name -eq $name -and $_.status -ne 'uninstalled' })
     return $entry.Count -gt 0
 }
 function Get-ScoopExportApps {
-    $export = (Invoke-CoopNative $scoop  export | Out-String) | ConvertFrom-Json
+    $export = (Invoke-BurrowNative $scoop  export | Out-String) | ConvertFrom-Json
     return @(@($export.apps) | ForEach-Object { "$($_.Name)@$($_.Version)" } | Sort-Object)
 }
 function Test-ScoopInstalled([string]$name) {
@@ -92,7 +92,7 @@ function Find-PythonHost {
     foreach ($candidate in $candidates) {
         if (-not $candidate -or -not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
         try {
-            $version = (Invoke-CoopNative $candidate  --version | Out-String).Trim()
+            $version = (Invoke-BurrowNative $candidate  --version | Out-String).Trim()
             if ($LASTEXITCODE -eq 0 -and $version -match '^Python 3\.') { return [IO.Path]::GetFullPath($candidate) }
         } catch { }
     }
@@ -263,7 +263,7 @@ function Normalize-ShimText([string]$text,[string]$root,[string]$package,[string
     $text = $text -replace ('(?i)<root>\\apps\\' + [regex]::Escape($package) + '\\(current|' + [regex]::Escape($version) + ')'), ('<root>\apps\' + $package + '\<pkgdir>')
     return (($text -replace "`r`n","`n").TrimEnd())
 }
-function Install-CoopShapeScratch([string]$name,[string]$manifestPath,$probe,[string]$root,[byte[]]$executableBytes) {
+function Install-BurrowShapeScratch([string]$name,[string]$manifestPath,$probe,[string]$root,[byte[]]$executableBytes) {
     $bucket = Join-Path $root 'buckets/scratch/bucket'
     $programs = Join-Path $root 'programs'
     New-Item -ItemType Directory -Path $bucket,$programs -Force | Out-Null
@@ -285,12 +285,12 @@ function Install-CoopShapeScratch([string]$name,[string]$manifestPath,$probe,[st
         }
     }
     [IO.File]::WriteAllText((Join-Path $bucket "$name.json"),(ConvertTo-Json -InputObject $manifest -Depth 12),[Text.UTF8Encoding]::new($false))
-    $savedPrograms = $env:COOP_PROGRAMS_DIR
-    $env:COOP_PROGRAMS_DIR = $programs
+    $savedPrograms = $env:BURROW_PROGRAMS_DIR
+    $env:BURROW_PROGRAMS_DIR = $programs
     try {
-        $install = Run "coop-scratch-$name" $CoopExe @('--root',$root,'install',"scratch/$name",'--json')
-        Assert-True ($install.exit -eq 0) "Coop scratch install for $name failed: $($install.output)"
-    } finally { $env:COOP_PROGRAMS_DIR = $savedPrograms }
+        $install = Run "burrow-scratch-$name" $BurrowExe @('--root',$root,'install',"scratch/$name",'--json')
+        Assert-True ($install.exit -eq 0) "Burrow scratch install for $name failed: $($install.output)"
+    } finally { $env:BURROW_PROGRAMS_DIR = $savedPrograms }
     return [pscustomobject]@{ root = $root; programs = $programs; install = $install }
 }
 
@@ -300,7 +300,7 @@ function Invoke-ScoopProbe([string]$name,[string]$manifestPath,[string]$version)
     $run = Run "scoop-probe-$name" $pwsh @('-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot 'scoop-shape-probe.ps1'),
         '-ScoopLibDir',$scoopLibDir,'-ScratchRoot',$scratch,'-ManifestPath',$manifestPath,'-PackageName',$name,
         '-Version',$version,'-ScoopAppDir',$scoopAppDir,'-OutputPath',$output,
-        '-ExecutableFixture',(Join-Path (Split-Path $CoopExe) 'fixture-env.exe'))
+        '-ExecutableFixture',(Join-Path (Split-Path $BurrowExe) 'fixture-env.exe'))
     Assert-True ($run.exit -eq 0) "the Scoop function probe for $name failed: $($run.output)"
     return (Get-Content -LiteralPath $output -Raw | ConvertFrom-Json)
 }
@@ -316,17 +316,17 @@ foreach ($name in $testPackages.Keys) {
     Assert-True (-not (Test-ScoopInstalled $name)) "Scoop already lists $name in the shared root; refusing to change it"
 }
 $rawPathBefore = Get-RawUserPath
-$coopListBefore = @((& $CoopExe --root $ScoopRoot list --json | Out-String | ConvertFrom-Json) | ForEach-Object { "$($_.name)@$($_.version)" } | Sort-Object)
+$burrowListBefore = @((& $BurrowExe --root $ScoopRoot list --json | Out-String | ConvertFrom-Json) | ForEach-Object { "$($_.name)@$($_.version)" } | Sort-Object)
 $scoopListBefore = Get-ScoopExportApps
 $sharedMain = Join-Path $ScoopRoot 'buckets/main'
 $versions = [ordered]@{
     generated_at = [DateTime]::UtcNow.ToString('o')
     project_head = (& git -C $projectRoot rev-parse HEAD | Out-String).Trim()
-    coop = (& $CoopExe --version | Out-String).Trim()
-    coop_sha256 = HashOf $CoopExe
+    burrow = (& $BurrowExe --version | Out-String).Trim()
+    burrow_sha256 = HashOf $BurrowExe
     powershell = $PSVersionTable.PSVersion.ToString()
     scoop_root = $ScoopRoot
-    scoop_version = (@(((Invoke-CoopNative $scoop  --version 6>&1 | Out-String) -split "`r?`n") | Where-Object { $_ -match '^v\d' }) | Select-Object -First 1)
+    scoop_version = (@(((Invoke-BurrowNative $scoop  --version 6>&1 | Out-String) -split "`r?`n") | Where-Object { $_ -match '^v\d' }) | Select-Object -First 1)
     shared_main_revision = (& git -C $sharedMain rev-parse HEAD | Out-String).Trim()
     project_tracked_changes = ((& git -C $projectRoot status --porcelain --untracked-files=no | Out-String).Trim() -split "`r?`n" | Where-Object { $_ })
     inventory_main_revision = (& git -C (Join-Path $InventoryRoot 'buckets/main') rev-parse HEAD | Out-String).Trim()
@@ -349,12 +349,12 @@ $probes = [ordered]@{}
 $scratchComparisons = [ordered]@{}
 $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
 $probeRoot = Join-Path $EvidenceDir 'scoop-probe'
-$scoopLibDir = Join-Path (Split-Path $CoopExe) 'scoop-lib'
+$scoopLibDir = Join-Path (Split-Path $BurrowExe) 'scoop-lib'
 $scoopAppDir = Join-Path $ScoopRoot 'apps/scoop/current'
 New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
-if (-not (Test-Path -LiteralPath (Join-Path $scoopLibDir 'install.ps1'))) { throw "The pinned Scoop library is missing beside coop.exe: $scoopLibDir" }
+if (-not (Test-Path -LiteralPath (Join-Path $scoopLibDir 'install.ps1'))) { throw "The pinned Scoop library is missing beside burrow.exe: $scoopLibDir" }
 if (-not (Test-Path -LiteralPath $scoopAppDir)) { throw "The real Scoop app directory is missing: $scoopAppDir" }
-$exeProbeBytes = [IO.File]::ReadAllBytes((Join-Path (Split-Path $CoopExe) 'fixture-env.exe'))
+$exeProbeBytes = [IO.File]::ReadAllBytes((Join-Path (Split-Path $BurrowExe) 'fixture-env.exe'))
 function Get-CurrentRelativePath([string]$path,[string]$package,[string]$root) {
     $prefix = [IO.Path]::GetFullPath((Join-Path $root "apps/$package/current")).TrimEnd('\')
     $full = [IO.Path]::GetFullPath($path).TrimEnd('\')
@@ -373,7 +373,7 @@ foreach ($case in $inventoryCases) {
     $manifestPath = Join-Path $InventoryRoot ("buckets/$($case.bucket)/bucket/$name.json")
     Assert-True (Test-Path -LiteralPath $manifestPath) "Inventories Manifest missing: $manifestPath"
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -AsHashtable
-    $preview = Run "shape-plan-$name" $CoopExe @('--root',$InventoryRoot,'install',$case.request,'--dry-run','--json')
+    $preview = Run "shape-plan-$name" $BurrowExe @('--root',$InventoryRoot,'install',$case.request,'--dry-run','--json')
     Assert-True ($preview.exit -eq 0) "$name preview failed with exit $($preview.exit)"
     $plan = Read-Json $preview.output
     Assert-True ([bool]$plan.execution_available) "$name is not execution_available on the inventory root"
@@ -444,18 +444,18 @@ foreach ($case in $inventoryCases) {
     }
 }
 
-# --- 1b. Coop scratch install compared with the Scoop-written shim files ------------------------
+# --- 1b. Burrow scratch install compared with the Scoop-written shim files ------------------------
 foreach ($name in @('stdiscosrv','retdec','mqtt-spy')) {
     $case = @($inventoryCases | Where-Object { $_.name -eq $name })[0]
     $manifestPath = Join-Path $InventoryRoot ("buckets/$($case.bucket)/bucket/$name.json")
     $probe = $probes[$name]
-    $scratchRoot = Join-Path $EvidenceDir "coop-scratch/$name"
+    $scratchRoot = Join-Path $EvidenceDir "burrow-scratch/$name"
     if (Test-Path -LiteralPath $scratchRoot) { Remove-Item -LiteralPath $scratchRoot -Recurse -Force }
-    $installed = Install-CoopShapeScratch $name $manifestPath $probe $scratchRoot $exeProbeBytes
+    $installed = Install-BurrowShapeScratch $name $manifestPath $probe $scratchRoot $exeProbeBytes
     $shimDir = Join-Path $scratchRoot 'shims'
     foreach ($file in @($probe.shims)) {
         $actualFile = Join-Path $shimDir $file.name
-        Assert-True (Test-Path -LiteralPath $actualFile) "the Coop scratch install for $name is missing $($file.name)"
+        Assert-True (Test-Path -LiteralPath $actualFile) "the Burrow scratch install for $name is missing $($file.name)"
         if ($null -ne $file.text) {
             $expectedText = Normalize-ShimText $file.text $probe.scoop_root $name $probe.version
             $actualText = Normalize-ShimText ([IO.File]::ReadAllText($actualFile)) $scratchRoot $name $probe.version
@@ -469,30 +469,30 @@ foreach ($name in @('stdiscosrv','retdec','mqtt-spy')) {
             $env:PATH = (Join-Path $probe.scoop_root 'shims') + ';' + (Join-Path $env:SystemRoot 'System32')
             $scoopResolution = Run 'scoop-retdec-fileinfo-resolution' $env:ComSpec @('/d','/c','retdec-fileinfo','probe-argument')
             $env:PATH = $shimDir + ';' + (Join-Path $env:SystemRoot 'System32')
-            $coopResolution = Run 'coop-retdec-fileinfo-resolution' $env:ComSpec @('/d','/c','retdec-fileinfo','probe-argument')
+            $burrowResolution = Run 'burrow-retdec-fileinfo-resolution' $env:ComSpec @('/d','/c','retdec-fileinfo','probe-argument')
         } finally { $env:PATH = $savedTestPath }
-        Assert-True ($scoopResolution.exit -eq 0 -and $coopResolution.exit -eq 0) "the retdec alias did not run: scoop=$($scoopResolution.output) coop=$($coopResolution.output)"
-        Assert-True ($scoopResolution.output -match 'env fixture' -and $coopResolution.output -match 'env fixture') "the .exe family did not win command resolution: scoop='$($scoopResolution.output)' coop='$($coopResolution.output)'"
-        Assert-True ($scoopResolution.output -eq $coopResolution.output) 'the .exe resolution output differs between Scoop and Coop'
-        $resolution = [ordered]@{ scoop_exit=$scoopResolution.exit; coop_exit=$coopResolution.exit; equal_output=($scoopResolution.output -eq $coopResolution.output); output=$coopResolution.output }
+        Assert-True ($scoopResolution.exit -eq 0 -and $burrowResolution.exit -eq 0) "the retdec alias did not run: scoop=$($scoopResolution.output) burrow=$($burrowResolution.output)"
+        Assert-True ($scoopResolution.output -match 'env fixture' -and $burrowResolution.output -match 'env fixture') "the .exe family did not win command resolution: scoop='$($scoopResolution.output)' burrow='$($burrowResolution.output)'"
+        Assert-True ($scoopResolution.output -eq $burrowResolution.output) 'the .exe resolution output differs between Scoop and Burrow'
+        $resolution = [ordered]@{ scoop_exit=$scoopResolution.exit; burrow_exit=$burrowResolution.exit; equal_output=($scoopResolution.output -eq $burrowResolution.output); output=$burrowResolution.output }
     }
     $shortcutCheck = $null
     if ($name -eq 'mqtt-spy') {
         $link = Join-Path $installed.programs 'mqtt-spy.lnk'
-        Assert-True (Test-Path -LiteralPath $link) 'the Coop scratch mqtt-spy install did not create the declared shortcut'
+        Assert-True (Test-Path -LiteralPath $link) 'the Burrow scratch mqtt-spy install did not create the declared shortcut'
         $identity = ShortcutOf $link
         Assert-True (([IO.Path]::GetFullPath($identity.target)) -ieq ([IO.Path]::GetFullPath((Join-Path $shimDir 'mqtt-spy.cmd')))) "the mqtt-spy shortcut target is '$($identity.target)'"
         Assert-True (Test-Path -LiteralPath $identity.target) 'the mqtt-spy shortcut target does not exist'
         $shortcutCheck = [ordered]@{ target=$identity.target; target_exists=$true }
     }
     $uninstall = $null
-    $savedPrograms = $env:COOP_PROGRAMS_DIR
-    $env:COOP_PROGRAMS_DIR = $installed.programs
-    try { $uninstall = Run "coop-scratch-$name-uninstall" $CoopExe @('--root',$scratchRoot,'uninstall',$name,'--json') }
-    finally { $env:COOP_PROGRAMS_DIR = $savedPrograms }
-    Assert-True ($uninstall.exit -eq 0) "the Coop scratch uninstall for $name failed: $($uninstall.output)"
-    Assert-True (@(Get-ChildItem -LiteralPath $shimDir -Force -ErrorAction SilentlyContinue).Count -eq 0) "the Coop scratch uninstall for $name left shim files"
-    Assert-True (@(Get-ChildItem -LiteralPath $installed.programs -Force -ErrorAction SilentlyContinue).Count -eq 0) "the Coop scratch uninstall for $name left shortcuts"
+    $savedPrograms = $env:BURROW_PROGRAMS_DIR
+    $env:BURROW_PROGRAMS_DIR = $installed.programs
+    try { $uninstall = Run "burrow-scratch-$name-uninstall" $BurrowExe @('--root',$scratchRoot,'uninstall',$name,'--json') }
+    finally { $env:BURROW_PROGRAMS_DIR = $savedPrograms }
+    Assert-True ($uninstall.exit -eq 0) "the Burrow scratch uninstall for $name failed: $($uninstall.output)"
+    Assert-True (@(Get-ChildItem -LiteralPath $shimDir -Force -ErrorAction SilentlyContinue).Count -eq 0) "the Burrow scratch uninstall for $name left shim files"
+    Assert-True (@(Get-ChildItem -LiteralPath $installed.programs -Force -ErrorAction SilentlyContinue).Count -eq 0) "the Burrow scratch uninstall for $name left shortcuts"
     $scratchComparisons[$name] = [ordered]@{ shims=@($probe.shims | ForEach-Object { $_.name }); install_exit=$installed.install.exit
         uninstall_exit=$uninstall.exit; exe_resolution=$resolution; shortcut=$shortcutCheck }
 }
@@ -508,15 +508,15 @@ $mqttPrograms = Join-Path $mqttRoot 'programs'
 if (Test-Path -LiteralPath $mqttRoot) { Remove-Item -LiteralPath $mqttRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $mqttBucket,$mqttPrograms -Force | Out-Null
 Copy-Item -LiteralPath $mqttManifestSource -Destination (Join-Path $mqttBucket 'mqtt-spy.json')
-$savedPrograms = $env:COOP_PROGRAMS_DIR
-$env:COOP_PROGRAMS_DIR = $mqttPrograms
+$savedPrograms = $env:BURROW_PROGRAMS_DIR
+$env:BURROW_PROGRAMS_DIR = $mqttPrograms
 try {
-    $mqttPreview = Run 'mqtt-real-preview' $CoopExe @('--root',$mqttRoot,'install','scratch/mqtt-spy','--dry-run','--json')
+    $mqttPreview = Run 'mqtt-real-preview' $BurrowExe @('--root',$mqttRoot,'install','scratch/mqtt-spy','--dry-run','--json')
     Assert-True ($mqttPreview.exit -eq 0) "the real mqtt-spy preview failed: $($mqttPreview.output)"
     Assert-True ([bool](Read-Json $mqttPreview.output).execution_available) 'the real mqtt-spy preview is not execution_available'
-    $mqttInstall = Run 'mqtt-real-install' $CoopExe @('--root',$mqttRoot,'install','scratch/mqtt-spy','--json')
+    $mqttInstall = Run 'mqtt-real-install' $BurrowExe @('--root',$mqttRoot,'install','scratch/mqtt-spy','--json')
     Assert-True ($mqttInstall.exit -eq 0) "the real mqtt-spy install failed: $($mqttInstall.output)"
-} finally { $env:COOP_PROGRAMS_DIR = $savedPrograms }
+} finally { $env:BURROW_PROGRAMS_DIR = $savedPrograms }
 $mqttManifest = Get-Content -LiteralPath $mqttManifestSource -Raw | ConvertFrom-Json -AsHashtable
 $mqttJar = Join-Path $mqttRoot 'apps/mqtt-spy/current/mqtt-spy.jar'
 Assert-True (Test-Path -LiteralPath $mqttJar) 'the real mqtt-spy jar was not published'
@@ -531,10 +531,10 @@ $mqttIdentity = ShortcutOf $mqttLink
 Assert-True (([IO.Path]::GetFullPath($mqttIdentity.target)) -ieq ([IO.Path]::GetFullPath($mqttWrapper))) "the real mqtt-spy shortcut target is '$($mqttIdentity.target)'"
 Assert-True (Test-Path -LiteralPath $mqttIdentity.target) 'the real mqtt-spy shortcut target does not exist'
 $mqttUninstall = $null
-$savedPrograms = $env:COOP_PROGRAMS_DIR
-$env:COOP_PROGRAMS_DIR = $mqttPrograms
-try { $mqttUninstall = Run 'mqtt-real-uninstall' $CoopExe @('--root',$mqttRoot,'uninstall','mqtt-spy','--json') }
-finally { $env:COOP_PROGRAMS_DIR = $savedPrograms }
+$savedPrograms = $env:BURROW_PROGRAMS_DIR
+$env:BURROW_PROGRAMS_DIR = $mqttPrograms
+try { $mqttUninstall = Run 'mqtt-real-uninstall' $BurrowExe @('--root',$mqttRoot,'uninstall','mqtt-spy','--json') }
+finally { $env:BURROW_PROGRAMS_DIR = $savedPrograms }
 Assert-True ($mqttUninstall.exit -eq 0) "the real mqtt-spy uninstall failed: $($mqttUninstall.output)"
 Assert-True (-not (Test-Path -LiteralPath $mqttWrapper) -and -not (Test-Path -LiteralPath $mqttLink) -and
     -not (Test-Path -LiteralPath (Join-Path $mqttRoot 'apps/mqtt-spy/current'))) 'the real mqtt-spy uninstall left published state'
@@ -542,7 +542,7 @@ $mqttReal = [ordered]@{ preview_executable=$true; install_exit=$mqttInstall.exit
     shortcut_target=$mqttIdentity.target; shortcut_target_exists=$true; uninstall_exit=$mqttUninstall.exit; gui_run='not-run' }
 } finally { $env:PATH = $savedProcessPath }
 $parity | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'inventory-parity.json') -Encoding utf8
-[ordered]@{ parity=$parity; coop_scratch=$scratchComparisons; mqtt_spy_real=$mqttReal } |
+[ordered]@{ parity=$parity; burrow_scratch=$scratchComparisons; mqtt_spy_real=$mqttReal } |
     ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'shape-comparison.json') -Encoding utf8
 if ($InventoryOnly) {
     Write-Text (Join-Path $EvidenceDir 'versions-and-commands.txt') (($versions.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n")
@@ -559,51 +559,51 @@ $work = Join-Path $EvidenceDir 'work'
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 Copy-Item -LiteralPath $msiFixture -Destination (Join-Path $work 'sample.msi') -Force
 $lifecycle = [ordered]@{}
-$installedByCoop = [System.Collections.Generic.HashSet[string]]::new()
+$installedByBurrow = [System.Collections.Generic.HashSet[string]]::new()
 $installedByScoop = [System.Collections.Generic.HashSet[string]]::new()
 $sharedManifest = {
     param([string]$name)
     Get-Content -LiteralPath (Join-Path $ScoopRoot "buckets/main/bucket/$name.json") -Raw | ConvertFrom-Json -AsHashtable
 }
 try {
-    # wgcf: multi-argument shim, Coop install -> run -> real scoop reset -> run -> Coop uninstall
+    # wgcf: multi-argument shim, Burrow install -> run -> real scoop reset -> run -> Burrow uninstall
     $wgcfDirectory = Join-Path $ScoopRoot 'apps/wgcf/current'
     $wgcfPersist = Join-Path $ScoopRoot 'persist/wgcf'
     $wgcfExpected = [ordered]@{}
     Add-ScoopCommandExpectation (& $sharedManifest 'wgcf') $wgcfDirectory $wgcfPersist $wgcfExpected
     $wgcfExpected = $wgcfExpected['wgcf|direct']
-    $wgcfPreview = Coop 'wgcf-preview' @('install','main/wgcf','--dry-run','--json')
+    $wgcfPreview = Burrow 'wgcf-preview' @('install','main/wgcf','--dry-run','--json')
     Assert-True ($wgcfPreview.exit -eq 0) "wgcf preview failed: $($wgcfPreview.output)"
     $wgcfPlan = Read-Json $wgcfPreview.output
     Assert-True ([bool]$wgcfPlan.execution_available) 'wgcf is not executable in the shared root'
-    $wgcfInstall = Coop 'wgcf-install' @('install','main/wgcf','--json')
-    [void]$installedByCoop.Add('wgcf')
+    $wgcfInstall = Burrow 'wgcf-install' @('install','main/wgcf','--json')
+    [void]$installedByBurrow.Add('wgcf')
     Assert-True ($wgcfInstall.exit -eq 0) "wgcf install failed: $($wgcfInstall.output)"
     $wgcfArgsCoop = Read-ShimArguments 'wgcf'
-    Assert-True ($wgcfArgsCoop -eq $wgcfExpected.arguments) "coop wgcf shim arguments are '$wgcfArgsCoop', expected '$($wgcfExpected.arguments)'"
-    $wgcfRun = Run 'wgcf-run-coop' (Join-Path $ScoopRoot 'shims/wgcf.exe') @('--help')
-    Assert-True ($wgcfRun.exit -eq 0 -and $wgcfRun.output -match 'Usage' -and $wgcfRun.output -match 'wgcf') "wgcf --help through the coop shim failed: exit=$($wgcfRun.exit) output=$($wgcfRun.output)"
+    Assert-True ($wgcfArgsCoop -eq $wgcfExpected.arguments) "burrow wgcf shim arguments are '$wgcfArgsCoop', expected '$($wgcfExpected.arguments)'"
+    $wgcfRun = Run 'wgcf-run-burrow' (Join-Path $ScoopRoot 'shims/wgcf.exe') @('--help')
+    Assert-True ($wgcfRun.exit -eq 0 -and $wgcfRun.output -match 'Usage' -and $wgcfRun.output -match 'wgcf') "wgcf --help through the burrow shim failed: exit=$($wgcfRun.exit) output=$($wgcfRun.output)"
     $wgcfReset = Scoop 'wgcf-scoop-reset' @('reset','wgcf')
     Assert-True ($wgcfReset.exit -eq 0) "scoop reset wgcf failed: $($wgcfReset.output)"
     $wgcfArgsScoop = Read-ShimArguments 'wgcf'
     Assert-True ($wgcfArgsScoop -eq $wgcfArgsCoop) "scoop reset changed the wgcf shim arguments: '$wgcfArgsScoop' vs '$wgcfArgsCoop'"
     $wgcfRunAfter = Run 'wgcf-run-after-reset' (Join-Path $ScoopRoot 'shims/wgcf.exe') @('--help')
     Assert-True ($wgcfRunAfter.exit -eq 0 -and $wgcfRunAfter.output -match 'Usage') "wgcf after scoop reset failed: exit=$($wgcfRunAfter.exit) output=$($wgcfRunAfter.output)"
-    $wgcfUninstall = Coop 'wgcf-uninstall' @('uninstall','wgcf','--json')
-    [void]$installedByCoop.Remove('wgcf')
+    $wgcfUninstall = Burrow 'wgcf-uninstall' @('uninstall','wgcf','--json')
+    [void]$installedByBurrow.Remove('wgcf')
     Assert-True ($wgcfUninstall.exit -eq 0) "wgcf uninstall failed: $($wgcfUninstall.output)"
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot 'shims/wgcf.exe')) -and -not (Test-Path -LiteralPath (Join-Path $ScoopRoot 'shims/wgcf.shim'))) 'wgcf uninstall left the shim'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot 'apps/wgcf/current'))) 'wgcf uninstall left the current link'
     Assert-True (Test-Path -LiteralPath (Join-Path $wgcfPersist 'wgcf-account.toml')) 'normal uninstall removed declared persistent data'
-    Assert-True (-not (Test-Installed 'wgcf')) 'Coop still lists wgcf after uninstall'
+    Assert-True (-not (Test-Installed 'wgcf')) 'Burrow still lists wgcf after uninstall'
     $lifecycle.wgcf = [ordered]@{
-        preview=$wgcfPlan.execution_available; shim_arguments_coop=$wgcfArgsCoop; shim_arguments_scoop=$wgcfArgsScoop
-        expected_arguments=$wgcfExpected.arguments; run_coop_exit=$wgcfRun.exit; run_after_scoop_reset_exit=$wgcfRunAfter.exit
+        preview=$wgcfPlan.execution_available; shim_arguments_burrow=$wgcfArgsCoop; shim_arguments_scoop=$wgcfArgsScoop
+        expected_arguments=$wgcfExpected.arguments; run_burrow_exit=$wgcfRun.exit; run_after_scoop_reset_exit=$wgcfRunAfter.exit
         scoop_reset_exit=$wgcfReset.exit; uninstall_exit=$wgcfUninstall.exit; persist_retained=(Test-Path -LiteralPath (Join-Path $wgcfPersist 'wgcf-account.toml'))
         plan_log=[IO.Path]::GetFileName($wgcfInstall.log)
     }
 
-    # zigup: Scoop install -> run -> Scoop uninstall restores Path -> Coop install (env_add_path ".") -> run -> Coop uninstall
+    # zigup: Scoop install -> run -> Scoop uninstall restores Path -> Burrow install (env_add_path ".") -> run -> Burrow uninstall
     $zigupDirectory = Join-Path $ScoopRoot 'apps/zigup/current'
     $zigupPersist = Join-Path $ScoopRoot 'persist/zigup'
     $rawPathBeforeZigup = Get-RawUserPath
@@ -619,34 +619,34 @@ try {
     [void]$installedByScoop.Remove('zigup')
     Assert-True ($zigupScoopUninstall.exit -eq 0) "scoop uninstall zigup failed: $($zigupScoopUninstall.output)"
     Assert-True ((Get-RawUserPath) -eq $rawPathBeforeZigup) 'scoop uninstall zigup did not restore the raw user Path'
-    $zigupPreview = Coop 'zigup-preview' @('install','main/zigup','--dry-run','--json')
+    $zigupPreview = Burrow 'zigup-preview' @('install','main/zigup','--dry-run','--json')
     Assert-True ($zigupPreview.exit -eq 0) "zigup preview failed: $($zigupPreview.output)"
     $zigupPlan = Read-Json $zigupPreview.output
     Assert-True ([bool]$zigupPlan.execution_available) 'zigup is not executable in the shared root'
-    $zigupInstall = Coop 'zigup-install' @('install','main/zigup','--json')
-    [void]$installedByCoop.Add('zigup')
+    $zigupInstall = Burrow 'zigup-install' @('install','main/zigup','--json')
+    [void]$installedByBurrow.Add('zigup')
     Assert-True ($zigupInstall.exit -eq 0) "zigup install failed: $($zigupInstall.output)"
     $zigupArgsCoop = Read-ShimArguments 'zigup'
-    Assert-True ($zigupArgsCoop -eq $zigupArgsScoop) "coop zigup shim arguments are '$zigupArgsCoop', Scoop wrote '$zigupArgsScoop'"
+    Assert-True ($zigupArgsCoop -eq $zigupArgsScoop) "burrow zigup shim arguments are '$zigupArgsCoop', Scoop wrote '$zigupArgsScoop'"
     $zigupExpectedPath = [System.Collections.Generic.List[string]]::new()
     Add-ScoopPathExpectation (& $sharedManifest 'zigup') $zigupDirectory $zigupExpectedPath
     $zigupPathAfter = @((Get-RawUserPath) -split ';' | Where-Object { $_.TrimEnd('\') -ieq $zigupDirectory.TrimEnd('\') })
-    Assert-True ($zigupPathAfter.Count -ge 1) "Coop did not add '$zigupDirectory' to the user Path (expected from env_add_path '.')"
-    $zigupRun = Run 'zigup-run-coop' (Join-Path $ScoopRoot 'shims/zigup.exe') @('--help')
-    Assert-True ($zigupRun.exit -eq 0 -and $zigupRun.output -match 'Usage') "zigup --help through the coop shim failed: exit=$($zigupRun.exit) output=$($zigupRun.output)"
-    $zigupUninstall = Coop 'zigup-uninstall' @('uninstall','zigup','--json')
-    [void]$installedByCoop.Remove('zigup')
+    Assert-True ($zigupPathAfter.Count -ge 1) "Burrow did not add '$zigupDirectory' to the user Path (expected from env_add_path '.')"
+    $zigupRun = Run 'zigup-run-burrow' (Join-Path $ScoopRoot 'shims/zigup.exe') @('--help')
+    Assert-True ($zigupRun.exit -eq 0 -and $zigupRun.output -match 'Usage') "zigup --help through the burrow shim failed: exit=$($zigupRun.exit) output=$($zigupRun.output)"
+    $zigupUninstall = Burrow 'zigup-uninstall' @('uninstall','zigup','--json')
+    [void]$installedByBurrow.Remove('zigup')
     Assert-True ($zigupUninstall.exit -eq 0) "zigup uninstall failed: $($zigupUninstall.output)"
-    Assert-True ((Get-RawUserPath) -eq $rawPathBeforeZigup) 'coop uninstall zigup did not restore the raw user Path'
+    Assert-True ((Get-RawUserPath) -eq $rawPathBeforeZigup) 'burrow uninstall zigup did not restore the raw user Path'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot 'shims/zigup.exe')) -and -not (Test-Path -LiteralPath (Join-Path $ScoopRoot 'shims/zigup.shim'))) 'zigup uninstall left the shim'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot 'apps/zigup/current'))) 'zigup uninstall left the current link'
     $lifecycle.zigup = [ordered]@{
-        scoop_shim_arguments=$zigupArgsScoop; coop_shim_arguments=$zigupArgsCoop
+        scoop_shim_arguments=$zigupArgsScoop; burrow_shim_arguments=$zigupArgsCoop
         expected_path_entries=@($zigupExpectedPath); path_entry_present=$zigupPathAfter.Count
-        scoop_run_exit=$zigupScoopRun.exit; coop_run_exit=$zigupRun.exit
+        scoop_run_exit=$zigupScoopRun.exit; burrow_run_exit=$zigupRun.exit
         raw_path_restored=((Get-RawUserPath) -eq $rawPathBeforeZigup)
         scoop_install_exit=$zigupScoopInstall.exit; scoop_uninstall_exit=$zigupScoopUninstall.exit
-        coop_uninstall_exit=$zigupUninstall.exit; plan_log=[IO.Path]::GetFileName($zigupInstall.log)
+        burrow_uninstall_exit=$zigupUninstall.exit; plan_log=[IO.Path]::GetFileName($zigupInstall.log)
     }
 
     # lessmsi: real shortcut target/icon and a real direct entry, then uninstall revokes both
@@ -655,10 +655,10 @@ try {
     $lessmsiExpected = [System.Collections.Generic.List[object]]::new()
     Add-ScoopShortcutExpectation (& $sharedManifest 'lessmsi') $lessmsiDirectory $lessmsiPersist $lessmsiExpected
     Assert-True ($lessmsiExpected.Count -eq 1) "lessmsi declares $($lessmsiExpected.Count) shortcuts, expected 1"
-    $lessmsiPreview = Coop 'lessmsi-preview' @('install','main/lessmsi','--dry-run','--json')
+    $lessmsiPreview = Burrow 'lessmsi-preview' @('install','main/lessmsi','--dry-run','--json')
     Assert-True ($lessmsiPreview.exit -eq 0) "lessmsi preview failed: $($lessmsiPreview.output)"
-    $lessmsiInstall = Coop 'lessmsi-install' @('install','main/lessmsi','--json')
-    [void]$installedByCoop.Add('lessmsi')
+    $lessmsiInstall = Burrow 'lessmsi-install' @('install','main/lessmsi','--json')
+    [void]$installedByBurrow.Add('lessmsi')
     Assert-True ($lessmsiInstall.exit -eq 0) "lessmsi install failed: $($lessmsiInstall.output)"
     $lessmsiLink = Join-Path $startMenu 'Less MSIérables.lnk'
     Assert-True (Test-Path -LiteralPath $lessmsiLink) "lessmsi shortcut missing: $lessmsiLink"
@@ -667,8 +667,8 @@ try {
     Assert-True (([IO.Path]::GetFullPath($lessmsiIdentity.working_directory)) -ieq ([IO.Path]::GetFullPath($lessmsiDirectory))) "lessmsi shortcut working directory is '$($lessmsiIdentity.working_directory)'"
     $lessmsiRun = Run 'lessmsi-run' (Join-Path $ScoopRoot 'shims/lessmsi.exe') @('l','-t','File',(Join-Path $work 'sample.msi'))
     Assert-True ($lessmsiRun.exit -eq 0 -and $lessmsiRun.output -match 'File') "lessmsi did not list the MSI file table: exit=$($lessmsiRun.exit) output=$($lessmsiRun.output)"
-    $lessmsiUninstall = Coop 'lessmsi-uninstall' @('uninstall','lessmsi','--json')
-    [void]$installedByCoop.Remove('lessmsi')
+    $lessmsiUninstall = Burrow 'lessmsi-uninstall' @('uninstall','lessmsi','--json')
+    [void]$installedByBurrow.Remove('lessmsi')
     Assert-True ($lessmsiUninstall.exit -eq 0) "lessmsi uninstall failed: $($lessmsiUninstall.output)"
     Assert-True (-not (Test-Path -LiteralPath $lessmsiLink)) 'lessmsi uninstall left the shortcut'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot 'shims/lessmsi.exe'))) 'lessmsi uninstall left the entry'
@@ -680,8 +680,8 @@ try {
         shortcut_removed=(-not (Test-Path -LiteralPath $lessmsiLink)); log=[IO.Path]::GetFileName($lessmsiInstall.log)
     }
 } finally {
-    foreach ($name in @($installedByCoop)) {
-        try { $null = Coop "cleanup-coop-$name" @('uninstall',$name,'--json') } catch { Write-Text (Join-Path $EvidenceDir "cleanup-coop-$name-error.log") $_.Exception.Message }
+    foreach ($name in @($installedByBurrow)) {
+        try { $null = Burrow "cleanup-burrow-$name" @('uninstall',$name,'--json') } catch { Write-Text (Join-Path $EvidenceDir "cleanup-burrow-$name-error.log") $_.Exception.Message }
     }
     foreach ($name in @($installedByScoop)) {
         try { $null = Scoop "cleanup-scoop-$name" @('uninstall',$name) } catch { Write-Text (Join-Path $EvidenceDir "cleanup-scoop-$name-error.log") $_.Exception.Message }
@@ -689,15 +689,15 @@ try {
 }
 
 # --- 3. Final state: only the test packages are gone; nothing else changed ----------------------
-$coopListAfter = @((& $CoopExe --root $ScoopRoot list --json | Out-String | ConvertFrom-Json) | ForEach-Object { "$($_.name)@$($_.version)" } | Sort-Object)
+$burrowListAfter = @((& $BurrowExe --root $ScoopRoot list --json | Out-String | ConvertFrom-Json) | ForEach-Object { "$($_.name)@$($_.version)" } | Sort-Object)
 $scoopListAfter = Get-ScoopExportApps
 $rawPathAfter = Get-RawUserPath
-Assert-True (($coopListBefore -join '|') -eq ($coopListAfter -join '|')) "the managed installation list changed outside the test packages: before=$($coopListBefore -join ',') after=$($coopListAfter -join ',')"
+Assert-True (($burrowListBefore -join '|') -eq ($burrowListAfter -join '|')) "the managed installation list changed outside the test packages: before=$($burrowListBefore -join ',') after=$($burrowListAfter -join ',')"
 Assert-True (($scoopListBefore -join '|') -eq ($scoopListAfter -join '|')) "the Scoop installation list changed outside the test packages: before=$($scoopListBefore -join ',') after=$($scoopListAfter -join ',')"
 Assert-True ($rawPathAfter -eq $rawPathBefore) "the raw user Path was not restored: before='$rawPathBefore' after='$rawPathAfter'"
 foreach ($name in $testPackages.Keys) {
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot "apps/$name/current"))) "test package directory left behind: $name"
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot ".coop/packages/$name.json"))) "Coop management record left behind: $name"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot ".burrow/packages/$name.json"))) "Burrow management record left behind: $name"
 }
 Write-Text (Join-Path $EvidenceDir 'commands.json') (($commands | ConvertTo-Json -Depth 6))
 $result = [ordered]@{
@@ -708,7 +708,7 @@ $result = [ordered]@{
     mqtt_spy_real = $mqttReal
     lifecycle = $lifecycle
     raw_user_path_restored = ($rawPathAfter -eq $rawPathBefore)
-    coop_list_unchanged = (($coopListBefore -join '|') -eq ($coopListAfter -join '|'))
+    burrow_list_unchanged = (($burrowListBefore -join '|') -eq ($burrowListAfter -join '|'))
     scoop_list_unchanged = (($scoopListBefore -join '|') -eq ($scoopListAfter -join '|'))
     commands = $commands
 }

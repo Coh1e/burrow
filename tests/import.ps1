@@ -1,8 +1,8 @@
 # Red when: `import` stops registering a missing bucket, stops installing the declared apps through the
 # batch path, or stops reporting a `Global install` entry as a refused system-level write.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -34,18 +34,18 @@ $scoopfile = Join-Path $root 'scoopfile.json'
     )
 } | ConvertTo-Json -Depth 5 | Set-Content $scoopfile -Encoding utf8
 
-$imported = Invoke-CoopNative $CoopExe  --root $root import $scoopfile
+$imported = Invoke-BurrowNative $BurrowExe  --root $root import $scoopfile
 if ($LASTEXITCODE -cne 0) { throw "import failed: $($imported -join ' | ')" }
 if ($imported -join "`n" -cnotmatch "was installed successfully") { throw "import did not install the app: $($imported -join ' | ')" }
 if ($imported -join "`n" -cnotmatch 'global-scope-readonly') { throw 'import did not refuse the global entry' }
 
-$lines = @(& $CoopExe --root $root list)
+$lines = @(& $BurrowExe --root $root list)
 if ($lines -join "`n" -cnotmatch 'probe\s+1\.0') { throw "the imported app is missing: $($lines -join ' | ')" }
-$buckets = (& $CoopExe --root $root bucket list --json) | ConvertFrom-Json
+$buckets = (& $BurrowExe --root $root bucket list --json) | ConvertFrom-Json
 if (@($buckets | Where-Object name -CEQ 'probe').Count -cne 1) { throw 'import did not register the bucket' }
 
 # Re-importing the same Scoopfile is a no-op for the installed app, not a failure.
-$again = Invoke-CoopNative $CoopExe  --root $root import $scoopfile
+$again = Invoke-BurrowNative $BurrowExe  --root $root import $scoopfile
 if ($LASTEXITCODE -cne 0) { throw "a second import failed: $($again -join ' | ')" }
 if ($again -join "`n" -cnotmatch 'already installed') { throw "a second import said: $($again -join ' | ')" }
 Write-Output 'PASS: import registers buckets, installs apps and refuses global entries'

@@ -5,7 +5,7 @@
 #include <fstream>
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 // Queries hash many small records (manifests, install records, version tree stamps). Opening
 // the CNG provider per file dominated local list time, so the shared provider is opened once

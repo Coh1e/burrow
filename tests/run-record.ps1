@@ -1,8 +1,8 @@
 # Red when: a write command stops leaving a record behind after being killed, `recover` stops naming
 # that record, a normal run starts leaving one, or `recover --dry-run` consumes it.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -26,21 +26,21 @@ New-Item -ItemType Directory -Path "$root/buckets/probe/bucket" -Force | Out-Nul
 "@ | Set-Content "$root/buckets/probe/bucket/slow.json" -Encoding utf8 -NoNewline
 
 # A run that finishes leaves nothing behind.
-& $CoopExe --root $root install probe/slow | Out-Null
+& $BurrowExe --root $root install probe/slow | Out-Null
 if ($LASTEXITCODE -cne 0) { throw 'the fixture package did not install' }
-if (@(Get-ChildItem "$root/.coop/runs" -File -ErrorAction SilentlyContinue).Count -cne 0) {
+if (@(Get-ChildItem "$root/.burrow/runs" -File -ErrorAction SilentlyContinue).Count -cne 0) {
     throw 'a completed run left a record behind'
 }
 
 # A run that is killed leaves the record of what it was doing.
-'{ "crash": ["after-extract"] }' | Set-Content "$root/.coop/test-faults.json" -Encoding utf8
-$previousToken = $env:COOP_ALLOW_TEST_FAULTS
+'{ "crash": ["after-extract"] }' | Set-Content "$root/.burrow/test-faults.json" -Encoding utf8
+$previousToken = $env:BURROW_ALLOW_TEST_FAULTS
 try {
-    $env:COOP_ALLOW_TEST_FAULTS = '1'
-    Invoke-CoopNative $CoopExe  --root $root update probe/slow -f | Out-Null
+    $env:BURROW_ALLOW_TEST_FAULTS = '1'
+    Invoke-BurrowNative $BurrowExe  --root $root update probe/slow -f | Out-Null
     if ($LASTEXITCODE -ceq 0) { throw 'the crash fault did not stop the command' }
 
-    $records = @(Get-ChildItem "$root/.coop/runs" -File -ErrorAction SilentlyContinue)
+    $records = @(Get-ChildItem "$root/.burrow/runs" -File -ErrorAction SilentlyContinue)
     if ($records.Count -cne 1) { throw "expected one run record, found $($records.Count)" }
     $record = Get-Content $records[0].FullName -Raw | ConvertFrom-Json
     if ($record.command -cne 'update') { throw "the record names '$($record.command)'" }
@@ -48,27 +48,27 @@ try {
     if ([string]::IsNullOrWhiteSpace($record.stage)) { throw 'the record names no stage' }
 
     # A dry run reports it and leaves it in place.
-    $dry = Invoke-CoopNative $CoopExe  --root $root recover --dry-run
+    $dry = Invoke-BurrowNative $BurrowExe  --root $root recover --dry-run
     if ($LASTEXITCODE -cne 0) { throw "recover --dry-run failed: $($dry -join ' | ')" }
-    if (($dry -join "`n") -cnotmatch 'an interrupted run was recorded: coop update probe/slow') {
+    if (($dry -join "`n") -cnotmatch 'an interrupted run was recorded: burrow update probe/slow') {
         throw "recover --dry-run did not name the run: $($dry -join ' | ')"
     }
-    if (@(Get-ChildItem "$root/.coop/runs" -File -ErrorAction SilentlyContinue).Count -cne 1) {
+    if (@(Get-ChildItem "$root/.burrow/runs" -File -ErrorAction SilentlyContinue).Count -cne 1) {
         throw 'recover --dry-run consumed the record'
     }
 
     # A real recover reports it and consumes it.
-    $recover = Invoke-CoopNative $CoopExe  --root $root recover
-    if (($recover -join "`n") -cnotmatch 'an interrupted run was recorded: coop update probe/slow') {
+    $recover = Invoke-BurrowNative $BurrowExe  --root $root recover
+    if (($recover -join "`n") -cnotmatch 'an interrupted run was recorded: burrow update probe/slow') {
         throw "recover did not name the run: $($recover -join ' | ')"
     }
-    if (@(Get-ChildItem "$root/.coop/runs" -File -ErrorAction SilentlyContinue).Count -cne 0) {
+    if (@(Get-ChildItem "$root/.burrow/runs" -File -ErrorAction SilentlyContinue).Count -cne 0) {
         throw 'recover did not consume the record'
     }
-    $again = Invoke-CoopNative $CoopExe  --root $root recover
+    $again = Invoke-BurrowNative $BurrowExe  --root $root recover
     if (($again -join "`n") -cmatch 'interrupted run') { throw 'a consumed record was reported twice' }
 } finally {
-    if ($null -eq $previousToken) { Remove-Item Env:\COOP_ALLOW_TEST_FAULTS -ErrorAction SilentlyContinue }
-    else { $env:COOP_ALLOW_TEST_FAULTS = $previousToken }
+    if ($null -eq $previousToken) { Remove-Item Env:\BURROW_ALLOW_TEST_FAULTS -ErrorAction SilentlyContinue }
+    else { $env:BURROW_ALLOW_TEST_FAULTS = $previousToken }
 }
 Write-Output 'PASS: a killed write command leaves a record that recover reports and consumes'

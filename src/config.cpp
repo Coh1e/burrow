@@ -8,10 +8,10 @@
 #include <iostream>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 // Scoop keeps its settings in `%XDG_CONFIG_HOME%\scoop\config.json`, falling back to
-// `%USERPROFILE%\.config\scoop\config.json`. Coop reads and writes the same file: a second copy would
+// `%USERPROFILE%\.config\scoop\config.json`. Burrow reads and writes the same file: a second copy would
 // let the two clients disagree about the same alias or setting.
 fs::path config_file() {
     wchar_t buffer[32768]{};
@@ -21,9 +21,9 @@ fs::path config_file() {
         return fs::path(std::wstring(buffer,length))/L".config"/L"scoop"/L"config.json";
     throw std::runtime_error("Cannot locate the user profile for the Scoop configuration");
 }
-// Only the keys Coop implements may be written. Everything else is read, reported and preserved:
+// Only the keys Burrow implements may be written. Everything else is read, reported and preserved:
 // overwriting `root_path` or `last_update` would silently change the other client's behaviour.
-bool coop_owned(const std::string& key) { return key == "ALIAS" || key == "virustotal_api_key"; }
+bool burrow_owned(const std::string& key) { return key == "ALIAS" || key == "virustotal_api_key"; }
 Json read_config() {
     const auto path = config_file();
     std::error_code error;
@@ -91,7 +91,7 @@ int config_command(const Context& context,const std::vector<std::wstring>& args)
     if (args.empty()) {
         std::vector<std::vector<std::string>> rows;
         for (const auto& [key,value] : config.items())
-            rows.push_back({key,value_text(value),coop_owned(key) ? std::string{} : "Coop ignores this key"});
+            rows.push_back({key,value_text(value),burrow_owned(key) ? std::string{} : "Burrow ignores this key"});
         if (rows.empty()) { std::cout << "The Scoop configuration is empty.\n"; return 0; }
         print_table({"Name","Value","Note"},rows);
         return 0;
@@ -100,7 +100,7 @@ int config_command(const Context& context,const std::vector<std::wstring>& args)
     if (first == "rm") {
         if (args.size() != 2) throw UsageError("config rm requires one key");
         const auto key = utf8(args[1]);
-        if (!coop_owned(key)) throw std::runtime_error("config key '"+key+"' is not managed by Coop; it is preserved and ignored");
+        if (!burrow_owned(key)) throw std::runtime_error("config key '"+key+"' is not managed by Burrow; it is preserved and ignored");
         config.erase(key);
         write_config(config);
         std::cout << "'" << key << "' has been removed\n";
@@ -112,7 +112,7 @@ int config_command(const Context& context,const std::vector<std::wstring>& args)
         return 0;
     }
     if (args.size() > 2) throw UsageError("config accepts a key and an optional value");
-    if (!coop_owned(first)) throw std::runtime_error("config key '"+first+"' is not managed by Coop; it is preserved and ignored");
+    if (!burrow_owned(first)) throw std::runtime_error("config key '"+first+"' is not managed by Burrow; it is preserved and ignored");
     config[first] = utf8(args[1]);
     write_config(config);
     std::cout << "'" << first << "' has been set to '" << utf8(args[1]) << "'\n";

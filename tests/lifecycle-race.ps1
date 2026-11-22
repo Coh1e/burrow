@@ -1,12 +1,12 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
 $sessionRoot = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $sessionRoot -Force | Out-Null
-Copy-Item $CoopExe "$sessionRoot/artifact.exe"
+Copy-Item $BurrowExe "$sessionRoot/artifact.exe"
 $bytes = [IO.File]::ReadAllBytes("$sessionRoot/artifact.exe")
 $hash = (Get-FileHash "$sessionRoot/artifact.exe" -Algorithm SHA256).Hash.ToLower()
 foreach ($case in @('version','exe','metadata','record','manifest')) {
@@ -20,7 +20,7 @@ foreach ($case in @('version','exe','metadata','record','manifest')) {
     try {
         @{version='1';url="http://127.0.0.1:$port/fixture.exe";hash=$hash;bin='fixture.exe'} | ConvertTo-Json | Set-Content "$root/buckets/test/bucket/fixture.json" -Encoding utf8
         $connection = $listener.AcceptTcpClientAsync()
-        $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+        $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
         $start.UseShellExecute = $false
         $start.RedirectStandardOutput = $true
         $start.RedirectStandardError = $true
@@ -42,7 +42,7 @@ foreach ($case in @('version','exe','metadata','record','manifest')) {
             'version' { "$root/apps/fixture/1/foreign.txt" }
             'exe' { "$root/shims/fixture.exe" }
             'metadata' { "$root/shims/fixture.shim" }
-            'record' { "$root/.coop/packages/fixture.json" }
+            'record' { "$root/.burrow/packages/fixture.json" }
             'manifest' { "$root/buckets/test/bucket/fixture.json" }
         }
         New-Item -ItemType Directory -Path (Split-Path $foreign) -Force | Out-Null

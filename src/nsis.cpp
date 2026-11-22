@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 // NSIS FirstHeader signature: the 0xDEADBEEF magic followed by the ASCII marker. 7-Zip's own NSIS
 // handler finds the same header; the declared download name never decides how the payload is read.
@@ -19,7 +19,7 @@ Json tree_totals(const fs::path& root) {
     if (!fs::is_directory(root)) return {{"files",files},{"bytes",bytes}};
     for (const auto& entry : fs::recursive_directory_iterator(root)) {
         const auto status = entry.symlink_status();
-        if (fs::is_symlink(status)) throw std::runtime_error("7-Zip extracted a link, which Coop does not publish");
+        if (fs::is_symlink(status)) throw std::runtime_error("7-Zip extracted a link, which Burrow does not publish");
         if (fs::is_regular_file(status)) {
             ++files;
             bytes += fs::file_size(entry.path());
@@ -35,9 +35,9 @@ NsisHelper nsis_helper(const Context& context) {
         const auto candidate = root/L"apps"/L"7zip"/L"current"/L"7z.exe";
         if (fs::is_regular_file(candidate)) return {candidate,{}};
     }
-    return {{},"NSIS installer extraction requires the external 7-Zip helper; Coop looked for "
+    return {{},"NSIS installer extraction requires the external 7-Zip helper; Burrow looked for "
         "apps/7zip/current/7z.exe under the selected root (and the global root) and never downloads "
-        "or installs it. Install the Scoop package 7zip first, or use an archive Coop can unpack natively"};
+        "or installs it. Install the Scoop package 7zip first, or use an archive Burrow can unpack natively"};
 }
 NsisPayload inspect_nsis_payload(const fs::path& path) {
     NsisPayload result;
@@ -88,7 +88,7 @@ Json extract_nsis_archive(const Context& context, const fs::path& helper, const 
                           const fs::path& destination, const std::string& extract_directory,
                           const fs::path& transaction, std::size_t index) {
     if (helper.empty() || !fs::is_regular_file(helper))
-        throw std::runtime_error("The declared external 7-Zip helper is missing; Coop does not download or install it");
+        throw std::runtime_error("The declared external 7-Zip helper is missing; Burrow does not download or install it");
     if (!fs::is_regular_file(payload)) throw std::runtime_error("The NSIS installer payload is missing: "+path_text(payload));
     const auto detection = inspect_nsis_payload(payload);
     if (!detection.detected) throw std::runtime_error("The artifact is not an NSIS installer payload: "+path_text(payload));
@@ -102,7 +102,7 @@ Json extract_nsis_archive(const Context& context, const fs::path& helper, const 
     Json record = {{"mechanism","external 7-Zip helper using Scoop's Expand-7zipArchive arguments"},
         {"helper",path_text(helper)},
         {"helper_sha256",fs::exists(helper) ? sha256_file(helper) : std::string{}},
-        {"helper_policy","separately installed 7-Zip software package; Coop detects it, never downloads, installs or bundles it, and never substitutes a bundled unpacker"},
+        {"helper_policy","separately installed 7-Zip software package; Burrow detects it, never downloads, installs or bundles it, and never substitutes a bundled unpacker"},
         {"arguments",request.arguments},
         {"selection",request.selection},
         {"detection",{{"signature","FirstHeader magic DE AD BE EF followed by the ASCII marker NullsoftInst"},
@@ -117,7 +117,7 @@ Json extract_nsis_archive(const Context& context, const fs::path& helper, const 
         {"files",totals.at("files")},
         {"bytes",totals.at("bytes")},
         {"installer_executed",false},
-        {"elevation","not requested by Coop; 7-Zip only unpacks the installer payload into the selected root"},
+        {"elevation","not requested by Burrow; 7-Zip only unpacks the installer payload into the selected root"},
         {"reboot","not scheduled; the vendor setup.exe is never started"},
         {"installer_effects","not executed: the vendor setup.exe's install directory, registry, services, Start Menu entries, [Run] steps and uninstall registration are outside this extraction"},
         {"differences","the extracted tree is the whole NSIS payload, or the declared extract_dir selection, with the file contents and timestamps 7-Zip writes; $PLUGINSDIR, Uninstall.exe and similar payload entries remain until the Manifest's own hooks remove them, exactly as with Scoop's Expand-7zipArchive"}};
@@ -164,7 +164,7 @@ Json extract_seven_zip_sfx(const Context& context, const fs::path& helper, const
                            const fs::path& transaction, std::size_t index) {
     if (helper.empty() || !fs::is_regular_file(helper))
         throw std::runtime_error("7z self-extracting archive extraction requires the external 7-Zip helper; "
-                                 "Coop looked for apps/7zip/current/7z.exe under the selected root and never "
+                                 "Burrow looked for apps/7zip/current/7z.exe under the selected root and never "
                                  "downloads or installs it");
     const auto detection = inspect_seven_zip_sfx(archive);
     if (!detection.detected) throw std::runtime_error("The artifact is not a 7z self-extracting archive: "+path_text(archive));
@@ -184,7 +184,7 @@ Json extract_seven_zip_sfx(const Context& context, const fs::path& helper, const
     Json record = {{"mechanism","external 7-Zip helper reading a 7z self-extracting archive"},
         {"helper",path_text(helper)},
         {"helper_sha256",fs::exists(helper) ? sha256_file(helper) : std::string{}},
-        {"helper_policy","separately installed 7-Zip software package; Coop detects it, never downloads, installs or bundles it"},
+        {"helper_policy","separately installed 7-Zip software package; Burrow detects it, never downloads, installs or bundles it"},
         {"arguments",arguments},
         {"selection",selection},
         {"detection",{{"signature","MZ header followed by the 7z signature 37 7A BC AF 27 1C"},

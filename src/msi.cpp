@@ -18,13 +18,13 @@
 #include <string>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 constexpr int file_attribute_noncompressed = 0x2000;
 // FDICopy receives a cabinet name and a path prefix and hands the concatenation to FNOPEN. Both
 // are placeholders: the callbacks below open the real, already-extracted cabinet stream through
-// its wide path, so Unicode and long Coop roots keep working.
-constexpr char cabinet_placeholder[] = "coop-msi-cabinet.cab";
+// its wide path, so Unicode and long Burrow roots keep working.
+constexpr char cabinet_placeholder[] = "burrow-msi-cabinet.cab";
 
 std::runtime_error installer_error(const std::string& action, UINT status) {
     return std::runtime_error(action + " (Windows Installer error " + std::to_string(status) + ")");
@@ -247,14 +247,14 @@ long far_seek(INT_PTR handle, long distance, int origin) {
     return static_cast<long>(result);
 }
 // FDI asks for the cabinet through FNOPEN. Only the placeholder name is answered, and it is
-// answered from the wide path Coop already created; any other cabinet request is a multi-volume
+// answered from the wide path Burrow already created; any other cabinet request is a multi-volume
 // reference this backend does not follow.
 INT_PTR open_cabinet(CabinetContext& context, char* requested) {
     const std::string name = requested ? requested : "";
     const auto leaf = name.find_last_of("\\/");
     const std::string leaf_name = leaf == std::string::npos ? name : name.substr(leaf+1);
     if (lower(wide(leaf_name)) != lower(wide(cabinet_placeholder))) {
-        context.error = "MSI cabinet references another cabinet file, which Coop does not follow: " + name;
+        context.error = "MSI cabinet references another cabinet file, which Burrow does not follow: " + name;
         return -1;
     }
     auto file = std::make_unique<OpenFile>();
@@ -328,7 +328,7 @@ INT_PTR far_notify(FDINOTIFICATIONTYPE kind, PFDINOTIFICATION info) {
         case fdintCLOSE_FILE_INFO:
             return close_file(*context, info);
         case fdintNEXT_CABINET:
-            context->error = "MSI cabinet requires the next cabinet file, which Coop does not follow: " + ascii_text(info->psz1);
+            context->error = "MSI cabinet requires the next cabinet file, which Burrow does not follow: " + ascii_text(info->psz1);
             return -1;
         }
         return 0;
@@ -534,7 +534,7 @@ Json extract_msi_image(const fs::path& msi, const fs::path& destination, const f
             if (item.cabinet.empty()) continue;
             if (item.cabinet.front() != L'#')
                 throw std::runtime_error("MSI " + path_text(msi) + " declares the external cabinet " + utf8(item.cabinet) +
-                    "; Coop extracts only embedded cabinets and never runs msiexec.exe or downloads cabinets");
+                    "; Burrow extracts only embedded cabinets and never runs msiexec.exe or downloads cabinets");
             const auto stream_name = item.cabinet.substr(1);
             if (!extracted_cabinets.insert(lower(stream_name)).second) continue;
             const auto cabinet = work_directory / (L"cabinet-" + std::to_wstring(cabinet_index++) + L".cab");
@@ -574,9 +574,9 @@ Json extract_msi_image(const fs::path& msi, const fs::path& destination, const f
             {"database_access", "read-only"},
             {"msiexec_started", false},
             {"administrative_install", false},
-            {"elevation", "not requested; the image is written only inside the Coop transaction and version directory"},
-            {"reboot", "not scheduled; Coop extracts an administrative image instead of installing the product"},
-            {"machine_cache", "not written by Coop: no Windows Installer service call, no administrative install and no product registration"},
+            {"elevation", "not requested; the image is written only inside the Burrow transaction and version directory"},
+            {"reboot", "not scheduled; Burrow extracts an administrative image instead of installing the product"},
+            {"machine_cache", "not written by Burrow: no Windows Installer service call, no administrative install and no product registration"},
             {"directory_rows", directories.size()},
             {"cabinets", facts.cabinets},
             {"cabinet_files", facts.cab_files},

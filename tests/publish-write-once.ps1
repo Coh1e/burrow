@@ -1,15 +1,15 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # #67: an archive artifact is written once. The claim is about what happens to the disk *while* the
 # install runs, so the assertion watches the transaction directory instead of reading the tree
 # afterwards: a second copy would have to appear there, and with a single write it never does.
 # The watch is proved live by requiring that the staging directory itself was observed, so the
 # assertion cannot pass by watching nothing.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $baseline = Join-Path $PSScriptRoot 'baseline/publish'
 $tidy = Join-Path $archives 'tidy-5.8.0-win64.zip'
@@ -23,7 +23,7 @@ function File-Uri([string]$path) { return ([Uri][IO.Path]::GetFullPath($path)).A
 
 function Install-Watched([string]$case,[hashtable]$manifest) {
     $root = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path "$root/buckets/test/bucket","$root/temp","$root/programs","$root/.coop/transactions" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$root/buckets/test/bucket","$root/temp","$root/programs","$root/.burrow/transactions" -Force | Out-Null
     $ordered = [ordered]@{}
     foreach ($key in ($manifest.Keys | Sort-Object)) { $ordered[$key] = $manifest[$key] }
     [IO.File]::WriteAllText("$root/buckets/test/bucket/$case.json",
@@ -31,7 +31,7 @@ function Install-Watched([string]$case,[hashtable]$manifest) {
 
     # Every path the install creates under the transaction directory, captured while it runs.
     $seen = [Collections.Concurrent.ConcurrentQueue[string]]::new()
-    $watcher = [IO.FileSystemWatcher]::new("$root/.coop/transactions")
+    $watcher = [IO.FileSystemWatcher]::new("$root/.burrow/transactions")
     $watcher.IncludeSubdirectories = $true
     $watcher.InternalBufferSize = 65536
     $watcher.NotifyFilter = [IO.NotifyFilters]'FileName, DirectoryName'
@@ -40,7 +40,7 @@ function Install-Watched([string]$case,[hashtable]$manifest) {
         $Event.MessageData.Enqueue($Event.SourceEventArgs.FullPath)
     }
     try {
-        $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+        $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
         $start.UseShellExecute = $false
         $start.RedirectStandardOutput = $true
         $start.RedirectStandardError = $true
@@ -50,11 +50,11 @@ function Install-Watched([string]$case,[hashtable]$manifest) {
         foreach ($argument in @('--root',$root,'install',"test/$case",'--json')) { Add-ProcessArgument $start ($argument) }
         $start.EnvironmentVariables['TEMP'] = "$root/temp"
         $start.EnvironmentVariables['TMP'] = "$root/temp"
-        $start.EnvironmentVariables['COOP_PROGRAMS_DIR'] = "$root/programs"
+        $start.EnvironmentVariables['BURROW_PROGRAMS_DIR'] = "$root/programs"
         $process = [Diagnostics.Process]::Start($start)
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'coop timed out' }
+        if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'burrow timed out' }
         $result = [pscustomobject]@{ exit = $process.ExitCode
             output = $stdout.GetAwaiter().GetResult(); error = $stderr.GetAwaiter().GetResult() }
         $process.Dispose()

@@ -59,23 +59,23 @@ Notes       : Scoop persists data since version 0.11.16. ...
 
 ## 进入 `--json` 的字段
 
-`management`、`scope`、`synced_at`、`status`、`last_operation`、`recovery`、`diagnostics`、`older_versions`、`validation` 只保留在 `--json`。文本不再解释"有没有 Coop 私有记录"、"bucket 上次同步时间"或"上次操作"。
+`management`、`scope`、`synced_at`、`status`、`last_operation`、`recovery`、`diagnostics`、`older_versions`、`validation` 只保留在 `--json`。文本不再解释"有没有 Burrow 私有记录"、"bucket 上次同步时间"或"上次操作"。
 
 ## 刻意偏离
 
 每条都要能被推翻或改成对齐，改的时候一并改这里的记录。
 
-1. **空结果退出码 0**：`list` 空表、`search` 无匹配在 Scoop 里退出 1。Coop 保持自己的 CLI 契约（1 = 操作失败），空表不是失败。要改必须同时改 [CLI 路径、退出码与批量边界](cli-boundaries.md)。
+1. **空结果退出码 0**：`list` 空表、`search` 无匹配在 Scoop 里退出 1。Burrow 保持自己的 CLI 契约（1 = 操作失败），空表不是失败。要改必须同时改 [CLI 路径、退出码与批量边界](cli-boundaries.md)。
 2. **`list [query]` 用大小写不敏感子串**，Scoop 用正则 `-match`。
 3. **`Updated` 的时间格式固定为 `YYYY-MM-DD HH:MM:SS`**；Scoop 走宿主区域性格式化，同一台机器上可能显示 `2026/10/28`。
-4. **`search` 匹配包名 + bin 名，查询按正则解释**（与 Scoop 无 sqlite 缓存时一致）。bin 名来自 bucket 索引（索引格式 2 起记录），因此升级后第一次搜索会退化为扫描目录，直到下一次 `bucket update` 重写索引。`search` 的匹配文本不再包含描述：`coop search ripgrep` 现在只列 `rga`（bin 名 `ripgrep-all`）与 `ripgrep`，与 `scoop search ripgrep` 一致。
-5. **`info` 的 `Updated at` / `Updated by` 来自 bucket 的 Git 提交**（`libgit2`，首个改动该清单的提交；遍历上限 20000 个提交）。非 Git 目录不打印这两行，而不是编造一个文件时间。实测 `coop info main/ripgrep` 与 `scoop info ripgrep` **逐行相同**。
+4. **`search` 匹配包名 + bin 名，查询按正则解释**（与 Scoop 无 sqlite 缓存时一致）。bin 名来自 bucket 索引（索引格式 2 起记录），因此升级后第一次搜索会退化为扫描目录，直到下一次 `bucket update` 重写索引。`search` 的匹配文本不再包含描述：`burrow search ripgrep` 现在只列 `rga`（bin 名 `ripgrep-all`）与 `ripgrep`，与 `scoop search ripgrep` 一致。
+5. **`info` 的 `Updated at` / `Updated by` 来自 bucket 的 Git 提交**（`libgit2`，首个改动该清单的提交；遍历上限 20000 个提交）。非 Git 目录不打印这两行，而不是编造一个文件时间。实测 `burrow info main/ripgrep` 与 `scoop info ripgrep` **逐行相同**。
 6. **`info -v` 提供 `Manifest` 与 `Installed size`**；`Installed size` 只给一个总数（当前版本目录 + 持久化目录），Scoop 会分成 current/old/persisted/cached 四行；`Download size` 需要一次网络探测，未实现。
-7. **尾随空行**：Scoop 的读命令表格结尾多一个空行，Coop 不打；`coop help` 例外——它要与 `scoop help` 逐字相同，因此保留表格后的空行。
-8. **`status` 的更新判定是"清单版本 ≠ 已装版本"**，Scoop 用 `Compare-Version` 排序。Coop 的 `update` 本来以"版本不同"为触发条件，`status` 用同一谓词，避免出现 `status` 说最新而 `update` 仍然动作；代价是清单版本回退时也会列为可更新。
-9. **`which` 未找到退出 1**（Scoop 退出 2），消息与 Scoop 相同。理由同偏离 1：2 在 Coop 的契约里是用法错误。
+7. **尾随空行**：Scoop 的读命令表格结尾多一个空行，Burrow 不打；`burrow help` 例外——它要与 `scoop help` 逐字相同，因此保留表格后的空行。
+8. **`status` 的更新判定是"清单版本 ≠ 已装版本"**，Scoop 用 `Compare-Version` 排序。Burrow 的 `update` 本来以"版本不同"为触发条件，`status` 用同一谓词，避免出现 `status` 说最新而 `update` 仍然动作；代价是清单版本回退时也会列为可更新。
+9. **`which` 未找到退出 1**（Scoop 退出 2），消息与 Scoop 相同。理由同偏离 1：2 在 Burrow 的契约里是用法错误。
 10. **`cat` 原样输出存储的清单字节**；Scoop 会 pretty-print，并因此丢失声明顺序。
-11. **`status` 默认检查客户端更新**：按同根 Coop 的安装 bucket 检查，独立分发使用官方最新稳定发布；同一根存在 `apps/scoop/current` 时，通过该 Git 仓库当前分支配置的远端检查 Scoop。只读取远端引用，不 fetch、不改写引用或工作目录、不更新 bucket。裸 `status` 也只读检查未固定修订的 Git bucket。远端检查失败时保留可取得的结果并退出 1。远端提交不在本地 HEAD 的历史中时，提示软件状态可能基于旧清单。`-l`/`--local` 跳过客户端检查；`--json` 保留现有本地包状态数组，不加入客户端结果。
+11. **`status` 默认检查客户端更新**：按同根 Burrow 的安装 bucket 检查，独立分发使用官方最新稳定发布；同一根存在 `apps/scoop/current` 时，通过该 Git 仓库当前分支配置的远端检查 Scoop。只读取远端引用，不 fetch、不改写引用或工作目录、不更新 bucket。裸 `status` 也只读检查未固定修订的 Git bucket。远端检查失败时保留可取得的结果并退出 1。远端提交不在本地 HEAD 的历史中时，提示软件状态可能基于旧清单。`-l`/`--local` 跳过客户端检查；`--json` 保留现有本地包状态数组，不加入客户端结果。
 
 ## 检查类读命令
 
@@ -89,7 +89,7 @@ Name  Installed Version  Latest Version  Missing Dependencies  Info
 demo  1.7.1              1.8.2
 ```
 
-只列异常项（有更新、缺依赖、Install failed、Deprecated、Manifest removed）；本地检查全部正常时打 `Everything is ok!`。裸命令先报告 Coop 与已安装 Scoop 的更新状态；有客户端更新或检查失败时不打印总状态正常。失败显示具名 `WARN`，继续检查本地包，退出码仍为 0。Coop 有更新时给出当前版本、最新版本和官方下载页；Scoop 有更新时提示执行 `scoop update`。缺失或无法检查的远端、分离 HEAD、无效发布响应均不视为最新。`--json` 给同样的本地包字段。
+只列异常项（有更新、缺依赖、Install failed、Deprecated、Manifest removed）；本地检查全部正常时打 `Everything is ok!`。裸命令先报告 Burrow 与已安装 Scoop 的更新状态；有客户端更新或检查失败时不打印总状态正常。失败显示具名 `WARN`，继续检查本地包，退出码仍为 0。Burrow 有更新时给出当前版本、最新版本和官方下载页；Scoop 有更新时提示执行 `scoop update`。缺失或无法检查的远端、分离 HEAD、无效发布响应均不视为最新。`--json` 给同样的本地包字段。
 
 `prefix <包>`：打印 `<根>\apps\<包>\current`（与 Scoop 相同，不解析成版本目录）。
 
@@ -103,16 +103,16 @@ demo  1.7.1              1.8.2
 
 `export`：输出 scoopfile JSON，`buckets` 每项 `Name/Source/Manifests`、`apps` 每项 `Name/Version/Source/Info`，字段名与 `scoop import` 读取的一致。
 
-`checkup`：只检查 Coop 自己的不变量——长路径开关、`main` bucket 是否存在、已注册 bucket 的目录是否存在、pending 事务、shim 指向的目标是否存在。有问题逐条 `WARN`，结尾 `Found N potential problem(s).` 或 `No problems identified!`，退出码始终 0。
+`checkup`：只检查 Burrow 自己的不变量——长路径开关、`main` bucket 是否存在、已注册 bucket 的目录是否存在、pending 事务、shim 指向的目标是否存在。有问题逐条 `WARN`，结尾 `Found N potential problem(s).` 或 `No problems identified!`，退出码始终 0。
 
-`help [命令]`：与 `scoop help` 逐字相同（程序名除外）——`Usage: coop <command> [<args>]`、三行表头、28 行命令表与 Scoop 0.6.0 的摘要。`coop`、`coop --help`、`coop help` 打印同一页，因此不存在两份会漂移的命令清单。`init`、`recover` 是 Coop 独有命令，按 Scoop 的页面口径不进入这一页；它们自己的用法由 `coop help init|recover` 与 `coop init|recover --help` 打印。未实现的命令显式标注 `(not implemented yet)` 并在 `coop help <未实现命令>` 时退出 1。`coop <命令> --help` 打印同一段文本。
+`help [命令]`：与 `scoop help` 逐字相同（程序名除外）——`Usage: burrow <command> [<args>]`、三行表头、28 行命令表与 Scoop 0.6.0 的摘要。`burrow`、`burrow --help`、`burrow help` 打印同一页，因此不存在两份会漂移的命令清单。`init`、`recover` 是 Burrow 独有命令，按 Scoop 的页面口径不进入这一页；它们自己的用法由 `burrow help init|recover` 与 `burrow init|recover --help` 打印。未实现的命令显式标注 `(not implemented yet)` 并在 `burrow help <未实现命令>` 时退出 1。`burrow <命令> --help` 打印同一段文本。
 
 ### 这三条的偏离
 
-12. **`export` 不含 `Updated` 与配置项**：Scoop 会写 `Updated`（bucket 的 git 提交时间或目录时间）并可用 `-c` 导出配置。Coop 先不写这两项，`scoop import` 不读它们。
-13. **`checkup` 的检查项是 Coop 的不变量**，不含 Scoop 的 Defender 排除项、7-Zip/innounp/dark helper、NTFS 卷检查。那些项目要么越过包管理器该做的事，要么与 Coop 的核心不依赖外部 helper 这一事实不符。
-14. **`help` 对未实现命令返回 1**，Scoop 对所有命令都返回 0。Coop 用这个退出码表达"这个命令还不存在"。
-15. **`coop help` 不列出 Coop 独有的 `init`、`recover`**：这一页要与 `scoop help` 逐字一致，Coop 不往里加行；两条命令的用法由 `coop help init|recover` 与 `coop init|recover --help` 提供。
+12. **`export` 不含 `Updated` 与配置项**：Scoop 会写 `Updated`（bucket 的 git 提交时间或目录时间）并可用 `-c` 导出配置。Burrow 先不写这两项，`scoop import` 不读它们。
+13. **`checkup` 的检查项是 Burrow 的不变量**，不含 Scoop 的 Defender 排除项、7-Zip/innounp/dark helper、NTFS 卷检查。那些项目要么越过包管理器该做的事，要么与 Burrow 的核心不依赖外部 helper 这一事实不符。
+14. **`help` 对未实现命令返回 1**，Scoop 对所有命令都返回 0。Burrow 用这个退出码表达"这个命令还不存在"。
+15. **`burrow help` 不列出 Burrow 独有的 `init`、`recover`**：这一页要与 `scoop help` 逐字一致，Burrow 不往里加行；两条命令的用法由 `burrow help init|recover` 与 `burrow init|recover --help` 提供。
 
 
 
@@ -120,11 +120,11 @@ demo  1.7.1              1.8.2
 
 | 项 | 结果 | 位置 |
 | --- | --- | --- |
-| 真实根形状对照 | `coop list` 与 `scoop list` 在 `C:\Users\Neo\scoop` 上逐行相同（16 个包，2026-10-29 本轮运行） | 本机真实根，只读 |
-| `info` 对照 | `coop info main/uv` 与 `scoop info uv` 逐行相同，仅少偏离 5 的两行 | 同上 |
+| 真实根形状对照 | `burrow list` 与 `scoop list` 在 `C:\Users\Neo\scoop` 上逐行相同（16 个包，2026-10-29 本轮运行） | 本机真实根，只读 |
+| `info` 对照 | `burrow info main/uv` 与 `scoop info uv` 逐行相同，仅少偏离 5 的两行 | 同上 |
 | 自动测试 | `tests/query-text.ps1`（CTest `query_text`）；文件头 `# Red when:` 声明形状变化会让它红 | `ctest --test-dir .local/build -R '^query_text$'` |
 | 红绿验证 | 2026-10-29 把 `Installed apps:` 改成 `Installed apps!:` 重构建后测试变红，还原后转绿 | 本轮运行，见提交前日志 |
-| 裸 `search` 耗时 | 1707 份清单 0.28 s（本轮运行；`& .\.local\build\coop.exe search` 由 `Measure-Object -Line` 计时；每条命中都读一次 Manifest 取 bin 名） | 本机真实根 |
+| 裸 `search` 耗时 | 1707 份清单 0.28 s（本轮运行；`& .\.local\build\burrow.exe search` 由 `Measure-Object -Line` 计时；每条命中都读一次 Manifest 取 bin 名） | 本机真实根 |
 
 ## 未覆盖
 

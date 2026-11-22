@@ -1,6 +1,6 @@
 # Scoop 生命周期、状态与初始兼容样本
 
-日期：2026-10-25。任务：[T01 / #3](https://github.com/Coh1e/coop/issues/3)，父规格 [#2](https://github.com/Coh1e/coop/issues/2)。本轮是固定源码调查、全量 JSON 字段统计和样本采集；未运行 Scoop 安装、Hook、用户迁移或 Coop 生命周期。
+日期：2026-10-25。任务：[T01 / #3](https://github.com/Coh1e/burrow/issues/3)，父规格 [#2](https://github.com/Coh1e/burrow/issues/2)。本轮是固定源码调查、全量 JSON 字段统计和样本采集；未运行 Scoop 安装、Hook、用户迁移或 Burrow 生命周期。
 
 ## 版本与输入
 
@@ -61,7 +61,7 @@
 
 [独立卸载](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/libexec/scoop-uninstall.ps1#L46-L151) 读取当前版本与保存的 Manifest：pre_uninstall → 运行进程检查 → uninstaller → 移除 shim 和快捷方式 → unlink current → psmodule 和环境清理 → 解除持久化链接并删除该版本目录 → post_uninstall → 清理旧版本。仅带 purge 才删除 persist 存储。注意 post_uninstall 时具体版本文件可能已删除；预卸载 Hook 在运行进程检测之前，不能将它当无副作用检查。
 
-Coop 既要保持已承诺的语义，又应执行父规格的数据保留与恢复规则；若 Scoop 源码的副作用与 Coop 可控恢复存在冲突，需要在相应实现票中明确，不擅自变更 Hook 路径和顺序。
+Burrow 既要保持已承诺的语义，又应执行父规格的数据保留与恢复规则；若 Scoop 源码的副作用与 Burrow 可控恢复存在冲突，需要在相应实现票中明确，不擅自变更 Hook 路径和顺序。
 
 ## 状态、架构与链接
 
@@ -77,21 +77,21 @@ Coop 既要保持已承诺的语义，又应执行父规格的数据保留与恢
 
 [`shim_def/create_shims`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/install.ps1#L170-L193) 的 bin 项可以指定目标、别名与附加参数。实际 [`shim`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/core.ps1#L949-L1107) 对 EXE/COM 复制小分发程序并写 `.shim` 目标/参数，对 GUI 子系统有处理；BAT/CMD、PS1、JAR 等采用不同转发路径。因此不能把所有 bin 统一实现为复制目标 EXE 或 `.cmd`。
 
-[`env_add_path/env_set`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/install.ps1#L309-L350) 使用声明路径、原安装路径与 persist 等替换，用户/系统范围分开。快捷方式另由 [`shortcuts.ps1`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/shortcuts.ps1#L1-L94) 处理。Coop 必须记录归属及外部修改，不能只在卸载时照字段盲删。
+[`env_add_path/env_set`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/install.ps1#L309-L350) 使用声明路径、原安装路径与 persist 等替换，用户/系统范围分开。快捷方式另由 [`shortcuts.ps1`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/shortcuts.ps1#L1-L94) 处理。Burrow 必须记录归属及外部修改，不能只在卸载时照字段盲删。
 
-[`Get-Dependency`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/depends.ps1#L1-L77) 合并显式 depends 与安装 helper 需求，先递归依赖、检测循环，再放入包本身；来源可 bucket 限定。helper 检测涉及所选架构 URL、pre/installer/post 脚本中的函数调用、配置及 helper 现状。[辅助工具逻辑](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/depends.ps1#L80-L162) 可能加入 7zip、lessmsi、innounp、dark。Coop 使用原生库替代自身 helper 需求，并不意味着可以删除某个包真正声明或脚本真正需要的依赖。
+[`Get-Dependency`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/depends.ps1#L1-L77) 合并显式 depends 与安装 helper 需求，先递归依赖、检测循环，再放入包本身；来源可 bucket 限定。helper 检测涉及所选架构 URL、pre/installer/post 脚本中的函数调用、配置及 helper 现状。[辅助工具逻辑](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/depends.ps1#L80-L162) 可能加入 7zip、lessmsi、innounp、dark。Burrow 使用原生库替代自身 helper 需求，并不意味着可以删除某个包真正声明或脚本真正需要的依赖。
 
 ## 脚本上下文与辅助函数边界
 
 直接可见的上下文来自调用作用域，不是独立的固定 JSON 契约：安装侧 app/manifest/bucket/url、architecture、version、dir、original_dir、persist_dir、global、fname 等；卸载侧另有 cmd 等入口变量，辅助函数可读取其他导入模块状态。[安装作用域](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/install.ps1#L8-L73)、[卸载作用域](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/libexec/scoop-uninstall.ps1#L46-L64)。
 
-样本已显示需要 shim/rm_shim/shimdir、ensure、Get-HelperPath、Invoke-ExternalCommand、Expand-7zipArchive 等函数，也有直接访问 bucketsdir 中配套文件、USERPROFILE、APPDATA、注册表和自定义进程代码。它们必须按真实样本逐项验证，不能声称一个有限 helper 列表证明任意 Hook 兼容。Scoop 的动态执行本身也不保证任意 native exit code 自动变为异常，Coop 需要按已确认规格准确传播失败，并记录可观察的兼容差异。
+样本已显示需要 shim/rm_shim/shimdir、ensure、Get-HelperPath、Invoke-ExternalCommand、Expand-7zipArchive 等函数，也有直接访问 bucketsdir 中配套文件、USERPROFILE、APPDATA、注册表和自定义进程代码。它们必须按真实样本逐项验证，不能声称一个有限 helper 列表证明任意 Hook 兼容。Scoop 的动态执行本身也不保证任意 native exit code 自动变为异常，Burrow 需要按已确认规格准确传播失败，并记录可观察的兼容差异。
 
-## 解压能力矩阵：源码行为与 Coop 待验证能力分开
+## 解压能力矩阵：源码行为与 Burrow 待验证能力分开
 
 [`Invoke-Extraction`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/decompress.ps1#L3-L61) 根据本地文件名选择机制。下载 [`url_filename`](https://github.com/ScoopInstaller/Scoop/blob/e6aa3b366bdee8ed138c1e0f7b85192ebdd35d0f/lib/download.ps1#L691-L715) 允许 fragment 改写本地文件名，例如 EXE 下载命名 dl.7z；统计不能只看 URL 路径后缀。
 
-| 机制 | Scoop 固定版行为 | Coop 当前状态 |
+| 机制 | Scoop 固定版行为 | Burrow 当前状态 |
 | --- | --- | --- |
 | ZIP | 已有7zip时用其提取，否则 PowerShell Archive | 原生库待验证，未运行 |
 | 7z、tar 系列及其他7zip格式 | 调用7zip，压缩tar可能二次提取，extract_dir 有布局处理 | 原生格式覆盖待验证，未运行 |
@@ -136,6 +136,6 @@ Coop 既要保持已承诺的语义，又应执行父规格的数据保留与恢
 
 本轮实际执行：官方归档下载及项目内解压（curl/tar，退出 0）；`tests/corpus/analyze.ps1` 读取全量 JSON 并复制原文（退出 0）；样本 SHA256 与解析/数量检查（见主代理验收结果）。工具运行时为 PowerShell 7.6.5；脚本不执行上游 PowerShell。源码与 Manifest 均有固定修订，样本文件哈希可独立重算。
 
-未运行：任何 Scoop 安装/更新/卸载、真实迁移、软件产物下载/运行、Hook、注册表/用户环境修改、归档库/解压机制构建验证、Coop IR/计划/生命周期测试、性能测试。没有历史运行结果替代本轮证据。
+未运行：任何 Scoop 安装/更新/卸载、真实迁移、软件产物下载/运行、Hook、注册表/用户环境修改、归档库/解压机制构建验证、Burrow IR/计划/生命周期测试、性能测试。没有历史运行结果替代本轮证据。
 
 下一步按任务阻塞关系推进：只读查询与预览使用新旧安装记录和真实字段；首条写路径优先 jq；Git、归档与脚本分别通过各票真实行为验证。具体库和复杂布局的可行性仍是实施门槛，不能从本报告推断已经支持。

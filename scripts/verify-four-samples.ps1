@@ -6,16 +6,16 @@ SourceFile schema and the separately authorized live procedure: docs/four-sample
 #>
 param(
     [Parameter(Mandatory = $true)][string]$SourceFile,
-    [string]$CoopExe,
+    [string]$BurrowExe,
     [string]$EvidenceDir,
     [string]$ScoopRoot,
     [switch]$RunLifecycle
 )
 $ErrorActionPreference = 'Stop'
-if (-not $CoopExe) { $CoopExe = Join-Path $PSScriptRoot '../.local/build/coop.exe' }
+if (-not $BurrowExe) { $BurrowExe = Join-Path $PSScriptRoot '../.local/build/burrow.exe' }
 if (-not $EvidenceDir) { $EvidenceDir = Join-Path $PSScriptRoot '../.local/four-samples' }
 . (Join-Path $PSScriptRoot 'four-sample-evidence.ps1')
-. (Join-Path $PSScriptRoot '../tests/invoke-coop.ps1')
+. (Join-Path $PSScriptRoot '../tests/invoke-burrow.ps1')
 $project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 function ProjectFile([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
@@ -31,7 +31,7 @@ function ProjectFile([string]$Path) {
     return $full
 }
 $SourceFile = ProjectFile $SourceFile
-$CoopExe = ProjectFile $CoopExe
+$BurrowExe = ProjectFile $BurrowExe
 $sources = Get-Content -Encoding UTF8 -LiteralPath $SourceFile -Raw | ConvertFrom-Json
 $byId = @{}
 foreach ($source in @($sources.sources)) {
@@ -70,7 +70,7 @@ if (-not $RunLifecycle) {
 }
 if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Live acceptance requires Windows PowerShell 5.1' }
 if (-not $ScoopRoot) { throw 'Live acceptance requires an explicit ScoopRoot' }
-if ($env:COOP_STATE_DIR) { throw 'Remove the process COOP_STATE_DIR override before live acceptance' }
+if ($env:BURROW_STATE_DIR) { throw 'Remove the process BURROW_STATE_DIR override before live acceptance' }
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot).TrimEnd('\')
 $scoop = (Get-Command scoop.ps1 -ErrorAction Stop).Source
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
@@ -78,14 +78,14 @@ if (-not $EvidenceDir.StartsWith($project + '\', [StringComparison]::OrdinalIgno
 # Unique evidence is never overwritten, including failed attempts.
 $run = Join-Path $EvidenceDir ('run-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Path $run -Force | Out-Null
-$binaryHash = (Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash
+$binaryHash = (Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash
 $commands = New-Object 'System.Collections.Generic.List[object]'
 $results = New-Object 'System.Collections.Generic.List[object]'
 $plan = [ordered]@{
     jq = @('preflight', 'forward', 'reverse', 'cleanup', 'restore')
-    wgcf = @('preflight', 'install', 'reset', 'scoop-uninstall', 'reinstall', 'coop-uninstall', 'restore')
-    pdd = @('preflight', 'missing-host', 'install', 'reset', 'scoop-uninstall', 'reinstall', 'coop-uninstall', 'restore')
-    'posh-git' = @('preflight', 'install', 'reset', 'scoop-uninstall', 'reinstall', 'coop-uninstall', 'restore')
+    wgcf = @('preflight', 'install', 'reset', 'scoop-uninstall', 'reinstall', 'burrow-uninstall', 'restore')
+    pdd = @('preflight', 'missing-host', 'install', 'reset', 'scoop-uninstall', 'reinstall', 'burrow-uninstall', 'restore')
+    'posh-git' = @('preflight', 'install', 'reset', 'scoop-uninstall', 'reinstall', 'burrow-uninstall', 'restore')
 }
 foreach ($name in $plan.Keys) { foreach ($stage in $plan[$name]) {
     $results.Add([pscustomobject]@{ package = $name; scene = $stage; status = 'not-run'; detail = ''; commands = @(); evidence = @() })
@@ -113,9 +113,9 @@ function Scene([string]$Package, [string]$Stage, [scriptblock]$Body) {
     finally { SaveReport; $script:active = $null }
 }
 function Tool([string]$Name, [string]$Exe, [string[]]$Arguments, [switch]$AllowFailure) {
-    if ((Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash -ne $binaryHash) { throw 'Coop binary changed during acceptance' }
+    if ((Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash -ne $binaryHash) { throw 'Burrow binary changed during acceptance' }
     $id = '{0:D3}-{1}' -f $commands.Count, $Name
-    $output = Invoke-CoopNative $Exe @Arguments | Out-String
+    $output = Invoke-BurrowNative $Exe @Arguments | Out-String
     $code = $LASTEXITCODE
     [IO.File]::WriteAllText((Join-Path $run "$id.log"), $output, (New-Object Text.UTF8Encoding($false)))
     $commands.Add([pscustomobject]@{ id = $id; executable = $Exe; arguments = $Arguments; exit = $code; output = "$id.log"; utc = [DateTime]::UtcNow.ToString('o') })
@@ -125,7 +125,7 @@ function Tool([string]$Name, [string]$Exe, [string[]]$Arguments, [switch]$AllowF
     return $output
 }
 function C([string]$Name, [string[]]$Arguments) {
-    $out = Tool $Name $CoopExe (@('--root', $ScoopRoot) + $Arguments)
+    $out = Tool $Name $BurrowExe (@('--root', $ScoopRoot) + $Arguments)
     if ($Arguments -contains '--json' -and $Arguments -notcontains '--dry-run' -and $Arguments[0] -in @('install', 'update', 'uninstall', 'cleanup', 'reset')) {
         $result = $out | ConvertFrom-Json
         if (@($result).Count -eq 0 -or @($result | Where-Object status -ne 'success').Count) { throw "Unexpected execution status for $Name" }
@@ -201,13 +201,13 @@ function Installed([string]$Package, [string]$Version) {
     if ($record.architecture -ne '64bit') { throw 'Unexpected standard installation architecture' }
     $link = Get-Item -LiteralPath (Join-Path $ScoopRoot "apps/$Package/current") -Force
     if ($link.LinkType -ne 'Junction' -or @($link.Target).Count -ne 1 -or [IO.Path]::GetFullPath($link.Target[0]).TrimEnd('\') -ine $dir.TrimEnd('\')) { throw 'Current does not target the expected installed version' }
-    $coopList = C "$Package-coop-view" @('list', '--json') | ConvertFrom-Json
-    $coopView = @($coopList | Where-Object name -eq $Package)
-    if (@($coopView).Count -ne 1 -or $coopView.version -ne $Version) { throw 'Coop view disagrees with standard installation' }
+    $burrowList = C "$Package-burrow-view" @('list', '--json') | ConvertFrom-Json
+    $burrowView = @($burrowList | Where-Object name -eq $Package)
+    if (@($burrowView).Count -ne 1 -or $burrowView.version -ne $Version) { throw 'Burrow view disagrees with standard installation' }
     $code = '$ErrorActionPreference="Stop"; & ' + "'" + $scoop.Replace("'", "''") + "' list '" + $Package + "' 6>" + '$null' + ' | Select-Object Name,Version,Source | ConvertTo-Json'
     $scoopView = @(Tool "$Package-scoop-view" 'powershell.exe' @('-NoProfile', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))) | ConvertFrom-Json)
     if ($scoopView.Count -ne 1 -or $scoopView[0].Name -ne $Package -or $scoopView[0].Version -ne $Version) { throw 'Scoop view disagrees with standard installation' }
-    Write-FourSampleJson (Join-Path $run "$Package-installation-$($commands.Count).json") @{ current = $link.Target; records = $records; source_manifest_sha256 = $byId[$id].manifest_sha256; coop = $coopView; scoop = $scoopView }
+    Write-FourSampleJson (Join-Path $run "$Package-installation-$($commands.Count).json") @{ current = $link.Target; records = $records; source_manifest_sha256 = $byId[$id].manifest_sha256; burrow = $burrowView; scoop = $scoopView }
 }
 function FunctionProbe([string]$Package) {
     switch ($Package) {
@@ -302,7 +302,7 @@ try {
         C 'jq-cleanup' @('cleanup', 'jq', '--json') | Out-Null
         if (Test-Path -LiteralPath (Join-Path $ScoopRoot "apps/jq/$($byId['jq-old'].version)")) { throw 'jq cleanup retained old version' }
         Installed 'jq' $byId['jq'].version
-        C 'jq-coop-uninstall' @('uninstall', 'jq', '--json') | Out-Null
+        C 'jq-burrow-uninstall' @('uninstall', 'jq', '--json') | Out-Null
     }
     Scene 'jq' 'restore' {
         $before = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $run 'jq-baseline.json') -Raw | ConvertFrom-Json
@@ -337,7 +337,7 @@ try {
             if ($name -eq 'wgcf') {
                 $script:config = Join-Path $ScoopRoot 'persist/wgcf/wgcf-account.toml'
                 if ((Get-Item -LiteralPath $config).Length -ne 0) { throw 'Unexpected wgcf configuration; left untouched' }
-                [IO.File]::WriteAllText($config, '# Coop verification: no account credentials', [Text.Encoding]::ASCII)
+                [IO.File]::WriteAllText($config, '# Burrow verification: no account credentials', [Text.Encoding]::ASCII)
                 $script:configHash = (Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash
             }
             $script:moduleEnvironment = [Environment]::GetEnvironmentVariable('PSModulePath', 'User')
@@ -364,12 +364,12 @@ try {
             if ($name -eq 'wgcf' -and -not (Test-FourSampleHash $config $configHash)) { throw 'Reinstall changed test configuration' }
             Snapshot "$name-reinstalled" $name | Out-Null
         }
-        Scene $name 'coop-uninstall' {
+        Scene $name 'burrow-uninstall' {
             Installed $name $byId[$name].version
             if ($name -eq 'posh-git') { FunctionProbe $name }
-            C "$name-coop-uninstall" @('uninstall', $name, '--json') | Out-Null
-            if ($name -eq 'wgcf' -and -not (Test-FourSampleHash $config $configHash)) { throw 'Coop uninstall changed test configuration' }
-            Snapshot "$name-coop-uninstalled" $name | Out-Null
+            C "$name-burrow-uninstall" @('uninstall', $name, '--json') | Out-Null
+            if ($name -eq 'wgcf' -and -not (Test-FourSampleHash $config $configHash)) { throw 'Burrow uninstall changed test configuration' }
+            Snapshot "$name-burrow-uninstalled" $name | Out-Null
         }
         Scene $name 'restore' {
             if ($name -eq 'wgcf') {

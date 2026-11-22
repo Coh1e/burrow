@@ -1,9 +1,9 @@
 # Red when: `create` stops guessing the version from the URL or stops printing a manifest skeleton,
 # `virustotal` stops refusing to run without an API key, or stops reporting the engine counts it read
 # from the service response.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -29,35 +29,35 @@ New-Item -ItemType Directory -Path "$root/buckets/main/bucket", "$root/vt" -Forc
     Set-Content "$root/vt/$hash.json" -Encoding utf8
 
 $previousConfigHome = $env:XDG_CONFIG_HOME
-$previousApi = $env:COOP_VIRUSTOTAL_API
+$previousApi = $env:BURROW_VIRUSTOTAL_API
 try {
     $env:XDG_CONFIG_HOME = Join-Path $root 'xdg'
-    $env:COOP_VIRUSTOTAL_API = 'file:///' + (($root -replace '\\', '/') + '/vt')
+    $env:BURROW_VIRUSTOTAL_API = 'file:///' + (($root -replace '\\', '/') + '/vt')
 
     # create: a manifest skeleton on stdout, version guessed from the file name.
-    $lines = @(& $CoopExe create 'https://example.com/tool-1.2.3-win64.zip')
+    $lines = @(& $BurrowExe create 'https://example.com/tool-1.2.3-win64.zip')
     if ($LASTEXITCODE -cne 0) { throw "create failed: $($lines -join ' | ')" }
     $manifest = ($lines -join "`n") | ConvertFrom-Json
     if ($manifest.version -cne '1.2.3') { throw "create guessed version '$($manifest.version)'" }
     if ($manifest.url -cne 'https://example.com/tool-1.2.3-win64.zip') { throw 'create lost the URL' }
     if ($manifest.hash -cne '') { throw 'create invented a hash' }
-    Invoke-CoopNative $CoopExe  create | Out-Null
+    Invoke-BurrowNative $BurrowExe  create | Out-Null
     if ($LASTEXITCODE -cne 2) { throw "create without a URL exited $LASTEXITCODE" }
-    Invoke-CoopNative $CoopExe  create 'not-a-url' | Out-Null
+    Invoke-BurrowNative $BurrowExe  create 'not-a-url' | Out-Null
     if ($LASTEXITCODE -cne 1) { throw "create with a bad URL exited $LASTEXITCODE" }
 
     # virustotal: refuses to run without a key, then reports the counts from the service.
-    $refusal = Invoke-CoopNative $CoopExe  --root $root virustotal demo
+    $refusal = Invoke-BurrowNative $BurrowExe  --root $root virustotal demo
     if ($LASTEXITCODE -cne 1 -or ($refusal -join '|') -cnotmatch 'API key is not configured') {
         throw "an unconfigured lookup said '$($refusal -join ' | ')'"
     }
-    & $CoopExe config virustotal_api_key test-key | Out-Null
+    & $BurrowExe config virustotal_api_key test-key | Out-Null
     if ($LASTEXITCODE -cne 0) { throw 'config refused the VirusTotal key' }
-    $lines = @(& $CoopExe --root $root virustotal demo)
+    $lines = @(& $BurrowExe --root $root virustotal demo)
     if ($LASTEXITCODE -cne 0 -or ($lines -join '|') -cnotmatch 'demo: 2 malicious, 1 suspicious out of 65 engines') {
         throw "the lookup said '$($lines -join ' | ')'"
     }
-    $lines = @(& $CoopExe --root $root virustotal demo -p)
+    $lines = @(& $BurrowExe --root $root virustotal demo -p)
     $report = ($lines -join "`n") | ConvertFrom-Json
     if ($report[0].engines -cne 65 -or $report[0].malicious -cne 2) { throw 'passthru did not carry the counts' }
 
@@ -65,20 +65,20 @@ try {
     @'
 { "version": "1.0", "url": "https://example.com/plain.exe", "hash": "md5:00000000000000000000000000000000" }
 '@ | Set-Content "$root/buckets/main/bucket/plain.json" -Encoding utf8 -NoNewline
-    $refusal = Invoke-CoopNative $CoopExe  --root $root virustotal plain
+    $refusal = Invoke-BurrowNative $BurrowExe  --root $root virustotal plain
     if ($LASTEXITCODE -cne 1 -or ($refusal -join '|') -cnotmatch 'no SHA256 digest') { throw "a hashless package said '$($refusal -join ' | ')'" }
 
     # The key may come from the environment for a one-off run, without writing it to the shared config.
     $env:XDG_CONFIG_HOME = Join-Path $root 'xdg-env'
-    $env:COOP_VIRUSTOTAL_KEY = 'environment-key'
-    $lines = @(& $CoopExe --root $root virustotal demo)
+    $env:BURROW_VIRUSTOTAL_KEY = 'environment-key'
+    $lines = @(& $BurrowExe --root $root virustotal demo)
     if ($LASTEXITCODE -cne 0 -or ($lines -join '|') -cnotmatch 'out of 65 engines') {
         throw "an environment key said '$($lines -join ' | ')'"
     }
 } finally {
     if ($null -eq $previousConfigHome) { Remove-Item Env:\XDG_CONFIG_HOME -ErrorAction SilentlyContinue }
     else { $env:XDG_CONFIG_HOME = $previousConfigHome }
-    if ($null -eq $previousApi) { Remove-Item Env:\COOP_VIRUSTOTAL_API -ErrorAction SilentlyContinue }
-    else { $env:COOP_VIRUSTOTAL_API = $previousApi }
+    if ($null -eq $previousApi) { Remove-Item Env:\BURROW_VIRUSTOTAL_API -ErrorAction SilentlyContinue }
+    else { $env:BURROW_VIRUSTOTAL_API = $previousApi }
 }
 Write-Output 'PASS: create manifest skeleton and virustotal report parsing'

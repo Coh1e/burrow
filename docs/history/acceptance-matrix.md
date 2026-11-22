@@ -3,7 +3,7 @@
 > **状态（2026-10-30）**：本页是历史验收快照，命令面、版本与测试数量已继续推进；当前状态与证据入口见 [README](../../README.md)。
 >
 
-2026-10-28 建立。用于**复核**写命令的输出与行为：Scoop 与 Coop 的逐行对照、缓存自愈与离线复用、六类命令的可复现证据。每条结论都绑定命令、退出码与证据位置，并标明是**本轮运行**、**历史结果**还是**未运行**。
+2026-10-28 建立。用于**复核**写命令的输出与行为：Scoop 与 Burrow 的逐行对照、缓存自愈与离线复用、六类命令的可复现证据。每条结论都绑定命令、退出码与证据位置，并标明是**本轮运行**、**历史结果**还是**未运行**。
 
 转录由 `scripts/acceptance-matrix.ps1` 生成，写入 `.local/acceptance/`（被忽略，不随仓库分发）；本文摘录关键行，读者按命令可自行重跑。
 
@@ -13,7 +13,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| Coop | `coop 0.1.0` |
+| Burrow | `burrow 0.1.0` |
 | 机器 | `HOMELANDER / Microsoft Windows NT 10.0.26300.0` |
 | 夹具 | `tidy-5.8.0-win64.zip`，1 370 807 字节 |
 | 夹具 SHA256 | `ffb2f86484c66e70e6a6da369cb8f0f459ad2ffec7c7ca80d09a13445ee51a40` |
@@ -21,9 +21,9 @@
 
 ## 与 Scoop 的逐行对照
 
-Scoop 侧的原文来自 [Scoop 0.6.0 写命令输出实录](../research/scoop-cli-output.md)（历史结果，取自交互终端）；本轮另用 `scripts/scoop-baseline.ps1` 复采了一次，`*>&1` 能拿到 `Write-Host` 的进度行（`Downloading`、`Checking hash`、`Extracting` 都在），产物在 `.local/scoop-baseline/transcript.txt`，所以该列可由脚本重建。Coop 侧为本轮运行。
+Scoop 侧的原文来自 [Scoop 0.6.0 写命令输出实录](../research/scoop-cli-output.md)（历史结果，取自交互终端）；本轮另用 `scripts/scoop-baseline.ps1` 复采了一次，`*>&1` 能拿到 `Write-Host` 的进度行（`Downloading`、`Checking hash`、`Extracting` 都在），产物在 `.local/scoop-baseline/transcript.txt`，所以该列可由脚本重建。Burrow 侧为本轮运行。
 
-| 行 | Scoop（历史） | Coop（本轮） | 对齐 |
+| 行 | Scoop（历史） | Burrow（本轮） | 对齐 |
 | --- | --- | --- | --- |
 | 安装开始 | `Installing 'ripgrep' (15.2.0) [64bit] from 'main' bucket` | 同形（无结尾句点） | 逐字 |
 | 下载 | `Downloading <url> (<大小>)...` | 同形：本地传输前测量，`http(s)` 用响应头的 `Content-Length` | 逐字 |
@@ -42,9 +42,9 @@ Scoop 侧的原文来自 [Scoop 0.6.0 写命令输出实录](../research/scoop-c
 | 缓存命中 | `Loading <文件名> from cache` | 同形（无句点） | 逐字 |
 | 重复安装 | `WARN  '<包>' (<版本>) is already installed.` + `Use 'scoop update <包>' …` | 同形，退出码 0 | 逐字 |
 
-**Coop 自有步骤**（Scoop 没有，用同句式自述）：`<包>: up-to-date`（无变更的更新）、`<包>: partial`（清理不完整）、`Persistent data retained…`（卸载保留数据）、`recover` 的逐动作行。`--timings` 的摘要只在显式请求时出现。
+**Burrow 自有步骤**（Scoop 没有，用同句式自述）：`<包>: up-to-date`（无变更的更新）、`<包>: partial`（清理不完整）、`Persistent data retained…`（卸载保留数据）、`recover` 的逐动作行。`--timings` 的摘要只在显式请求时出现。
 
-**刻意偏离**：更新时 Coop 先校验并解压新载荷，再卸载旧版本，所以 `Checking hash` / `Extracting` 出现在 `Uninstalling` 之前。按 Scoop 的顺序（下载 → 卸载 → 从缓存安装），解压失败会把可用版本一起弄没；Coop 的失败用例断言 `current` 仍指向旧版本（`tests/update-lines.ps1`）。
+**刻意偏离**：更新时 Burrow 先校验并解压新载荷，再卸载旧版本，所以 `Checking hash` / `Extracting` 出现在 `Uninstalling` 之前。按 Scoop 的顺序（下载 → 卸载 → 从缓存安装），解压失败会把可用版本一起弄没；Burrow 的失败用例断言 `current` 仍指向旧版本（`tests/update-lines.ps1`）。
 
 ## 耗时对照
 
@@ -63,15 +63,15 @@ Scoop 侧的原文来自 [Scoop 0.6.0 写命令输出实录](../research/scoop-c
 
 ```powershell
 # 1. 填缓存
-coop --root <根> install test/<包> --json
-coop --root <根> uninstall test/<包> --json
+burrow --root <根> install test/<包> --json
+burrow --root <根> uninstall test/<包> --json
 
 # 2. 破坏缓存文件的首字节
 $cached = "<根>/cache/tidy-5.8.0-win64.zip"
 $bytes = [IO.File]::ReadAllBytes($cached); $bytes[0] = 0x00; [IO.File]::WriteAllBytes($cached,$bytes)
 
 # 3. 再装：应重新下载，而不是加载损坏的缓存
-coop --root <根> install test/<包>
+burrow --root <根> install test/<包>
 # 证据行：Downloading file:///...      （本轮 12-cache-corrupt-install，退出码 0）
 
 # 4. 离线复用：把清单的 URL 改成不可达主机，文件名保持不变
@@ -99,7 +99,7 @@ coop --root <根> install test/<包>
 
 | 类别 | 内容 |
 | --- | --- |
-| **本轮运行** | 上表九个场景的 Coop 输出与退出码；缓存损坏重下；离线复用；冷装与缓存命中的计时 |
+| **本轮运行** | 上表九个场景的 Burrow 输出与退出码；缓存损坏重下；离线复用；冷装与缓存命中的计时 |
 | **历史结果** | Scoop 侧的交互原文（Scoop 0.6.0 实录，取自终端）。`scripts/scoop-baseline.ps1` 本轮运行过一次，产物在 `.local/scoop-baseline/transcript.txt`：用 `*>&1` 捕获后，`Downloading`、`Checking hash`、`Extracting` 与彩色转义都在，所以该列可由脚本在本机重建；实录里的 `update` 在本夹具上以退出码 1 结束（清单换了版本号但 URL 未变），脚本把这一步的期望退出码显式写成 1 并记录；旧耗时表不再引用 |
 | **未运行** | 真实网络下的下载进度条（非终端不显示，源码层面已确定）；`http(s)` 下载行在响应**没有** `Content-Length` 时的形状（无括号、无 `...`，本轮只覆盖有 `Content-Length` 的回环服务） |
 
@@ -108,7 +108,7 @@ coop --root <根> install test/<包>
 ```powershell
 ./scripts/fetch-deps.ps1 -Action fetch   # 首次：拉取锁定的夹具与测试归档
 ./scripts/build.ps1 -Action build
-pwsh -File scripts/acceptance-matrix.ps1 -CoopExe .local/build/coop.exe
+pwsh -File scripts/acceptance-matrix.ps1 -BurrowExe .local/build/burrow.exe
 ```
 
 脚本每次从空根开始，重建 bucket 与缓存，输出 `.local/acceptance/` 下的转录与 `summary.json`。同一台机器上重跑，除计时数字外应逐字节一致。
@@ -121,9 +121,9 @@ pwsh -File scripts/acceptance-matrix.ps1 -CoopExe .local/build/coop.exe
 
 | 客户端 | 各次本地开销（s） | 中位数 |
 | --- | --- | --- |
-| Coop | 0.132 / 0.061 / 0.060 / 0.057 / 0.054 | **0.060 s** |
+| Burrow | 0.132 / 0.061 / 0.060 / 0.057 / 0.054 | **0.060 s** |
 | Scoop | 38.734 / 5.978 / 0.290 / 0.270 / 0.254 | **0.290 s** |
 
-比值 **0.21**（阈值 1.2，脚本在超过阈值时以非零退出）。两侧首跑各带一次性开销（Scoop 首次近 39 s、Coop 0.53 s），中位数把它们摊掉。
+比值 **0.21**（阈值 1.2，脚本在超过阈值时以非零退出）。两侧首跑各带一次性开销（Scoop 首次近 39 s、Burrow 0.53 s），中位数把它们摊掉。
 
-注意：这只说明"这个小夹具上 Coop 的本地开销不高于 Scoop"，不构成对所有包型的结论；大型包、安装器格式与脚本 Hook 各有自己的路径。
+注意：这只说明"这个小夹具上 Burrow 的本地开销不高于 Scoop"，不构成对所有包型的结论；大型包、安装器格式与脚本 Hook 各有自己的路径。

@@ -9,7 +9,7 @@
 // Dependency planning is part of the IR planner: it consumes normalized dependency identity and
 // installed facts, and returns separate package plans in topological order. It does not read Scoop
 // JSON, interpret source text again or execute anything.
-namespace coop::ir {
+namespace burrow::ir {
 namespace {
 std::string lower(std::string value) {
     for (auto& character : value)

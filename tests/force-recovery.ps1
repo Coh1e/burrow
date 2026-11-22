@@ -1,8 +1,8 @@
 # Red when: a forced reinstall stops being resumable after an injected failure at the version publish,
 # or the fault file starts working without the engineering token.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -24,38 +24,38 @@ New-Item -ItemType Directory -Path "$root/buckets/probe/bucket" -Force | Out-Nul
   "bin": [ [ "rg.exe", "rgforced" ] ]
 }
 "@ | Set-Content "$root/buckets/probe/bucket/vers.json" -Encoding utf8 -NoNewline
-& $CoopExe --root $root install probe/vers | Out-Null
+& $BurrowExe --root $root install probe/vers | Out-Null
 if ($LASTEXITCODE -cne 0) { throw 'the fixture package did not install' }
 
 # A fault file only has an effect when the engineering token is present in the environment.
-'{ "fail": ["after-version-publish"] }' | Set-Content "$root/.coop/test-faults.json" -Encoding utf8
-$ungated = Invoke-CoopNative $CoopExe  --root $root update probe/vers -f
+'{ "fail": ["after-version-publish"] }' | Set-Content "$root/.burrow/test-faults.json" -Encoding utf8
+$ungated = Invoke-BurrowNative $BurrowExe  --root $root update probe/vers -f
 if ($LASTEXITCODE -cne 0) { throw "a fault file worked without the token: $($ungated -join ' | ')" }
 
-$previousToken = $env:COOP_ALLOW_TEST_FAULTS
+$previousToken = $env:BURROW_ALLOW_TEST_FAULTS
 try {
-    $env:COOP_ALLOW_TEST_FAULTS = '1'
-    $failed = Invoke-CoopNative $CoopExe  --root $root update probe/vers -f
+    $env:BURROW_ALLOW_TEST_FAULTS = '1'
+    $failed = Invoke-BurrowNative $BurrowExe  --root $root update probe/vers -f
     if ($LASTEXITCODE -ceq 0) { throw 'the injected failure did not fail the command' }
     if (($failed -join "`n") -cnotmatch 'Injected test fault') { throw "the failure was not the injected one: $($failed -join ' | ')" }
 
     # The replaced version directory is restored, so the package keeps working without a repair step.
-    $listed = @(& $CoopExe --root $root list)
+    $listed = @(& $BurrowExe --root $root list)
     if (($listed -join "`n") -cnotmatch 'vers\s+1\.0') { throw "the package is gone after the failure: $($listed -join ' | ')" }
     if (-not (Test-Path "$root/apps/vers/1.0")) { throw 'the version directory was not restored' }
     if (-not (Test-Path "$root/apps/vers/current")) { throw 'the current link was not restored' }
     if (-not (Test-Path "$root/shims/rgforced.exe")) { throw 'the command entry was not restored' }
-    $recover = @(& $CoopExe --root $root recover)
+    $recover = @(& $BurrowExe --root $root recover)
     if ($LASTEXITCODE -cne 0 -or ($recover -join "`n") -cnotmatch 'No pending transactions') {
         throw "recover reported a pending transaction: $($recover -join ' | ')"
     }
 
     # With the fault file gone the same forced reinstall completes.
-    Remove-Item -LiteralPath "$root/.coop/test-faults.json" -Force
-    $healed = Invoke-CoopNative $CoopExe  --root $root update probe/vers -f
+    Remove-Item -LiteralPath "$root/.burrow/test-faults.json" -Force
+    $healed = Invoke-BurrowNative $BurrowExe  --root $root update probe/vers -f
     if ($LASTEXITCODE -cne 0) { throw "the forced reinstall did not recover: $($healed -join ' | ')" }
 } finally {
-    if ($null -eq $previousToken) { Remove-Item Env:\COOP_ALLOW_TEST_FAULTS -ErrorAction SilentlyContinue }
-    else { $env:COOP_ALLOW_TEST_FAULTS = $previousToken }
+    if ($null -eq $previousToken) { Remove-Item Env:\BURROW_ALLOW_TEST_FAULTS -ErrorAction SilentlyContinue }
+    else { $env:BURROW_ALLOW_TEST_FAULTS = $previousToken }
 }
 Write-Output 'PASS: a failed forced reinstall restores the version and leaves no pending transaction'

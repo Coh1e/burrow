@@ -1,7 +1,7 @@
 #pragma once
 #include <string_view>
 
-namespace coop {
+namespace burrow {
 enum class VersionOrder { lower, equal, higher, unknown };
 // The target's order relative to the installed version. Unsupported distinct spellings are unknown.
 VersionOrder compare_update_versions(std::string_view installed, std::string_view target);

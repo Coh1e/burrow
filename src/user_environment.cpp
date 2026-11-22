@@ -8,10 +8,10 @@
 #include <vector>
 
 // The current user's environment is the actual interface used by a new terminal, Explorer and
-// shortcuts. Coop therefore changes HKCU\Environment instead of only injecting variables into a
+// shortcuts. Burrow therefore changes HKCU\Environment instead of only injecting variables into a
 // launcher child, and it keeps the raw value/kind it replaced so a later update or uninstall can
 // distinguish its own write from a value the user changed afterwards.
-namespace coop {
+namespace burrow {
 namespace {
 constexpr wchar_t environment_key_name[] = L"Environment";
 constexpr wchar_t environment_broadcast[] = L"Environment";
@@ -223,7 +223,7 @@ Json result_object(Json ownership, Json undo, Json writes, Json preserved, bool 
         {"ownership",std::move(ownership)},{"undo",std::move(undo)},{"writes",std::move(writes)},
         {"preserved",std::move(preserved)},{"broadcast",broadcast(changed)}};
 }
-// Revert one owned PATH value. If the user changed PATH since Coop wrote it, only the entries Coop
+// Revert one owned PATH value. If the user changed PATH since Burrow wrote it, only the entries Burrow
 // actually added are removed; every other entry and its order is left alone.
 void revert_path(const Json& prior, Json& writes, Json& undo, Json& preserved, bool& changed) {
     if (!prior.is_object() || !prior.contains("applied")) return;
@@ -232,7 +232,7 @@ void revert_path(const Json& prior, Json& writes, Json& undo, Json& preserved, b
     const auto current = read_value("Path");
     const auto previous = prior.contains("previous") ? raw_from_json(prior.at("previous"),"Path") : RawValue{};
     if (same_value(current,applied)) {
-        maybe_write("Path",current,previous,writes,undo,changed,"restore the user PATH value recorded before Coop");
+        maybe_write("Path",current,previous,writes,undo,changed,"restore the user PATH value recorded before Burrow");
         return;
     }
     auto entries = split_path(current.value);
@@ -242,9 +242,9 @@ void revert_path(const Json& prior, Json& writes, Json& undo, Json& preserved, b
     const auto remaining = join_path(entries);
     RawValue updated = current;
     updated.value = remaining;
-    maybe_write("Path",current,updated,writes,undo,changed,"remove only the PATH entries Coop added; user changes are preserved");
+    maybe_write("Path",current,updated,writes,undo,changed,"remove only the PATH entries Burrow added; user changes are preserved");
     add_preserved(preserved,"Path",applied,current,
-        "PATH differs from the value Coop wrote; user entries and their order are preserved");
+        "PATH differs from the value Burrow wrote; user entries and their order are preserved");
 }
 void revert_variables(const Json& prior, Json& writes, Json& undo, Json& preserved, bool& changed) {
     if (!prior.is_object() || !prior.contains("variables") || !prior.at("variables").is_array()) return;
@@ -257,10 +257,10 @@ void revert_variables(const Json& prior, Json& writes, Json& undo, Json& preserv
         const auto current = read_value(name);
         if (same_value(current,applied)) {
             maybe_write(name,current,previous,writes,undo,changed,
-                "restore the user environment value recorded before Coop wrote it");
+                "restore the user environment value recorded before Burrow wrote it");
         } else {
             add_preserved(preserved,name,applied,current,
-                "the user changed this value after Coop wrote it; the newer value is kept");
+                "the user changed this value after Burrow wrote it; the newer value is kept");
         }
     }
 }
@@ -283,7 +283,7 @@ Json ownership_from_declarations(const Json& environment, const Json& path_entri
         const auto name = setting.at("name").get<std::string>();
         const auto current = read_value(name);
         const auto declared = desired_value(current,setting.at("value").get<std::string>());
-        // The pre-install value is unknown without a Coop record, so there is nothing to restore;
+        // The pre-install value is unknown without a Burrow record, so there is nothing to restore;
         // a later removal deletes the value only while it still equals this declaration.
         ownership["variables"].push_back({{"name",name},{"previous",raw_json(RawValue{})},
             {"applied",raw_json(declared)}});
@@ -332,12 +332,12 @@ Json apply_user_environment(const Json& environment, const Json& path_entries, c
             if (!same_value(current,prior_applied)) {
                 ownership["variables"].push_back(*prior);
                 add_preserved(preserved,name,prior_applied,current,
-                    "the user changed this value after Coop wrote it; the newer value is kept");
+                    "the user changed this value after Burrow wrote it; the newer value is kept");
                 continue;
             }
             const auto desired = desired_value(current,desired_text);
             maybe_write(name,current,desired,writes,undo,changed,
-                "replace the value this package previously wrote; the pre-Coop value is retained");
+                "replace the value this package previously wrote; the pre-Burrow value is retained");
             Json entry = {{"name",name},
                 {"previous",prior->contains("previous") ? prior->at("previous") : raw_json(current)},
                 {"applied",raw_json(desired)}};
@@ -364,7 +364,7 @@ Json apply_user_environment(const Json& environment, const Json& path_entries, c
                 "revert a declaration the updated package no longer owns");
         } else {
             add_preserved(preserved,name,applied,current,
-                "the user changed this value after Coop wrote it; the newer value is kept");
+                "the user changed this value after Burrow wrote it; the newer value is kept");
         }
     }
     const auto desired = desired_paths(path_entries);
@@ -380,7 +380,7 @@ Json apply_user_environment(const Json& environment, const Json& path_entries, c
         RawValue previous_raw = current_path;
         if (prior_path.is_null()) {
             // Fresh install: match Scoop by removing duplicates of the declared entries and
-            // prepending them, while retaining the complete pre-Coop value for restoration.
+            // prepending them, while retaining the complete pre-Burrow value for restoration.
             base_entries = split_path(current_path.value);
             for (const auto& entry : desired)
                 if (!contains_path(base_entries,entry)) added.push_back(entry);
@@ -394,7 +394,7 @@ Json apply_user_environment(const Json& environment, const Json& path_entries, c
                     if (!contains_path(base_entries,entry)) added.push_back(entry);
                 for (const auto& entry : desired) erase_path(base_entries,entry);
             } else {
-                // The user changed PATH after Coop wrote it. Remove only entries Coop itself
+                // The user changed PATH after Burrow wrote it. Remove only entries Burrow itself
                 // added from the value a later uninstall restores, keep every user entry and its
                 // order, then prepend declared entries that are missing.
                 base_entries = split_path(current_path.value);
@@ -411,7 +411,7 @@ Json apply_user_environment(const Json& environment, const Json& path_entries, c
                     added.push_back(entry);
                 }
                 add_preserved(preserved,"Path",applied,current_path,
-                    "PATH differs from the value Coop wrote; user entries and their order are preserved");
+                    "PATH differs from the value Burrow wrote; user entries and their order are preserved");
             }
         }
         std::vector<std::string> updated_entries = prepend_entries;
@@ -524,8 +524,8 @@ Json add_user_path_entry(const std::string& variable, const std::string& entry, 
         Json ownership = owned_before ? prior_ownership : Json{{"scope","HKCU\\Environment"},{"variable",variable},
             {"entry",entry},{"previous",raw_json(current)},{"applied",raw_json(current)},{"added",Json::array()}};
         if (contains_path(entries,entry)) {
-            // The entry is already on the value. Only an earlier Coop record makes it Coop-owned;
-            // otherwise the user, another client or an older Coop operation owns it.
+            // The entry is already on the value. Only an earlier Burrow record makes it Burrow-owned;
+            // otherwise the user, another client or an older Burrow operation owns it.
             ownership["applied"] = raw_json(current);
             return {{"scope","HKCU\\Environment"},{"mechanism","current-user path-list entry"},
                 {"status","already-present"},{"ownership",std::move(ownership)},
@@ -576,8 +576,8 @@ Json revert_user_path_entry(const Json& prior) {
         Json result = {{"scope","HKCU\\Environment"},{"mechanism","current-user path-list entry"},
             {"variable",variable},{"entry",entry},{"added",added},
             {"undo",Json::array()},{"writes",Json::array()},{"preserved",Json::array()}};
-        // Only an entry Coop itself added belongs to Coop. A shared install by Scoop, or a value
-        // that already contained the entry, leaves no Coop ownership and is kept.
+        // Only an entry Burrow itself added belongs to Burrow. A shared install by Scoop, or a value
+        // that already contained the entry, leaves no Burrow ownership and is kept.
         if (added.empty()) {
             result["status"] = "not-owned";
             result["broadcast"] = broadcast(false);
@@ -588,7 +588,7 @@ Json revert_user_path_entry(const Json& prior) {
         const auto previous = prior.contains("previous") ? raw_from_json(prior.at("previous"),variable) : RawValue{};
         if (same_value(current,applied)) {
             maybe_write(variable,current,previous,writes,undo,changed,
-                "restore the value recorded before Coop added the path entry");
+                "restore the value recorded before Burrow added the path entry");
         } else {
             auto entries = split_path(current.value);
             for (const auto& item : added)
@@ -598,10 +598,10 @@ Json revert_user_path_entry(const Json& prior) {
             updated.value = join_path(entries);
             updated.type = value_type(current,updated.value);
             maybe_write(variable,current,updated,writes,undo,changed,
-                "remove only the path entries Coop added; user changes and other entries are preserved");
+                "remove only the path entries Burrow added; user changes and other entries are preserved");
             if (current.present)
                 add_preserved(preserved,variable,applied,current,
-                    "the value differs from the value Coop wrote; user changes and other entries are kept");
+                    "the value differs from the value Burrow wrote; user changes and other entries are kept");
         }
         result["status"] = changed ? "reverted" : "unchanged";
         result["undo"] = std::move(undo);

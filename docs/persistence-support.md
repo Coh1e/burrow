@@ -19,13 +19,13 @@
 
 因此首个可执行样本采用无脚本、单 EXE 的测试 Manifest，同时声明一个目录映射和一个文件映射；真实样本继续作为语义与查询对照，不宣称其生命周期已通过。
 
-## 2. 已实现的 Coop 行为
+## 2. 已实现的 Burrow 行为
 
 存储位置固定为 `<root>/persist/<package>/<target>`。`source` 与 `target` 必须是无盘符、无 `..` 的包相对路径；重复 source/target 会被诊断为无效 Manifest。
 
 ### 共享安装验证
 
-- 只验证、不搬动数据：版本目录中已存在的 junction/hardlink 必须指向声明的 store，目标类型和内容保持原样。该验证对 Scoop 创建的安装与 Coop 创建的安装完全相同，不要求私有记录或接管步骤。
+- 只验证、不搬动数据：版本目录中已存在的 junction/hardlink 必须指向声明的 store，目标类型和内容保持原样。该验证对 Scoop 创建的安装与 Burrow 创建的安装完全相同，不要求私有记录或接管步骤。
 - junction 比较实际 reparse target；hardlink 比较文件卷序列号与文件索引。链接缺失、指向别处、变成普通目录/文件或 store 目标缺失时拒绝更新/卸载，并给出不一致证据。
 - 当前 Manifest 与本地更新 Manifest 的 persist 映射必须一致；变化时更新被明确拒绝，避免把未验证的数据迁移写成可管理。
 - 管理记录（存在时）保存已验证的 source、target、链接、store、类型和归属证据；`--purge` 的范围同样来自安装自身声明与已核对链接，不以私有记录为前提。
@@ -42,12 +42,12 @@
 
 - 卸载前重新验证每个声明链接的归属；任何链接被替换、重定向或文件身份变化都会在任何删除前失败。
 - 卸载把版本目录移入事务并解除链接，只删除链接本身，不跟随到 store 目标；`persist` 存储、未声明的同包目录和其他用户数据保持不变。
-- 当前版本目录、入口和管理记录被移除；旧版本目录按现有 `docs/archive-support.md` 约定保留，显式清理由 `coop cleanup` 负责。
-- 卸载成功后把仍存在的旧版本写入 `.coop/retained/<package>.json`，使清理在包已卸载后仍有本机归属证据；没有证据的目录不会被清理。
+- 当前版本目录、入口和管理记录被移除；旧版本目录按现有 `docs/archive-support.md` 约定保留，显式清理由 `burrow cleanup` 负责。
+- 卸载成功后把仍存在的旧版本写入 `.burrow/retained/<package>.json`，使清理在包已卸载后仍有本机归属证据；没有证据的目录不会被清理。
 
 ### 彻底删除
 
-- `coop uninstall <package> --purge` 是独立选项；不发 `--purge` 时行为不变。
+- `burrow uninstall <package> --purge` 是独立选项；不发 `--purge` 时行为不变。
 - 预览（`--dry-run`）和计划输出列出 `purge.scope`：每个声明映射的 source、target、store、链接、类型和当前文件身份；不扩展到整个 `persist/<package>` 目录。
 - 实际删除前重新验证管理记录中的归属、链接仍指向相同 store、store 仍是普通文件/目录且不是 reparse point，并比较写入计划时的文件身份；任一变化都在删除程序和持久化数据前失败。
 - 删除只针对声明 store：目录递归删除时遇到 junction/reparse point 只解除链接，不跟随到范围外内容；文件 hardlink 只删除 store 中的链接。未声明的同包目录和其他用户数据保留。
@@ -55,16 +55,16 @@
 
 ### 旧版本清理
 
-- `coop cleanup [package...] [--dry-run]` 只处理管理记录或卸载保留证据中登记、Manifest 与安装记录摘要未变、不是当前版本且没有 pending 事务依赖的本地版本目录。
+- `burrow cleanup [package...] [--dry-run]` 只处理管理记录或卸载保留证据中登记、Manifest 与安装记录摘要未变、不是当前版本且没有 pending 事务依赖的本地版本目录。
 - 未记录的目录、缺失历史 Manifest、Manifest/安装记录被修改、版本目录本身是 reparse point 或正在使用的版本全部保留并报告 `unmanageable`/`in-use`/`recovery-protected`；不猜测缺失 Manifest 或下载 URL。
 - 清理先把候选目录移动到清理事务，再删除；移动失败不删除任何内容。中断的清理事务在下一次清理时先恢复，仍被占用的目录放回原位。当前版本永不进入候选。
-- Scoop 会对持久化目录 junction 设置链接级只读属性（`attrib +R /L`），归档内的文件也可能是只读。清理和解链前先清除该属性，再只解除链接；否则 Scoop 创建、Coop 保留的旧版本目录会被误判为占用（R09 真机复现并修复，回归见 `tests/cleanup.ps1` 与 `tests/persist.ps1`）。
+- Scoop 会对持久化目录 junction 设置链接级只读属性（`attrib +R /L`），归档内的文件也可能是只读。清理和解链前先清除该属性，再只解除链接；否则 Scoop 创建、Burrow 保留的旧版本目录会被误判为占用（R09 真机复现并修复，回归见 `tests/cleanup.ps1` 与 `tests/persist.ps1`）。
 
 ### 冲突与恢复
 
 - store 路径中的 reparse point、版本目录中已有的真实 source 冲突、链接创建/权限失败都明确失败，不静默覆盖。
 - 更新或卸载的写阶段失败沿用事务日志恢复已移动的当前版本、入口和记录；失败后 store 数据保持不变，新版本 staging 链接被删除。
-- 中断后的 pending 事务仍阻止后续写入；`coop recover` 按日志分类并还原 Coop 自有路径，不重跑脚本。通用安装/发布阶段恢复由 `tests/recovery.ps1` 与 `tests/lifecycle-interrupt.ps1` 验证，本票的 persist 路径额外验证写阶段失败回滚。
+- 中断后的 pending 事务仍阻止后续写入；`burrow recover` 按日志分类并还原 Burrow 自有路径，不重跑脚本。通用安装/发布阶段恢复由 `tests/recovery.ps1` 与 `tests/lifecycle-interrupt.ps1` 验证，本票的 persist 路径额外验证写阶段失败回滚。
 
 ## 3. 验证结果
 
@@ -72,7 +72,7 @@
 
 | 场景 | 观察结果 |
 | --- | --- |
-| 共享安装验证 | 原始目录 junction 与文件 hardlink、程序输出、store 内容和未声明目录均不变；预览不写 `.coop`，也不要求私有记录 |
+| 共享安装验证 | 原始目录 junction 与文件 hardlink、程序输出、store 内容和未声明目录均不变；预览不写 `.burrow`，也不要求私有记录 |
 | 共享更新 | 程序与链接保持原声明关系；更新发布新版本并从共享事实核对两条归属；不复制/移动数据 |
 | 更新前读取 | 修改 store 后，旧版本程序实际读到新内容 |
 | 写阶段失败 | 锁定管理记录使发布失败；旧程序、入口、链接和 store 内容保持；新版本目录不存在 |
@@ -95,25 +95,25 @@
 
 ## 真机验证（R09 / #30）
 
-`tests/real-scoop-persistence.ps1` 在人类选定的真实共用根（`C:\Users\Neo\scoop`）上顺序执行，只安装运行前不存在的包，结束后核对安装清单与本轮前一致并删除本轮创建的测试 store 与临时 bucket；既有 `persist/frp`、`persist/spotbugs`、`persist/uv` 数据不被改写。本轮实测 Windows 11 工作站、Scoop v0.6.0、main `a97619fec75f0c74bd74e73b0e9138df08687a50`、PowerShell 7.6.5；代码提交见本轮报告与 `versions-final-head.txt`，`coop.exe` 摘要见证据 JSON。
+`tests/real-scoop-persistence.ps1` 在人类选定的真实共用根（`C:\Users\Neo\scoop`）上顺序执行，只安装运行前不存在的包，结束后核对安装清单与本轮前一致并删除本轮创建的测试 store 与临时 bucket；既有 `persist/frp`、`persist/spotbugs`、`persist/uv` 数据不被改写。本轮实测 Windows 11 工作站、Scoop v0.6.0、main `a97619fec75f0c74bd74e73b0e9138df08687a50`、PowerShell 7.6.5；代码提交见本轮报告与 `versions-final-head.txt`，`burrow.exe` 摘要见证据 JSON。
 
 | 场景 | 真实观察 |
 | --- | --- |
-| 既有目录链接（只读） | 真实 `7zip` 26.05 的 `Codecs`、`Formats` junction 在 `coop list --json` 与本轮升级后的 `update --dry-run` 中报告为既有 store、`data_retained=true`，实际 junction 目标逐项一致；读取前后 store 内容与安装清单不变，未写 `.coop/packages/7zip.json`。R09 当时使用旧 `adopt --dry-run` 读取同一证据，该命令已由 R22 移除；同一验证现在由共享 update 预览与卸载使用 |
-| 文件映射：Scoop → Coop 更新 | `scoop install mediamtx@1.21.2` 为文件映射创建 hardlink；测试值写入 store 后，真实 `mediamtx.exe` 通过版本目录链接读到 `coop-r09-store` 并以其为监听地址失败。Coop 更新到 1.21.3 的计划与执行步骤逐项一致，新版本 `mediamtx.yml` 与 store 是同一文件，store 哈希与文件标识不变，`retained_versions=[1.21.2]`、`data_rollback=none`；旧版本仍读同一 store |
-| 文件映射：Scoop 继续使用 | `scoop reset mediamtx` 后真实 shim 运行 1.21.3，Coop 仍识别同一安装；`coop uninstall` 返回 `data_retained=true`，旧版本目录保留且链接仍指向 store；`coop cleanup` 删除旧版本目录后 store 不变；Scoop 重装 1.21.2 后新 hardlink 仍指向同一 store 并读到同一测试值 |
-| 目录映射：Scoop → Coop 更新 | `scoop install pocketbase@0.40.5` 创建 `pb_data`、`pb_migrations` junction；store 中的迁移文件被真实程序应用并写入 store 内的 `data.db`。Coop 更新到 0.40.6 后两个 junction 仍指向同一 store，迁移文件与 `data.db` 的文件标识不变，新版本运行 `migrate up` 报告 `No new migrations to apply.`，旧版本目录保留 |
-| 目录映射：卸载、清理与重装 | `scoop reset pocketbase` 后 shim 运行 0.40.6；`coop uninstall` 保留两个 store 与 `data.db`；`coop cleanup` 删除保留的 0.40.5 目录时不跟随 junction，store 数据仍在；Scoop 重装 0.40.5 后连接同一 `pb_data` 并报告无新迁移 |
+| 既有目录链接（只读） | 真实 `7zip` 26.05 的 `Codecs`、`Formats` junction 在 `burrow list --json` 与本轮升级后的 `update --dry-run` 中报告为既有 store、`data_retained=true`，实际 junction 目标逐项一致；读取前后 store 内容与安装清单不变，未写 `.burrow/packages/7zip.json`。R09 当时使用旧 `adopt --dry-run` 读取同一证据，该命令已由 R22 移除；同一验证现在由共享 update 预览与卸载使用 |
+| 文件映射：Scoop → Burrow 更新 | `scoop install mediamtx@1.21.2` 为文件映射创建 hardlink；测试值写入 store 后，真实 `mediamtx.exe` 通过版本目录链接读到 `burrow-r09-store` 并以其为监听地址失败。Burrow 更新到 1.21.3 的计划与执行步骤逐项一致，新版本 `mediamtx.yml` 与 store 是同一文件，store 哈希与文件标识不变，`retained_versions=[1.21.2]`、`data_rollback=none`；旧版本仍读同一 store |
+| 文件映射：Scoop 继续使用 | `scoop reset mediamtx` 后真实 shim 运行 1.21.3，Burrow 仍识别同一安装；`burrow uninstall` 返回 `data_retained=true`，旧版本目录保留且链接仍指向 store；`burrow cleanup` 删除旧版本目录后 store 不变；Scoop 重装 1.21.2 后新 hardlink 仍指向同一 store 并读到同一测试值 |
+| 目录映射：Scoop → Burrow 更新 | `scoop install pocketbase@0.40.5` 创建 `pb_data`、`pb_migrations` junction；store 中的迁移文件被真实程序应用并写入 store 内的 `data.db`。Burrow 更新到 0.40.6 后两个 junction 仍指向同一 store，迁移文件与 `data.db` 的文件标识不变，新版本运行 `migrate up` 报告 `No new migrations to apply.`，旧版本目录保留 |
+| 目录映射：卸载、清理与重装 | `scoop reset pocketbase` 后 shim 运行 0.40.6；`burrow uninstall` 保留两个 store 与 `data.db`；`burrow cleanup` 删除保留的 0.40.5 目录时不跟随 junction，store 数据仍在；Scoop 重装 0.40.5 后连接同一 `pb_data` 并报告无新迁移 |
 | 准备失败保护 | 临时 bucket 包使用项目内 mediamtx 归档：先安装 1.21.2 并把测试值写入 store，再以损坏归档预览/执行更新。更新以 `Unrecognized archive format` 失败，退出非零；当前版本、入口、hardlink 与 store 内容不变，真实程序仍读到同一测试值；journal 为 `rolled-back` 且 `observed_steps=[download,verify,extract]`；随后普通卸载仍 `data_retained=true` |
-| 回滚范围 | 成功更新单独报告 `retained_versions` 与 `data_rollback=none`；准备失败只回滚 Coop 已移动/创建的程序、入口和 staging，store 内容不被回滚也不被删除。保留旧程序不等于数据回到旧状态，数据恢复没有自动承诺 |
+| 回滚范围 | 成功更新单独报告 `retained_versions` 与 `data_rollback=none`；准备失败只回滚 Burrow 已移动/创建的程序、入口和 staging，store 内容不被回滚也不被删除。保留旧程序不等于数据回到旧状态，数据恢复没有自动承诺 |
 
-本轮修复了一个真机问题：Scoop 用 `attrib +R /L` 把持久化 junction 标记为链接级只读，`coop cleanup` 删除保留的 Scoop 旧版本目录时只调 `RemoveDirectoryW`，因此报告 `Cannot unlink managed junction` 并把目录当作 in-use。现在 `src/data.cpp` 的统一 `erase_tree` 在解除链接前清除只读属性，`execute`、`cleanup` 与归档 staging 共用同一实现；回归在 `tests/cleanup.ps1`（旧版本 junction）和 `tests/persist.ps1`（卸载当前版本链接）中，红/绿记录见 `.local/pi/tasks/30/evidence/`。
+本轮修复了一个真机问题：Scoop 用 `attrib +R /L` 把持久化 junction 标记为链接级只读，`burrow cleanup` 删除保留的 Scoop 旧版本目录时只调 `RemoveDirectoryW`，因此报告 `Cannot unlink managed junction` 并把目录当作 in-use。现在 `src/data.cpp` 的统一 `erase_tree` 在解除链接前清除只读属性，`execute`、`cleanup` 与归档 staging 共用同一实现；回归在 `tests/cleanup.ps1`（旧版本 junction）和 `tests/persist.ps1`（卸载当前版本链接）中，红/绿记录见 `.local/pi/tasks/30/evidence/`。
 
 本轮运行的完整命令、退出码、计划、journal 与场景 JSON 保存在 `.local/pi/tasks/30/evidence/real-persistence-final/`（最终 head 运行）；中间修复运行不作为证据。
 
 未在真机运行或未承诺：
 
 - 文件映射样本使用 `mediamtx`；`frp` 的 `frps.exe` 在本机被 Defender 判定为 `PUA:Win32/FRProxy` 隔离，因此没有改用该包，也没有修改杀毒设置。既有的 `persist/frp` 数据仍作为历史保留证据只读核对，未被搬动。
-- 测试创建的 store 是空的（本轮首次安装），因此“复用既有 store”的完整分支在真机由 Scoop/Coop 交替共享同一 store 证明；更早卸载遗留的 `frp`/`spotbugs`/`uv` store 没有被重新挂载，也没有被修改。
+- 测试创建的 store 是空的（本轮首次安装），因此“复用既有 store”的完整分支在真机由 Scoop/Burrow 交替共享同一 store 证明；更早卸载遗留的 `frp`/`spotbugs`/`uv` store 没有被重新挂载，也没有被修改。
 - 脚本、快捷方式、环境变量、MSI/7z 安装器与持久化映射的真实组合；权限拒绝、跨卷 hardlink、ReFS 128 位文件 ID、ACL 继承、全局安装以及并发写同一 store 的竞态仍未运行。#33 后 MSI + persist 的安装/更新/卸载组合已在项目内真实 MSI 产物上覆盖（`tests/msi-lifecycle.ps1`）。
 - 数据迁移（persist 映射变化）仍明确拒绝而不是自动迁移；其失败回滚范围不在本页承诺内。

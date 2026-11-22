@@ -10,7 +10,7 @@
 #include <set>
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 void check(int result, const char* operation) {
     if (result < 0) {
@@ -330,7 +330,7 @@ void fetch_branch(git_remote* remote, const BucketSource& source, Transfer& tran
     fetch_refspec(remote,refspec,transfer,"Fetch shared bucket revision");
 }
 void fetch_pinned(git_remote* remote, const std::string& revision, Transfer& transfer) {
-    fetch_refspec(remote,"+"+revision+":refs/coop/pinned",transfer,"Fetch fixed source revision");
+    fetch_refspec(remote,"+"+revision+":refs/burrow/pinned",transfer,"Fetch fixed source revision");
 }
 git_oid head_oid(git_repository* repository) {
     const auto head = own(head_reference(repository),git_reference_free);

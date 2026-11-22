@@ -1,8 +1,8 @@
 # Red when: update previews or rejected arguments refresh a bucket, migrate legacy state,
 # write a run/transaction record, or silently discard options in bare/wildcard dispatch.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) {
@@ -71,7 +71,7 @@ $cases += @(
     @{name='literal-root-value'; args=@('--root=--dry-run','--root','{root}','--dry-run'); code=1},
     @{name='installed-preview-before-run-record'; args=@('demo','--dry-run'); code=0; installed=$true; stateFile=$true; noLegacy=$true}
 )
-$savedState = $env:COOP_STATE_DIR
+$savedState = $env:BURROW_STATE_DIR
 $failures = @()
 try {
     foreach ($case in $cases) {
@@ -81,8 +81,8 @@ try {
         New-Item -ItemType Directory -Force -Path $root | Out-Null
         if ($case.stateFile) { 'state-path-is-a-file' | Set-Content $state -Encoding ascii }
         if (-not $case.noLegacy) {
-            New-Item -ItemType Directory -Force -Path "$root/.coop" | Out-Null
-            'legacy-state-must-stay' | Set-Content "$root/.coop/sentinel" -Encoding ascii
+            New-Item -ItemType Directory -Force -Path "$root/.burrow" | Out-Null
+            'legacy-state-must-stay' | Set-Content "$root/.burrow/sentinel" -Encoding ascii
         }
         if (-not $case.noBucket -and -not $case.installed) {
             New-Item -ItemType Directory -Force -Path "$root/buckets" | Out-Null
@@ -99,12 +99,12 @@ try {
             '{"bucket":"main","architecture":"64bit"}' | Set-Content "$root/apps/demo/1.7.1/scoop-install.json" -Encoding ascii
             New-Item -ItemType Junction -Path "$root/apps/demo/current" -Target "$root/apps/demo/1.7.1" | Out-Null
         }
-        $env:COOP_STATE_DIR = $state
+        $env:BURROW_STATE_DIR = $state
         $beforeRoot = Snapshot $root
         $beforeState = Snapshot $state
         $caseArguments = @($case.args | ForEach-Object { if ($_ -ceq '{root}') { $root } else { $_ } })
         $invocation = @('--root',$root,'update') + $caseArguments
-        $result = Invoke-CoopNativeRaw -Exe $CoopExe -Arguments $invocation
+        $result = Invoke-BurrowNativeRaw -Exe $BurrowExe -Arguments $invocation
         $afterRoot = Snapshot $root
         $afterState = Snapshot $state
         $changed = $beforeRoot -cne $afterRoot -or $beforeState -cne $afterState
@@ -116,6 +116,6 @@ try {
             Write-Output ('FAIL ' + $message)
         } else { Write-Output ('PASS ' + $case.name) }
     }
-} finally { $env:COOP_STATE_DIR = $savedState }
+} finally { $env:BURROW_STATE_DIR = $savedState }
 if ($failures.Count) { throw "$($failures.Count) unsafe update cases; evidence: $session" }
 Write-Output 'PASS update preview/argument safety with unchanged shared Git, installation and external state'

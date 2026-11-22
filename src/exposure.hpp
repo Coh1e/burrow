@@ -3,7 +3,7 @@
 #include "data.hpp"
 #include <optional>
 
-namespace coop {
+namespace burrow {
 // Command entries are forwarded according to the target file type, matching the fixed
 // Scoop shim behavior: EXE/COM run directly, BAT/CMD through cmd.exe, PS1 through
 // PowerShell, JAR through the Java runtime, PY through Python and every other target
@@ -18,7 +18,7 @@ std::optional<fs::path> command_host_path(LauncherKind kind);
 std::string command_host_problem(LauncherKind kind);
 // The exact file contents Scoop's shim() writes for each script branch. The .cmd/.ps1 files use
 // CRLF and the shell wrapper uses LF with no trailing newline, like Out-UTF8File in Scoop.
-// Coop always publishes these Scoop views beside its own launcher for BAT/CMD, PS1 and JAR targets,
+// Burrow always publishes these Scoop views beside its own launcher for BAT/CMD, PS1 and JAR targets,
 // because Scoop's shortcut declarations can target them (for example mqtt-spy points a shortcut at
 // shims/mqtt-spy.cmd) and because an alias declared for two shim families must keep both families
 // on disk exactly like Scoop.
@@ -36,7 +36,7 @@ bool is_gui_executable(const fs::path& path);
 void mark_launcher_gui(const fs::path& launcher);
 
 // Shortcuts live in the user's Start Menu "Scoop Apps" folder. An isolated directory can
-// be selected with COOP_PROGRAMS_DIR for tests; the default user folder is used otherwise.
+// be selected with BURROW_PROGRAMS_DIR for tests; the default user folder is used otherwise.
 fs::path shortcut_directory(const Context& context);
 fs::path shortcut_link_path(const Context& context, const std::string& name);
 struct ShortcutIdentity { fs::path target; std::string arguments; fs::path icon; };

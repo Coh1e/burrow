@@ -1,16 +1,16 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-$coopDirectory = Split-Path $CoopExe
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+$burrowDirectory = Split-Path $BurrowExe
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
-$fixture1 = Join-Path $coopDirectory 'fixture-1.exe'
-$fixture2 = Join-Path $coopDirectory 'fixture-2.exe'
-$guard = Join-Path $coopDirectory 'process_guard.exe'
+$fixture1 = Join-Path $burrowDirectory 'fixture-1.exe'
+$fixture2 = Join-Path $burrowDirectory 'fixture-2.exe'
+$guard = Join-Path $burrowDirectory 'process_guard.exe'
 $nodeArchive = Join-Path $archives 'node-v26.12.1-win-x64.7z'
 $pwshPath = (Get-Process -Id $PID).Path
 foreach ($path in @($fixture1,$fixture2,$guard,$nodeArchive,$pwshPath)) {
@@ -56,7 +56,7 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     foreach ($argument in $arguments) { Add-ProcessArgument $start ($argument) }
     $start.EnvironmentVariables['TEMP'] = "$root/temp"
     $start.EnvironmentVariables['TMP'] = "$root/temp"
-    $start.EnvironmentVariables['COOP_PROGRAMS_DIR'] = "$root/programs"
+    $start.EnvironmentVariables['BURROW_PROGRAMS_DIR'] = "$root/programs"
     foreach ($key in $environment.Keys) { $start.EnvironmentVariables[$key] = $environment[$key] }
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
@@ -68,17 +68,17 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ("$root/run-{0:d2}-{1}.json" -f $script:runs,$label) -Encoding utf8
     return $result
 }
-function Invoke-Coop([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $CoopExe $arguments $environment
+function Invoke-Burrow([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
+    return Invoke-Process $label $BurrowExe $arguments $environment
 }
 function Invoke-Guard([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $guard (@($CoopExe)+$arguments) $environment
+    return Invoke-Process $label $guard (@($BurrowExe)+$arguments) $environment
 }
 function Parse-Json([string]$label,$result) {
     try { return $result.output | ConvertFrom-Json } catch { throw "$label did not print JSON: $($result.output)" }
 }
 function Last-Journal([string]$package) {
-    $journals = @(Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
+    $journals = @(Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } |
         Where-Object { $_.package -eq $package })
@@ -122,13 +122,13 @@ $nodePlan = Parse-Json 'node-preview' $nodePreview
 Check ($nodePlan.execution_available -eq $true) '7z archive path stayed disabled'
 Check ($nodePlan.artifacts[0].archive -eq '7z') '7z preview did not report the 7z artifact'
 Check (@($nodePlan.external_tools).Count -eq 0) 'native 7z extraction falsely requires an external tool'
-$nodeInstall = Invoke-Guard 'node-install' @('--root',$root,'install','main/nodepkg','--json') @{COOP_PROCESS_GUARD_TIMEOUT_MS='120000'}
+$nodeInstall = Invoke-Guard 'node-install' @('--root',$root,'install','main/nodepkg','--json') @{BURROW_PROCESS_GUARD_TIMEOUT_MS='120000'}
 Check ($nodeInstall.exit -eq 0) "7z install failed: $($nodeInstall.error)"
 Check ($nodeInstall.error -match 'Observed workload processes: 1') '7z install started an external decompressor or PowerShell'
 $nodeVersion = ((& "$root/shims/node.exe" --version) -join "`n")
 Check ($LASTEXITCODE -eq 0 -and $nodeVersion.Trim() -eq 'v26.12.1') "7z archive entry ran wrong program: $nodeVersion"
 Check (Test-Path -LiteralPath "$root/apps/nodepkg/current/node.exe") '7z archive layout is wrong'
-$nodeUninstall = Invoke-Coop 'node-uninstall' @('--root',$root,'uninstall','nodepkg','--json')
+$nodeUninstall = Invoke-Burrow 'node-uninstall' @('--root',$root,'uninstall','nodepkg','--json')
 Check ($nodeUninstall.exit -eq 0) "7z uninstall failed: $($nodeUninstall.error)"
 
 # --- 2. installer.script runs in Scoop order with the documented context. ---
@@ -141,7 +141,7 @@ $preInstallScript = @('Set-Content -Path "$dir\pre.txt" -Value "pre" -Encoding A
 $postInstallScript = @('Copy-Item "$dir\installer-context.txt" "$dir\post-seen.txt"')
 Write-Manifest 'main' 'installerscript' @{version='1';url=(File-Uri $installerZip);hash=(File-Hash $installerZip);bin='app.exe';
     pre_install=$preInstallScript;installer=@{script=$installerScript};post_install=$postInstallScript}
-$installerPreview = Invoke-Coop 'installer-preview' @('--root',$root,'install','main/installerscript','--dry-run','--json')
+$installerPreview = Invoke-Burrow 'installer-preview' @('--root',$root,'install','main/installerscript','--dry-run','--json')
 Check ($installerPreview.exit -eq 0) "installer script preview failed: $($installerPreview.error)"
 $installerPlan = Parse-Json 'installer-preview' $installerPreview
 Check ($installerPlan.execution_available -eq $true) 'installer script path stayed disabled'
@@ -152,7 +152,7 @@ Check ($installerPlan.package.script_support.library_version -match 'v0\.6\.0') 
 $order = Operations-After $installerPlan 'publish-current' @()
 Check ($order.positions['pre_install'] -lt $order.positions['installer'] -and $order.positions['installer'] -lt $order.publish -and
     $order.publish -lt $order.positions['post_install']) 'installer script did not stay between pre_install and current publication'
-$installerInstall = Invoke-Coop 'installer-install' @('--root',$root,'install','main/installerscript','--json')
+$installerInstall = Invoke-Burrow 'installer-install' @('--root',$root,'install','main/installerscript','--json')
 Check ($installerInstall.exit -eq 0) "installer script install failed: $($installerInstall.error)"
 $installerResult = Parse-Json 'installer-install' $installerInstall
 Check ((@($installerResult.scripts | ForEach-Object { $_.phase }) -join ',') -eq 'pre_install,installer,post_install') 'installer script lifecycle order is wrong'
@@ -169,7 +169,7 @@ Check ((@($installerJournal.scripts | ForEach-Object { $_.phase }) -join ',') -e
 $installerUpdateZip = New-PayloadZip 'installerscript2' @{'app.exe'=[IO.File]::ReadAllBytes($fixture2);'payload/inner2.txt'='inner2'}
 Write-Manifest 'main' 'installerscript' @{version='2';url=(File-Uri $installerUpdateZip);hash=(File-Hash $installerUpdateZip);bin='app.exe';
     pre_install=$preInstallScript;installer=@{script=$installerScript};post_install=$postInstallScript}
-$installerUpdate = Invoke-Coop 'installer-update' @('--root',$root,'update','installerscript','--json')
+$installerUpdate = Invoke-Burrow 'installer-update' @('--root',$root,'update','installerscript','--json')
 Check ($installerUpdate.exit -eq 0) "installer script update failed: $($installerUpdate.error)"
 $installerUpdateResult = Parse-Json 'installer-update' $installerUpdate
 Check ((@($installerUpdateResult.scripts | ForEach-Object { $_.phase }) -join ',') -eq 'pre_install,installer,post_install') 'installer script update order is wrong'
@@ -185,7 +185,7 @@ $failingInstaller = @(
 )
 Write-Manifest 'main' 'installerfail' @{version='1';url=(File-Uri $installerFailureZip);hash=(File-Hash $installerFailureZip);bin='installerfail.exe';
     installer=@{script=$failingInstaller}}
-$installerFailure = Invoke-Coop 'installer-failure' @('--root',$root,'install','main/installerfail','--json')
+$installerFailure = Invoke-Burrow 'installer-failure' @('--root',$root,'install','main/installerfail','--json')
 Check ($installerFailure.exit -ne 0) 'failing installer script was reported as success'
 Check ($installerFailure.error -match 'installer hook failed with exit code 1') "installer failure was not propagated: $($installerFailure.error)"
 $installerFailureJournal = Last-Journal 'installerfail'
@@ -211,10 +211,10 @@ $rclonePlan = Parse-Json 'rclone-preview' $rclonePreview
 $rcloneReport = @($rclonePlan.package.scripts | Where-Object { $_.phase -eq 'uninstaller' })
 Check ($rclonePlan.execution_available -eq $true -and $rcloneReport.Count -eq 1 -and
     $rcloneReport[0].host -match 'PowerShell' -and $rcloneReport[0].text -match 'LinkType') 'real rclone uninstaller script was not accepted'
-$rcloneInstall = Invoke-Coop 'rclone-install' @('--root',$root,'install','main/rclonepkg','--json')
+$rcloneInstall = Invoke-Burrow 'rclone-install' @('--root',$root,'install','main/rclonepkg','--json')
 Check ($rcloneInstall.exit -eq 0) "rclone package install failed: $($rcloneInstall.error)"
 Check (Test-Path -LiteralPath "$root/persist/rclonepkg/data/config.txt") 'rclone persist directory was not created'
-$rcloneUninstall = Invoke-Coop 'rclone-uninstall' @('--root',$root,'uninstall','rclonepkg','--json')
+$rcloneUninstall = Invoke-Burrow 'rclone-uninstall' @('--root',$root,'uninstall','rclonepkg','--json')
 Check ($rcloneUninstall.exit -eq 0) "rclone uninstall failed: $($rcloneUninstall.error)"
 $rcloneResult = Parse-Json 'rclone-uninstall' $rcloneUninstall
 Check ((@($rcloneResult.scripts | ForEach-Object { $_.phase }) -join ',') -eq 'pre_uninstall,uninstaller') 'uninstaller script lifecycle order is wrong'
@@ -224,7 +224,7 @@ Check ($rcloneRun.command -eq 'uninstall' -and $rcloneRun.exit_code -eq 0 -and
 Check ((Get-Content -LiteralPath "$root/persist/rclonepkg/rclone.conf" -Raw).Trim() -eq 'rclone config') 'real rclone uninstaller script did not use Get-Item/LinkType and copy the config'
 Check ((Get-Content -LiteralPath "$root/persist/rclonepkg/data/config.txt" -Raw).Trim() -eq 'persisted data') 'uninstaller removed declared persistent data'
 Check (-not (Test-Path -LiteralPath "$root/apps/rclonepkg/current") -and -not (Test-Path -LiteralPath "$root/apps/rclonepkg/1") -and
-    -not (Test-Path -LiteralPath "$root/shims/rclone.exe") -and -not (Test-Path -LiteralPath "$root/.coop/packages/rclonepkg.json")) 'rclone uninstall left package state'
+    -not (Test-Path -LiteralPath "$root/shims/rclone.exe") -and -not (Test-Path -LiteralPath "$root/.burrow/packages/rclonepkg.json")) 'rclone uninstall left package state'
 $rcloneJournal = Last-Journal 'rclonepkg'
 Check ((@($rcloneJournal.scripts | ForEach-Object { $_.phase }) -join ',') -eq 'pre_uninstall,uninstaller' -and
     $rcloneJournal.scripts[1].status -eq 'succeeded') 'rclone uninstall journal is inaccurate'
@@ -233,9 +233,9 @@ $uninstallFailureZip = New-PayloadZip 'uninstallfail' @{'uninstallfail.exe'=[IO.
 $failingUninstaller = @('Copy-Item "$dir\absent.txt" "$dir\copied.txt"')
 Write-Manifest 'main' 'uninstallfail' @{version='1';url=(File-Uri $uninstallFailureZip);hash=(File-Hash $uninstallFailureZip);bin='uninstallfail.exe';
     uninstaller=@{script=$failingUninstaller}}
-$uninstallFailureInstall = Invoke-Coop 'uninstall-failure-install' @('--root',$root,'install','main/uninstallfail','--json')
+$uninstallFailureInstall = Invoke-Burrow 'uninstall-failure-install' @('--root',$root,'install','main/uninstallfail','--json')
 Check ($uninstallFailureInstall.exit -eq 0) "uninstaller failure fixture install failed: $($uninstallFailureInstall.error)"
-$uninstallFailure = Invoke-Coop 'uninstall-failure' @('--root',$root,'uninstall','uninstallfail','--json')
+$uninstallFailure = Invoke-Burrow 'uninstall-failure' @('--root',$root,'uninstall','uninstallfail','--json')
 Check ($uninstallFailure.exit -ne 0) 'failing uninstaller script was reported as success'
 Check ($uninstallFailure.error -match 'uninstaller hook failed with exit code 1') "uninstaller failure was not propagated: $($uninstallFailure.error)"
 $uninstallFailureJournal = Last-Journal 'uninstallfail'
@@ -243,7 +243,7 @@ Check ($uninstallFailureJournal.state -eq 'rolled-back' -and @($uninstallFailure
     $uninstallFailureJournal.scripts[0].phase -eq 'uninstaller' -and $uninstallFailureJournal.scripts[0].status -eq 'failed' -and
     $uninstallFailureJournal.scripts[0].exit_code -eq 1) 'uninstaller failure journal is inaccurate'
 Check ((Test-Path -LiteralPath "$root/apps/uninstallfail/current") -and (Test-Path -LiteralPath "$root/shims/uninstallfail.exe") -and
-    (Test-Path -LiteralPath "$root/.coop/packages/uninstallfail.json")) 'uninstaller failure removed the installed package'
+    (Test-Path -LiteralPath "$root/.burrow/packages/uninstallfail.json")) 'uninstaller failure removed the installed package'
 
 # --- 4. Real samples: remaining execution gaps are installer mechanisms. -----
 Copy-Item -LiteralPath "$PSScriptRoot/corpus/main/7zip.json" "$root/buckets/main/bucket/7zip.json"
@@ -290,7 +290,7 @@ Check ($rcloneJournal.scripts[1].stdout_log.StartsWith($root)) 'script evidence 
     root=$root
     checks=$script:checks
     runs=$script:runs
-    coop_sha256=(File-Hash $CoopExe)
+    burrow_sha256=(File-Hash $BurrowExe)
     powershell=$pwshPath
     sevenzip_artifact=@{path=$nodeArchive;sha256=$nodeHash}
     windows_installer_cache=@{

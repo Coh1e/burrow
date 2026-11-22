@@ -1,6 +1,6 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
@@ -9,15 +9,15 @@ if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::Or
 $session = Join-Path $TestRoot ([guid]::NewGuid().ToString('N'))
 $tag = [guid]::NewGuid().ToString('N').Substring(0,8)
 $root = Join-Path $session 'root'
-$package = 'coop-r25-'+$tag
+$package = 'burrow-r25-'+$tag
 $moduleName = 'mod-'+$tag
-$combinedPackage = 'coop-r25-combined-'+$tag
-$plainPackage = 'coop-r25-plain-'+$tag
+$combinedPackage = 'burrow-r25-combined-'+$tag
+$plainPackage = 'burrow-r25-plain-'+$tag
 $modulesDirectory = Join-Path $root 'modules'
 $moduleLink = Join-Path $modulesDirectory $moduleName
-$baseEntry = 'C:\coop-r25-base-'+$tag
-$keepEntry = 'C:\coop-r25-keep-'+$tag
-$userEntry = 'C:\coop-r25-user-'+$tag
+$baseEntry = 'C:\burrow-r25-base-'+$tag
+$keepEntry = 'C:\burrow-r25-keep-'+$tag
+$userEntry = 'C:\burrow-r25-user-'+$tag
 $probe = Join-Path $session 'module-probe.ps1'
 $probeOutput = Join-Path $session 'module-probe.json'
 function Assert-True([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
@@ -78,13 +78,13 @@ function New-ZipPackage([string]$path,[System.Collections.IDictionary]$entries) 
         }
     } finally { $zip.Dispose(); $stream.Dispose() }
 }
-function Invoke-Coop([string[]]$arguments) {
-    $output = Invoke-CoopNative $CoopExe  @arguments | Out-String
+function Invoke-Burrow([string[]]$arguments) {
+    $output = Invoke-BurrowNative $BurrowExe  @arguments | Out-String
     return [pscustomobject]@{code=$LASTEXITCODE;text=$output}
 }
-function CoopJson([string[]]$arguments) {
-    $result = Invoke-Coop $arguments
-    if ($result.code -ne 0) { throw "coop $($arguments -join ' ') failed with exit $($result.code)`n$($result.text)" }
+function BurrowJson([string[]]$arguments) {
+    $result = Invoke-Burrow $arguments
+    if ($result.code -ne 0) { throw "burrow $($arguments -join ' ') failed with exit $($result.code)`n$($result.text)" }
     return ($result.text | ConvertFrom-Json)
 }
 function Get-Snapshot([string]$path) {
@@ -148,7 +148,7 @@ function Write-Manifest([string]$name,[string]$version,[string]$module = '') {
     $entries["version.txt"] = "version $version"
     if ($module) {
         $entries["$module.psd1"] = "@{`n    ModuleVersion = '$version'`n    RootModule = '$module.psm1'`n}`n"
-        $entries["$module.psm1"] = "function Get-CoopModuleVersion { '$version' }`nExport-ModuleMember -Function Get-CoopModuleVersion`n"
+        $entries["$module.psm1"] = "function Get-BurrowModuleVersion { '$version' }`nExport-ModuleMember -Function Get-BurrowModuleVersion`n"
     }
     $entries['bin/marker.txt'] = "version $version"
     New-ZipPackage $archive $entries
@@ -170,7 +170,7 @@ try {
     Set-UserRaw 'PSModulePath' "$baseEntry;$keepEntry" 'String'
     $rootBefore = Get-Snapshot $root
     $environmentBefore = Get-UserRaw 'PSModulePath'
-    $preview = CoopJson @('--root',$root,'install',"test/$package",'--dry-run','--json')
+    $preview = BurrowJson @('--root',$root,'install',"test/$package",'--dry-run','--json')
     Assert-True ($preview.execution_available -eq $true) "psmodule preview was blocked: $($preview.diagnostics | ConvertTo-Json -Compress)"
     $operations = @($preview.ir_operations | ForEach-Object operation)
     Assert-True ('ps-module' -in $operations) "preview omitted the ps-module operation: $($operations -join ',')"
@@ -188,28 +188,28 @@ try {
     Assert-True (($rootBefore -join '|') -eq ((Get-Snapshot $root) -join '|')) 'preview changed the installation root'
 
     # Interrupt after both the junction and PSModulePath have been published.
-    $faults = Join-Path $root '.coop/test-faults.json'
+    $faults = Join-Path $root '.burrow/test-faults.json'
     New-Item -ItemType Directory -Path (Split-Path $faults) -Force | Out-Null
     [IO.File]::WriteAllText($faults,'{"crash":["after-ps-module"]}')
-    $savedFaults = $env:COOP_ALLOW_TEST_FAULTS
+    $savedFaults = $env:BURROW_ALLOW_TEST_FAULTS
     try {
-        $env:COOP_ALLOW_TEST_FAULTS = '1'
-        $interrupted = Invoke-CoopNativeRaw $CoopExe --root $root install "test/$package" --json
+        $env:BURROW_ALLOW_TEST_FAULTS = '1'
+        $interrupted = Invoke-BurrowNativeRaw $BurrowExe --root $root install "test/$package" --json
         Assert-True ($interrupted.code -ne 0) 'module installation did not interrupt'
         Assert-True (Test-Path -LiteralPath $moduleLink) 'interruption did not reach module publication'
         Assert-PathHas (Get-UserRaw 'PSModulePath').value $modulesDirectory 'interruption did not reach PSModulePath publication'
     } finally {
-        $env:COOP_ALLOW_TEST_FAULTS = $savedFaults
+        $env:BURROW_ALLOW_TEST_FAULTS = $savedFaults
         Remove-Item -LiteralPath $faults
     }
-    $recovery = Invoke-CoopNativeRaw $CoopExe --root $root recover --json
+    $recovery = Invoke-BurrowNativeRaw $BurrowExe --root $root recover --json
     Assert-True ($recovery.code -eq 0) "module recovery failed: $($recovery.err)"
     Assert-True (-not (Test-Path -LiteralPath $moduleLink)) 'recovery left the module junction'
     $afterRecovery = Get-UserRaw 'PSModulePath'
     Assert-True ($afterRecovery.value -eq $environmentBefore.value -and $afterRecovery.kind -eq $environmentBefore.kind) 'recovery did not restore PSModulePath'
 
     # --- The spoken plan is what runs; the module is visible to a new PowerShell process ---------
-    $install = CoopJson @('--root',$root,'install',"test/$package",'--json')
+    $install = BurrowJson @('--root',$root,'install',"test/$package",'--json')
     Assert-True ($install.status -eq 'success') "psmodule install did not succeed: $($install | ConvertTo-Json -Depth 4)"
     $journal = Get-Content -LiteralPath $install.journal -Raw | ConvertFrom-Json
     Assert-True ((@($preview.ir_operations | ForEach-Object operation) -join ',') -eq (@($journal.observed_steps) -join ',')) `
@@ -223,9 +223,9 @@ try {
     Assert-PathHas $installedPath $modulesDirectory 'install did not add the modules directory to PSModulePath'
     Assert-PathHas $installedPath $baseEntry 'install removed an existing PSModulePath entry'
     Assert-PathHas $installedPath $keepEntry 'install removed an existing PSModulePath entry'
-    $record = Get-Content -LiteralPath "$root/.coop/packages/$package.json" -Raw | ConvertFrom-Json
+    $record = Get-Content -LiteralPath "$root/.burrow/packages/$package.json" -Raw | ConvertFrom-Json
     Assert-True ($record.psmodule.name -eq $moduleName) 'the package record omitted the module name'
-    Assert-True ((Path-Has @($record.psmodule.user_environment.ownership.added) $modulesDirectory)) 'the package record omitted the PSModulePath entry Coop added'
+    Assert-True ((Path-Has @($record.psmodule.user_environment.ownership.added) $modulesDirectory)) 'the package record omitted the PSModulePath entry Burrow added'
     Assert-True ($record.psmodule.user_environment.ownership.previous.value -eq "$baseEntry;$keepEntry") 'the package record lost the previous PSModulePath value'
     $probe1 = Import-InNewPowerShell $moduleName
     if ($null -ne $probe1) {
@@ -237,10 +237,10 @@ try {
 
     # --- Update moves the module content with current and does not duplicate the entry ------------
     Write-Manifest $package '2.0.0' $moduleName
-    $updatePreview = CoopJson @('--root',$root,'update',$package,'--dry-run','--json')
+    $updatePreview = BurrowJson @('--root',$root,'update',$package,'--dry-run','--json')
     $updateOperations = @($updatePreview.ir_operations | ForEach-Object operation)
     Assert-True ('remove-ps-module' -in $updateOperations -and 'ps-module' -in $updateOperations) "update preview omitted the module operations: $($updateOperations -join ',')"
-    $update = CoopJson @('--root',$root,'update',$package,'--json')
+    $update = BurrowJson @('--root',$root,'update',$package,'--json')
     Assert-True ($update.status -eq 'success') "psmodule update did not succeed: $($update | ConvertTo-Json -Depth 4)"
     $updateJournal = Get-Content -LiteralPath $update.journal -Raw | ConvertFrom-Json
     Assert-True ((@($updatePreview.ir_operations | ForEach-Object operation) -join ',') -eq (@($updateJournal.observed_steps) -join ',')) 'the update did not follow its displayed plan'
@@ -256,15 +256,15 @@ try {
 
     # --- A user edit after install survives the uninstall ----------------------------------------
     Set-UserRaw 'PSModulePath' ($updatedPath.TrimEnd(';')+';'+$userEntry) ((Get-UserRaw 'PSModulePath').kind)
-    $uninstallPreview = CoopJson @('--root',$root,'uninstall',$package,'--dry-run','--json')
+    $uninstallPreview = BurrowJson @('--root',$root,'uninstall',$package,'--dry-run','--json')
     Assert-True ($uninstallPreview.ps_module.operation -eq 'remove') 'the uninstall preview did not describe the module link removal'
     Assert-True ($uninstallPreview.ps_module.user_environment.variable -eq 'PSModulePath') 'the uninstall preview omitted the PSModulePath effect'
     Assert-True ('remove-ps-module' -in @($uninstallPreview.ir_operations | ForEach-Object operation)) 'the uninstall preview omitted the module removal operation'
-    $uninstall = CoopJson @('--root',$root,'uninstall',$package,'--json')
+    $uninstall = BurrowJson @('--root',$root,'uninstall',$package,'--json')
     Assert-True ($uninstall.status -eq 'success') "psmodule uninstall did not succeed: $($uninstall | ConvertTo-Json -Depth 4)"
     Assert-True (-not (Test-Path -LiteralPath $moduleLink)) 'the uninstall left the module junction behind'
     $afterPath = (Get-UserRaw 'PSModulePath').value
-    Assert-PathMissing $afterPath $modulesDirectory 'the uninstall left the entry Coop added'
+    Assert-PathMissing $afterPath $modulesDirectory 'the uninstall left the entry Burrow added'
     Assert-PathHas $afterPath $baseEntry 'the uninstall removed another PSModulePath entry'
     Assert-PathHas $afterPath $keepEntry 'the uninstall removed another PSModulePath entry'
     Assert-PathHas $afterPath $userEntry 'the uninstall removed a user entry added after the install'
@@ -273,23 +273,23 @@ try {
     # --- An unmodified PSModulePath is restored exactly -----------------------------------------
     Set-UserRaw 'PSModulePath' "$baseEntry;$keepEntry" 'String'
     Write-Manifest $package '3.0.0' $moduleName
-    $second = CoopJson @('--root',$root,'install',"test/$package",'--json')
+    $second = BurrowJson @('--root',$root,'install',"test/$package",'--json')
     Assert-True ($second.status -eq 'success') 'the second psmodule install did not succeed'
     Assert-True (Test-Path -LiteralPath $moduleLink) 'the second install did not create the module junction'
-    $secondUninstall = CoopJson @('--root',$root,'uninstall',$package,'--json')
+    $secondUninstall = BurrowJson @('--root',$root,'uninstall',$package,'--json')
     Assert-True ($secondUninstall.status -eq 'success') 'the second psmodule uninstall did not succeed'
     $restored = Get-UserRaw 'PSModulePath'
     Assert-True ($restored.present -eq $true -and $restored.value -eq "$baseEntry;$keepEntry" -and $restored.kind -eq 'String') `
         "the uninstall did not restore the recorded PSModulePath value: present=$($restored.present) kind=$($restored.kind) value=$($restored.value)"
 
-    # --- A stray non-link entry under modules does not keep Coop's PSModulePath entry -----------
+    # --- A stray non-link entry under modules does not keep Burrow's PSModulePath entry -----------
     New-Item -ItemType Directory -Path $modulesDirectory -Force | Out-Null
     $stray = Join-Path $modulesDirectory 'stray.txt'
     [IO.File]::WriteAllText($stray,'not a module link',[Text.UTF8Encoding]::new($false))
     Write-Manifest $package '4.0.0' $moduleName
-    $strayInstall = CoopJson @('--root',$root,'install',"test/$package",'--json')
+    $strayInstall = BurrowJson @('--root',$root,'install',"test/$package",'--json')
     Assert-True ($strayInstall.status -eq 'success') 'the stray-entry install did not succeed'
-    $strayUninstall = CoopJson @('--root',$root,'uninstall',$package,'--json')
+    $strayUninstall = BurrowJson @('--root',$root,'uninstall',$package,'--json')
     Assert-True ($strayUninstall.status -eq 'success') 'the stray-entry uninstall did not succeed'
     $strayPath = (Get-UserRaw 'PSModulePath').value
     Assert-PathMissing $strayPath $modulesDirectory 'a stray file under modules kept the PSModulePath entry'
@@ -297,7 +297,7 @@ try {
     Assert-True (Test-Path -LiteralPath $stray) 'the uninstall removed a stray file under modules'
 
     # --- An invalid psmodule declaration is a blocking adapter diagnostic -----------------------
-    $invalidPackage = 'coop-r25-invalid-'+$tag
+    $invalidPackage = 'burrow-r25-invalid-'+$tag
     $invalidArchive = Join-Path $session "$package-1.0.0.zip"
     $invalidManifest = [ordered]@{
         version='1.0.0'
@@ -307,12 +307,12 @@ try {
     }
     [IO.File]::WriteAllText("$root/buckets/test/bucket/$invalidPackage.json",($invalidManifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
     $environmentBeforeInvalid = Get-UserRaw 'PSModulePath'
-    $invalidPreview = Invoke-Coop @('--root',$root,'install',"test/$invalidPackage",'--dry-run','--json')
+    $invalidPreview = Invoke-Burrow @('--root',$root,'install',"test/$invalidPackage",'--dry-run','--json')
     $invalidDocument = $invalidPreview.text | ConvertFrom-Json
     $invalidCodes = @($invalidDocument.diagnostics | ForEach-Object { "$($_.category)/$($_.code)" })
     Assert-True ($invalidDocument.execution_available -eq $false) 'an invalid psmodule declaration was planned as executable'
     Assert-True ($invalidCodes -contains 'adapter/manifest-shape') "the invalid psmodule declaration did not report adapter/manifest-shape: $($invalidCodes -join ',')"
-    $invalidInstall = Invoke-Coop @('--root',$root,'install',"test/$invalidPackage",'--json')
+    $invalidInstall = Invoke-Burrow @('--root',$root,'install',"test/$invalidPackage",'--json')
     Assert-True ($invalidInstall.code -ne 0) 'an invalid psmodule declaration was executed'
     Assert-True (-not (Test-Path -LiteralPath "$root/apps/$invalidPackage")) 'an invalid psmodule declaration created a package directory'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $modulesDirectory 'true'))) 'an invalid psmodule declaration created a module link'
@@ -321,11 +321,11 @@ try {
 
     # --- A package without psmodule leaves PSModulePath alone ------------------------------------
     $environmentBeforePlain = Get-UserRaw 'PSModulePath'
-    $plain = CoopJson @('--root',$root,'install',"test/$plainPackage",'--json')
+    $plain = BurrowJson @('--root',$root,'install',"test/$plainPackage",'--json')
     Assert-True ($plain.status -eq 'success') 'the plain package did not install'
     $environmentAfterPlain = Get-UserRaw 'PSModulePath'
     Assert-True ($environmentAfterPlain.value -eq $environmentBeforePlain.value) 'a package without psmodule changed PSModulePath'
-    $plainUninstall = CoopJson @('--root',$root,'uninstall',$plainPackage,'--json')
+    $plainUninstall = BurrowJson @('--root',$root,'uninstall',$plainPackage,'--json')
     Assert-True ($plainUninstall.status -eq 'success') 'the plain package did not uninstall'
     Assert-True ((Get-UserRaw 'PSModulePath').value -eq $environmentBeforePlain.value) 'a package without psmodule changed PSModulePath on uninstall'
 
@@ -342,7 +342,7 @@ try {
     }
     [IO.File]::WriteAllText("$root/buckets/test/bucket/$combinedPackage.json",($combinedManifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
     $modulesBeforeCombined = if (Test-Path -LiteralPath $modulesDirectory) { @(Get-ChildItem -LiteralPath $modulesDirectory -Force | ForEach-Object { $_.Name }) } else { @() }
-    $combinedPreview = CoopJson @('--root',$root,'install',"test/$combinedPackage",'--dry-run','--json')
+    $combinedPreview = BurrowJson @('--root',$root,'install',"test/$combinedPackage",'--dry-run','--json')
     Assert-True ($combinedPreview.execution_available -eq $true) "combined psmodule+bin+post_install preview was blocked: $($combinedPreview.diagnostics | ConvertTo-Json -Compress)"
     $combinedOperations = @($combinedPreview.ir_operations | ForEach-Object operation)
     foreach ($expected in 'hook','entries','ps-module') { Assert-True ($expected -in $combinedOperations) "combined preview omitted $expected`: $($combinedOperations -join ',')" }

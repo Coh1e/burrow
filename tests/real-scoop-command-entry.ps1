@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [Parameter(Mandatory)][string]$Package,
     [Parameter(Mandatory)][string]$Command,
@@ -15,20 +15,20 @@ param(
 #
 # Runs the real CLI against the selected installation root: read-only preview, install, inspection
 # of the generated Scoop .cmd/sh wrapper, the real program through that .cmd, optionally a real
-# `scoop reset` followed by the same entry, the other client's list view, and Coop uninstall.
-# The child PATH for Coop and for the wrapper contains a real Git bash and, when needed, a real
+# `scoop reset` followed by the same entry, the other client's list view, and Burrow uninstall.
+# The child PATH for Burrow and for the wrapper contains a real Git bash and, when needed, a real
 # Python 3, but not the Windows system directory: Scoop's bash branch must take the cygpath path
 # instead of accidentally running the WSL bash/wslpath pair. TERM=xterm is scoped to the wrapper
 # child because the test starts from a non-terminal process.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 if (-not ($EvidenceDir.TrimEnd('\')+'\').StartsWith($projectRoot+'\',[StringComparison]::OrdinalIgnoreCase)) {
     throw 'EvidenceDir must stay inside the project directory'
 }
 New-Item -ItemType Directory -Path $EvidenceDir -Force | Out-Null
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot).TrimEnd('\')
 if ($Package -notmatch '^([^/]+)/([^/]+)$') { throw 'Package must be qualified as bucket/name' }
 $bucket = $Matches[1]
@@ -36,7 +36,7 @@ $packageName = $Matches[2]
 $manifestPath = Join-Path $ScoopRoot "buckets/$bucket/bucket/$packageName.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Package Manifest not found: $manifestPath" }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-$coopRecord = Join-Path $ScoopRoot ".coop/packages/$packageName.json"
+$burrowRecord = Join-Path $ScoopRoot ".burrow/packages/$packageName.json"
 $entryCmd = Join-Path $ScoopRoot "shims/$Command.cmd"
 $entryShell = Join-Path $ScoopRoot "shims/$Command"
 $commands = [System.Collections.Generic.List[object]]::new()
@@ -79,7 +79,7 @@ function Find-PythonHost {
     foreach ($candidate in $candidates) {
         if (-not $candidate -or -not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
         try {
-            $version = (Invoke-CoopNative $candidate  --version | Out-String).Trim()
+            $version = (Invoke-BurrowNative $candidate  --version | Out-String).Trim()
             if ($LASTEXITCODE -eq 0 -and $version -match '^Python 3\.') { return [IO.Path]::GetFullPath($candidate) }
         } catch { }
     }
@@ -102,8 +102,8 @@ function Run([string]$name,[string]$exe,[string[]]$arguments,[string]$pathValue 
     $commands.Add([pscustomobject]@{name=$name;exe=$exe;arguments=$arguments;exit=$exit;log=$log;path=$pathValue;term=$term})
     return [pscustomobject]@{exit=$exit;output=$output;log=$log}
 }
-function Coop([string]$name,[string[]]$arguments) {
-    return Run $name $CoopExe (@('--root',$ScoopRoot)+$arguments) $hostPath
+function Burrow([string]$name,[string[]]$arguments) {
+    return Run $name $BurrowExe (@('--root',$ScoopRoot)+$arguments) $hostPath
 }
 $git = Find-GitBash
 $python = Find-PythonHost
@@ -129,18 +129,18 @@ $summary = [ordered]@{
     started = (Get-Date).ToUniversalTime().ToString('o')
 }
 try {
-    $summary.coop_version = (Run 'coop-version' $CoopExe @('--version')).output.Trim()
-    $summary.coop_sha256 = (Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash.ToLower()
+    $summary.burrow_version = (Run 'burrow-version' $BurrowExe @('--version')).output.Trim()
+    $summary.burrow_sha256 = (Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash.ToLower()
     $summary.package_version = [string]$manifest.version
     $summary.bucket_revision = (& git -C (Join-Path $ScoopRoot "buckets/$bucket") rev-parse HEAD 2>&1 | Out-String).Trim()
     $summary.bash = $git.Bash
     $summary.python = $python
-    if (Test-Path -LiteralPath $coopRecord) { throw "$packageName already has a Coop record; refusing to change the selected root" }
+    if (Test-Path -LiteralPath $burrowRecord) { throw "$packageName already has a Burrow record; refusing to change the selected root" }
     if (Test-Path -LiteralPath (Join-Path $ScoopRoot "apps/$packageName")) { throw "$packageName is already installed in $ScoopRoot" }
     if (-not $SkipScoopReset) { Run 'scoop-list-before' (Get-Command scoop.ps1 -ErrorAction Stop).Source @('list') | Out-Null }
 
-    # --- Preview: no entry, package directory or Coop record ------------------------------------
-    $preview = Coop 'preview' @('install',$Package,'--dry-run','--json')
+    # --- Preview: no entry, package directory or Burrow record ------------------------------------
+    $preview = Burrow 'preview' @('install',$Package,'--dry-run','--json')
     Assert-True ($preview.exit -eq 0) "preview failed: $($preview.output)"
     $plan = Read-Json $preview.output
     Assert-True ($plan.execution_available -eq $true) "preview was blocked: $($plan.diagnostics | ConvertTo-Json -Compress)"
@@ -152,7 +152,7 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $entryCmd)) 'preview created the command entry'
 
     # --- Install: the generated wrapper is the Scoop branch, and the real program runs ----------
-    $install = Coop 'install' @('install',$Package,'--json')
+    $install = Burrow 'install' @('install',$Package,'--json')
     Assert-True ($install.exit -eq 0) "install failed: $($install.output)"
     $installedByTest = $true
     $result = Read-Json $install.output
@@ -161,7 +161,7 @@ try {
     Assert-True ((@($plan.ir_operations | ForEach-Object operation) -join ',') -eq (@($journal.observed_steps) -join ',')) `
         "execution did not follow the displayed plan: planned=$(@($plan.ir_operations | ForEach-Object operation) -join ',') observed=$(@($journal.observed_steps) -join ',')"
     Assert-True ((Test-Path -LiteralPath $entryCmd -PathType Leaf) -and (Test-Path -LiteralPath $entryShell -PathType Leaf)) "missing Scoop wrapper files: $entryCmd / $entryShell"
-    foreach ($stale in @("$Command.exe","$Command.shim","$Command.coop-shim.json")) {
+    foreach ($stale in @("$Command.exe","$Command.shim","$Command.burrow-shim.json")) {
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot "shims/$stale"))) "unexpected $stale for a $ExpectedHost entry"
     }
     $cmdText = Get-Content -LiteralPath $entryCmd -Raw
@@ -177,7 +177,7 @@ try {
         Assert-True ($cmdText -match 'bash -c "\$\(cygpath -u') 'bash .cmd does not carry the Scoop cygpath branch'
         Assert-True ($shellText -match 'if \[ \$WSL_INTEROP \]') 'bash shell wrapper does not carry the Scoop WSL/cygpath branch'
     }
-    $record = Get-Content -LiteralPath $coopRecord -Raw | ConvertFrom-Json
+    $record = Get-Content -LiteralPath $burrowRecord -Raw | ConvertFrom-Json
     $recorded = @($record.commands | Where-Object name -eq $Command)
     Assert-True ($recorded.Count -eq 1 -and $recorded[0].format -eq 'scoop-wrapper' -and $recorded[0].launcher -eq $ExpectedHost) 'the package record did not keep the Scoop wrapper identity'
     $firstRun = Run 'run-before-reset' $entryCmd $CommandArguments $hostPath 'xterm'
@@ -199,16 +199,16 @@ try {
         $scoopList = Run 'scoop-list' $scoop @('list')
         Assert-True ($scoopList.exit -eq 0) "scoop list failed: $($scoopList.output)"
         Assert-True (($scoopList.output -split "`r?`n" | Where-Object { $_ -match ('^\s*'+[regex]::Escape($packageName)+'\s') }).Count -ge 1) `
-            "Scoop did not list the Coop-installed package: $($scoopList.output)"
+            "Scoop did not list the Burrow-installed package: $($scoopList.output)"
     }
 
     # --- Uninstall removes the wrapper files and the package ------------------------------------
-    $uninstall = Coop 'uninstall' @('uninstall',$packageName,'--json')
+    $uninstall = Burrow 'uninstall' @('uninstall',$packageName,'--json')
     Assert-True ($uninstall.exit -eq 0) "uninstall failed: $($uninstall.output)"
     $installedByTest = $false
     $uninstallResult = Read-Json $uninstall.output
     Assert-True ($uninstallResult.status -eq 'success') 'uninstall did not report success'
-    foreach ($left in @("apps/$packageName","shims/$Command.cmd","shims/$Command",".coop/packages/$packageName.json")) {
+    foreach ($left in @("apps/$packageName","shims/$Command.cmd","shims/$Command",".burrow/packages/$packageName.json")) {
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $ScoopRoot $left))) "uninstall left $left"
     }
     if (-not $SkipScoopReset) {
@@ -227,7 +227,7 @@ try {
     throw
 } finally {
     if ($installedByTest) {
-        try { & $CoopExe --root $ScoopRoot uninstall $packageName --json *> (Join-Path $EvidenceDir 'cleanup-uninstall.log') } catch { }
+        try { & $BurrowExe --root $ScoopRoot uninstall $packageName --json *> (Join-Path $EvidenceDir 'cleanup-uninstall.log') } catch { }
     }
     $pathAfter = (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path
     if ($pathAfter -ne $pathBefore) {

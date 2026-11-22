@@ -1,20 +1,20 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 # Installer/uninstaller program declarations combined with multi-stage scripts (#32). The seam is
 # the real CLI plus a real PowerShell host and the pinned Scoop compatibility library: manifests are
 # real Scoop JSON, installer programs are real .cmd/.ps1 files inside the package payloads, and the
 # observations are the files those programs and scripts actually produce, the saved transaction
 # journal and the published package state.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-$coopDirectory = Split-Path $CoopExe
-$fixture1 = Join-Path $coopDirectory 'fixture-1.exe'
-$fixture2 = Join-Path $coopDirectory 'fixture-2.exe'
-$guard = Join-Path $coopDirectory 'process_guard.exe'
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+$burrowDirectory = Split-Path $BurrowExe
+$fixture1 = Join-Path $burrowDirectory 'fixture-1.exe'
+$fixture2 = Join-Path $burrowDirectory 'fixture-2.exe'
+$guard = Join-Path $burrowDirectory 'process_guard.exe'
 $pwshPath = (Get-Process -Id $PID).Path
 foreach ($path in @($fixture1,$fixture2,$guard,$pwshPath)) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing fixed test input: $path" }
@@ -74,17 +74,17 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ("$root/run-{0:d2}-{1}.json" -f $script:runs,$label) -Encoding utf8
     return $result
 }
-function Invoke-Coop([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $CoopExe $arguments $environment
+function Invoke-Burrow([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
+    return Invoke-Process $label $BurrowExe $arguments $environment
 }
 function Invoke-Guard([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $guard (@($CoopExe)+$arguments) $environment
+    return Invoke-Process $label $guard (@($BurrowExe)+$arguments) $environment
 }
 function Parse-Json([string]$label,$result) {
     try { return $result.output | ConvertFrom-Json } catch { throw "$label did not print JSON: $($result.output)" }
 }
 function Last-Journal([string]$package) {
-    $journals = @(Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
+    $journals = @(Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } |
         Where-Object { $_.package -eq $package })
@@ -179,10 +179,10 @@ Check ($positions['pre_install'] -lt $positions['installer'] -and $positions['in
     $positions['publish-current'] -lt $positions['post_install']) 'installer program is not planned between pre_install and current publication'
 Check (@($comboPlan.ir_operations | Where-Object { $_.operation -eq 'installer' }).Count -eq 1) 'preview did not list exactly one installer program operation'
 Check (@($comboPlan.ir_operations | Where-Object { $_.operation -eq 'installer' })[0].effect -match 'setup\.cmd') 'installer operation does not name the declared program'
-Check (-not (Test-Path -LiteralPath "$root/apps") -and -not (Test-Path -LiteralPath "$root/.coop/transactions")) 'preview wrote installation state'
+Check (-not (Test-Path -LiteralPath "$root/apps") -and -not (Test-Path -LiteralPath "$root/.burrow/transactions")) 'preview wrote installation state'
 
 # --- 2. Install: program, scripts, current, persist and the entry it produces. ---------------
-$comboInstall = Invoke-Coop 'combo-install' @('--root',$root,'install','main/progcombo','--json')
+$comboInstall = Invoke-Burrow 'combo-install' @('--root',$root,'install','main/progcombo','--json')
 Check ($comboInstall.exit -eq 0) "combined install failed: $($comboInstall.error)"
 $comboResult = Parse-Json 'combo-install' $comboInstall
 Check ((@($comboResult.scripts | ForEach-Object { $_.phase }) -join ',') -eq 'pre_install,installer,post_install') 'install hook order is wrong'
@@ -228,7 +228,7 @@ Write-Manifest 'progcombo' @{version='2';url=(File-Uri $comboZip2);hash=(File-Ha
     pre_uninstall=$comboOldPreUninstall;
     installer=@{file='setup.cmd';args=@('--root','$dir','--version','$version','--global','$global');script=$comboInstallerScript2};
     uninstaller=@{file='remove.cmd';args=@('--log',$comboPersistLog,'--dir','$dir');keep=$true;script=$comboUninstScript}}
-$comboUpdate = Invoke-Coop 'combo-update' @('--root',$root,'update','progcombo','--json')
+$comboUpdate = Invoke-Burrow 'combo-update' @('--root',$root,'update','progcombo','--json')
 Check ($comboUpdate.exit -eq 0) "combined update failed: $($comboUpdate.error)"
 $comboUpdateResult = Parse-Json 'combo-update' $comboUpdate
 Check (@($comboUpdateResult.installers).Count -eq 2) 'update did not report both the old uninstaller and the new installer program'
@@ -248,7 +248,7 @@ Check ((Get-Content -LiteralPath "$root/apps/progcombo/current/post-seen.txt" -E
 Check ((Test-Path -LiteralPath "$root/apps/progcombo/1/app.exe") -and
     ($comboUpdateResult.retained_versions -contains '1')) 'update did not retain the previous version'
 Check ((Get-Content -LiteralPath "$root/persist/progcombo/data/conf.txt" -Raw).Trim() -eq 'persisted configuration') 'update replaced the declared persistent data'
-$comboList = Invoke-Coop 'combo-list' @('--root',$root,'list','--json')
+$comboList = Invoke-Burrow 'combo-list' @('--root',$root,'list','--json')
 Check ($comboList.exit -eq 0 -and $comboList.output -match '"version": "2"') 'list does not report the updated version'
 
 # --- 4. args-only declaration resolves to the downloaded file name. ---------------------------
@@ -256,11 +256,11 @@ $argsOnly = "$root/build/setup-args.cmd"
 [IO.File]::WriteAllText($argsOnly,$setupCmd.Replace("`r`n","`n").Replace("`n","`r`n"),[Text.UTF8Encoding]::new($false))
 Write-Manifest 'progargs' @{version='1';url=(File-Uri $argsOnly);hash=(File-Hash $argsOnly);
     installer=@{args=@('--root','$dir','--version','$version','--global','$global')}}
-$argsPreview = Invoke-Coop 'args-preview' @('--root',$root,'install','main/progargs','--dry-run','--json')
+$argsPreview = Invoke-Burrow 'args-preview' @('--root',$root,'install','main/progargs','--dry-run','--json')
 Check ($argsPreview.exit -eq 0) "args-only preview failed: $($argsPreview.error)"
 $argsPlan = Parse-Json 'args-preview' $argsPreview
 Check ($argsPlan.package.installer.file -eq 'setup-args.cmd' -and $argsPlan.package.installer.keep -eq $false) 'args-only declaration did not fall back to the downloaded file name'
-$argsInstall = Invoke-Coop 'args-install' @('--root',$root,'install','main/progargs','--json')
+$argsInstall = Invoke-Burrow 'args-install' @('--root',$root,'install','main/progargs','--json')
 Check ($argsInstall.exit -eq 0) "args-only install failed: $($argsInstall.error)"
 $argsResult = Parse-Json 'args-install' $argsInstall
 $argsRun = @($argsResult.installers)[0]
@@ -272,7 +272,7 @@ Check ((Get-Content -LiteralPath "$root/apps/progargs/1/program-args.txt" -Raw) 
 $ps1Zip = New-PayloadZip 'ps1payload' @{'app.exe'=[IO.File]::ReadAllBytes($fixture1);'setup.ps1'=$setupPs1}
 Write-Manifest 'progps1' @{version='1';url=(File-Uri $ps1Zip);hash=(File-Hash $ps1Zip);bin=@(,@('app.exe','ps1tool'));
     installer=@{file='setup.ps1';args=@('$dir','$version','$global')}}
-$ps1Install = Invoke-Coop 'ps1-install' @('--root',$root,'install','main/progps1','--json')
+$ps1Install = Invoke-Burrow 'ps1-install' @('--root',$root,'install','main/progps1','--json')
 Check ($ps1Install.exit -eq 0) "ps1 installer program install failed: $($ps1Install.error)"
 $ps1Result = Parse-Json 'ps1-install' $ps1Install
 $ps1Run = @($ps1Result.installers)[0]
@@ -297,10 +297,10 @@ $removeUninstScript = @('Add-Content -Path "$persist_dir\uninstall-order.txt" -V
 Write-Manifest 'progremove' @{version='1';url=(File-Uri $removeZip);hash=(File-Hash $removeZip);bin=@(,@('app.exe','rtool'));persist='data';
     pre_uninstall=$removeScripts.pre_uninstall;post_uninstall=$removeScripts.post_uninstall;
     uninstaller=@{file='remove.cmd';args=@('--log',$persistLog,'--dir','$dir');keep=$true;script=$removeUninstScript}}
-$removeInstall = Invoke-Coop 'remove-install' @('--root',$root,'install','main/progremove','--json')
+$removeInstall = Invoke-Burrow 'remove-install' @('--root',$root,'install','main/progremove','--json')
 Check ($removeInstall.exit -eq 0) "uninstaller fixture install failed: $($removeInstall.error)"
 Check ((Get-Content -LiteralPath "$root/persist/progremove/data/state.txt" -Raw).Trim() -eq 'kept state') 'uninstaller fixture persistence was not created'
-$removeUninstall = Invoke-Coop 'remove-uninstall' @('--root',$root,'uninstall','progremove','--json')
+$removeUninstall = Invoke-Burrow 'remove-uninstall' @('--root',$root,'uninstall','progremove','--json')
 Check ($removeUninstall.exit -eq 0) "combined uninstall failed: $($removeUninstall.error)"
 $removeResult = Parse-Json 'remove-uninstall' $removeUninstall
 Check ((@($removeResult.scripts | ForEach-Object { $_.phase }) -join ',') -eq 'pre_uninstall,uninstaller,post_uninstall') 'uninstall hook order is wrong'
@@ -313,7 +313,7 @@ Check ((Get-Content -LiteralPath "$root/persist/progremove/data/state.txt" -Raw)
 Check (-not (Test-Path -LiteralPath "$root/apps/progremove/current") -and
     -not (Test-Path -LiteralPath "$root/apps/progremove/1") -and
     -not (Test-Path -LiteralPath "$root/shims/rtool.exe") -and
-    -not (Test-Path -LiteralPath "$root/.coop/packages/progremove.json")) 'uninstall left package state'
+    -not (Test-Path -LiteralPath "$root/.burrow/packages/progremove.json")) 'uninstall left package state'
 $removeJournal = Last-Journal 'progremove'
 Check ($removeJournal.state -eq 'committed' -and @($removeJournal.installers).Count -eq 1 -and
     $removeJournal.installers[0].status -eq 'succeeded') 'uninstaller program journal record is wrong'
@@ -323,11 +323,11 @@ $failZip = New-PayloadZip 'failpayload' @{'app.exe'=[IO.File]::ReadAllBytes($fix
 $failPre = @('Set-Content -Path "$dir\pre-fail.txt" -Value "pre" -Encoding Ascii')
 Write-Manifest 'progfail' @{version='1';url=(File-Uri $failZip);hash=(File-Hash $failZip);bin=@(,@('app.exe','ftool'));
     pre_install=$failPre;installer=@{file='fail.cmd'}}
-$failInstall = Invoke-Coop 'fail-install' @('--root',$root,'install','main/progfail','--json')
+$failInstall = Invoke-Burrow 'fail-install' @('--root',$root,'install','main/progfail','--json')
 Check ($failInstall.exit -ne 0) 'failing installer program was reported as success'
 # Scoop's Invoke-ExternalCommand turns a non-zero program exit into a failed helper call and
 # Invoke-Installer then aborts with exit code 1; the program's own code is reported in the host
-# output. Coop keeps that upstream behavior instead of inventing a different exit status.
+# output. Burrow keeps that upstream behavior instead of inventing a different exit status.
 Check ($failInstall.error -match 'installer program failed with exit code 1') "installer program failure was not propagated: $($failInstall.error)"
 $failJournal = Last-Journal 'progfail'
 Check ($failJournal.state -eq 'rolled-back' -and @($failJournal.installers).Count -eq 1 -and
@@ -336,12 +336,12 @@ Check ((Test-Path -LiteralPath $failJournal.installers[0].stderr_log) -and
     ((Get-Content -LiteralPath $failJournal.installers[0].stderr_log -Raw) -match 'installer-program-failed')) 'installer program stderr was not captured'
 Check ((Get-Content -LiteralPath $failJournal.installers[0].stdout_log -Raw) -match 'Exit code was 9') 'the failing program exit code was not reported by the upstream helper'
 Check (-not (Test-Path -LiteralPath "$root/apps/progfail/current") -and -not (Test-Path -LiteralPath "$root/apps/progfail/1") -and
-    -not (Test-Path -LiteralPath "$root/shims/progfail.exe") -and -not (Test-Path -LiteralPath "$root/.coop/packages/progfail.json")) 'failed installer program published package state'
+    -not (Test-Path -LiteralPath "$root/shims/progfail.exe") -and -not (Test-Path -LiteralPath "$root/.burrow/packages/progfail.json")) 'failed installer program published package state'
 
 $missingZip = New-PayloadZip 'missingpayload' @{'app.exe'=[IO.File]::ReadAllBytes($fixture1)}
 Write-Manifest 'progmissing' @{version='1';url=(File-Uri $missingZip);hash=(File-Hash $missingZip);bin=@(,@('app.exe','mtool'));
     installer=@{file='absent.cmd'}}
-$missingInstall = Invoke-Coop 'missing-install' @('--root',$root,'install','main/progmissing','--json')
+$missingInstall = Invoke-Burrow 'missing-install' @('--root',$root,'install','main/progmissing','--json')
 Check ($missingInstall.exit -ne 0) 'missing installer program was reported as success'
 $missingJournal = Last-Journal 'progmissing'
 Check ($missingJournal.state -eq 'rolled-back' -and @($missingJournal.installers)[0].exit_code -ne 0 -and
@@ -354,26 +354,26 @@ Check (-not (Test-Path -LiteralPath "$root/apps/progmissing/current") -and
 $escapeZip = New-PayloadZip 'escapepayload' @{'app.exe'=[IO.File]::ReadAllBytes($fixture1)}
 Write-Manifest 'progescape' @{version='1';url=(File-Uri $escapeZip);hash=(File-Hash $escapeZip);bin=@(,@('app.exe','etool'));
     installer=@{file='..\escape.cmd'}}
-$escapePreview = Invoke-Coop 'escape-preview' @('--root',$root,'install','main/progescape','--dry-run','--json')
+$escapePreview = Invoke-Burrow 'escape-preview' @('--root',$root,'install','main/progescape','--dry-run','--json')
 Check ($escapePreview.output -match 'Invalid path component' -or
     $escapePreview.output -match 'Manifest path must be relative to its package' -or
     $escapePreview.output -match 'Unsafe path component') 'installer program outside the package was not rejected'
-$escapeInstall = Invoke-Coop 'escape-install' @('--root',$root,'install','main/progescape','--json')
+$escapeInstall = Invoke-Burrow 'escape-install' @('--root',$root,'install','main/progescape','--json')
 Check ($escapeInstall.exit -ne 0 -and -not (Test-Path -LiteralPath "$root/apps/progescape")) 'escaping installer program was executed or published'
 
 $failRemoveZip = New-PayloadZip 'failremove' @{'app.exe'=[IO.File]::ReadAllBytes($fixture1);'fail.cmd'=$failCmd}
 Write-Manifest 'progremovefail' @{version='1';url=(File-Uri $failRemoveZip);hash=(File-Hash $failRemoveZip);bin=@(,@('app.exe','rftool'));
     uninstaller=@{file='fail.cmd'}}
-$failRemoveInstall = Invoke-Coop 'remove-fail-install' @('--root',$root,'install','main/progremovefail','--json')
+$failRemoveInstall = Invoke-Burrow 'remove-fail-install' @('--root',$root,'install','main/progremovefail','--json')
 Check ($failRemoveInstall.exit -eq 0) "uninstaller failure fixture install failed: $($failRemoveInstall.error)"
-$failRemove = Invoke-Coop 'remove-fail' @('--root',$root,'uninstall','progremovefail','--json')
+$failRemove = Invoke-Burrow 'remove-fail' @('--root',$root,'uninstall','progremovefail','--json')
 Check ($failRemove.exit -ne 0) 'failing uninstaller program was reported as success'
 $failRemoveJournal = Last-Journal 'progremovefail'
 Check ($failRemoveJournal.state -eq 'rolled-back' -and @($failRemoveJournal.installers)[0].exit_code -eq 1 -and
     (Get-Content -LiteralPath @($failRemoveJournal.installers)[0].stdout_log -Raw) -match 'Exit code was 9') 'uninstaller program failure journal is inaccurate'
 Check ((Test-Path -LiteralPath "$root/apps/progremovefail/current") -and
     (Test-Path -LiteralPath "$root/shims/rftool.exe") -and
-    (Test-Path -LiteralPath "$root/.coop/packages/progremovefail.json")) 'failed uninstaller program removed the installed package'
+    (Test-Path -LiteralPath "$root/.burrow/packages/progremovefail.json")) 'failed uninstaller program removed the installed package'
 
 # --- 8. Evidence summary. ------------------------------------------------------------------
 @{
@@ -381,13 +381,13 @@ Check ((Test-Path -LiteralPath "$root/apps/progremovefail/current") -and
     root=$root
     checks=$script:checks
     runs=$script:runs
-    coop_sha256=(File-Hash $CoopExe)
+    burrow_sha256=(File-Hash $BurrowExe)
     powershell=$pwshPath
     powershell_version=$PSVersionTable.PSVersion.ToString()
     installer_programs=@('setup.cmd (batch, keep=true)','setup-args.cmd (args-only fallback)','setup.ps1 (in-process .ps1)','remove.cmd (uninstaller)','fail.cmd (exit 9)')
     substitution='$dir, $version and $global are substituted by the pinned Scoop Invoke-Installer; the programs record what they received'
     side_effects='all installer programs and scripts write only inside $dir, $persist_dir or the passed path; external side effects are recorded as unverified and never re-run'
-    rollback='failed installer and uninstaller programs leave no current, entry or Coop record; journals are marked rolled-back'
+    rollback='failed installer and uninstaller programs leave no current, entry or Burrow record; journals are marked rolled-back'
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$root/evidence.json" -Encoding utf8
 Write-Output "PASS installer/uninstaller programs combined with multi-stage scripts: $root/evidence.json ($script:checks checks)"
 exit 0

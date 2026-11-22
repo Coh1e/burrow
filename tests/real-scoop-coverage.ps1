@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [string]$ScoopRoot = (Join-Path $env:USERPROFILE 'scoop'),
     [Parameter(Mandatory)][string]$EvidenceDir,
     [string]$InventoryRoot = (Join-Path $PSScriptRoot '../.local/coverage/root'),
@@ -17,24 +17,24 @@ param(
 #
 # The denominator is every Manifest in the official Main and Extras buckets at pinned
 # revisions. Main always uses the revision that is actually checked out in the human's
-# shared Scoop bucket; the Coop registry record is reported next to it because a Scoop
-# bucket update moves the worktree without updating Coop's cached record. Extras has to
+# shared Scoop bucket; the Burrow registry record is reported next to it because a Scoop
+# bucket update moves the worktree without updating Burrow's cached record. Extras has to
 # be cloned into a project-local inventory root because the shared root does not register
 # it (or clones it at the recorded revision when it does).
 #
-# Every Manifest is read with `coop info --json` and planned with
-# `coop install --json --dry-run`. A successful read or an executable plan is never
+# Every Manifest is read with `burrow info --json` and planned with
+# `burrow install --json --dry-run`. A successful read or an executable plan is never
 # reported as a runtime verification: the only runtime-verified packages are the ones in
 # a supplied cohort facts file whose installed Manifest still has the same SHA256 as the
 # denominator Manifest and whose recorded program run succeeded.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $ProgressPreference = 'SilentlyContinue'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\') + '\'
-foreach ($location in @($CoopExe,$ScoopRoot,$EvidenceDir,$InventoryRoot)) {
+foreach ($location in @($BurrowExe,$ScoopRoot,$EvidenceDir,$InventoryRoot)) {
     if (-not $location) { throw 'A required path is empty' }
 }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot).TrimEnd('\')
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 $InventoryRoot = [IO.Path]::GetFullPath($InventoryRoot).TrimEnd('\')
@@ -46,7 +46,7 @@ function Assert-ProjectLocal([string]$Path,[string]$Label) {
 }
 Assert-ProjectLocal $EvidenceDir 'EvidenceDir'
 Assert-ProjectLocal $InventoryRoot 'InventoryRoot'
-if (-not (Test-Path -LiteralPath $CoopExe)) { throw "Coop executable not found: $CoopExe" }
+if (-not (Test-Path -LiteralPath $BurrowExe)) { throw "Burrow executable not found: $BurrowExe" }
 if (-not (Test-Path -LiteralPath $ScoopRoot)) { throw "Shared Scoop root not found: $ScoopRoot" }
 if ($InventoryRoot.TrimEnd('\') + '\' -like ($ScoopRoot.TrimEnd('\') + '\*')) {
     throw 'The inventory root must not live inside the shared Scoop root'
@@ -124,14 +124,14 @@ function Get-WorktreeRevision([string]$Worktree) {
     throw "Unreadable HEAD in $Worktree"
 }
 function Get-BucketRecords([string]$Root) {
-    $registry = Join-Path $Root '.coop/buckets.json'
+    $registry = Join-Path $Root '.burrow/buckets.json'
     if (-not (Test-Path -LiteralPath $registry)) { return @() }
     return @((Get-Content -LiteralPath $registry -Raw | ConvertFrom-Json))
 }
-function Invoke-Coop([string[]]$Arguments,[string]$Label) {
-    $output = Invoke-CoopNative $CoopExe  @Arguments
+function Invoke-Burrow([string[]]$Arguments,[string]$Label) {
+    $output = Invoke-BurrowNative $BurrowExe  @Arguments
     $code = $LASTEXITCODE
-    $script:CommandLines.Add(('{0} :: coop {1} :: exit={2}' -f $Label,($Arguments -join ' '),$code))
+    $script:CommandLines.Add(('{0} :: burrow {1} :: exit={2}' -f $Label,($Arguments -join ' '),$code))
     return [pscustomobject]@{ exit = $code; text = ($output -join "`n") }
 }
 function Get-DiagnosticMechanism([object]$Diagnostic) {
@@ -184,7 +184,7 @@ $baseline = [ordered]@{
         architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
         powershell = $PSVersionTable.PSVersion.ToString()
     }
-    coop = [ordered]@{ version = (& $CoopExe --version); sha256 = (Get-Sha256 $CoopExe) }
+    burrow = [ordered]@{ version = (& $BurrowExe --version); sha256 = (Get-Sha256 $BurrowExe) }
 }
 $projectHead = Get-WorktreeRevision ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
 if ($projectHead) { $baseline.project_head = [ordered]@{ revision = $projectHead.revision; reference = $projectHead.reference } }
@@ -194,7 +194,7 @@ try {
     $scoopVersion = (@($scoopVersionText -split "`r?`n" | Where-Object { $_.Trim() }) | Select-Object -First 2) -join ' '
 } catch { $scoopVersion = 'unavailable' }
 $baseline.scoop = [ordered]@{ root = $ScoopRoot; version = $scoopVersion }
-Write-Output ("coverage inventory: coop {0}, shared root {1}" -f $baseline.coop.version,$ScoopRoot)
+Write-Output ("coverage inventory: burrow {0}, shared root {1}" -f $baseline.burrow.version,$ScoopRoot)
 
 # Shared-root snapshot: the inventory only reads the shared root. Any change is a failure.
 function Get-RootSnapshot([string]$Path) {
@@ -209,7 +209,7 @@ if (-not $SkipRealRootSnapshot) {
     $snapshotBefore | Set-Content -LiteralPath (Join-Path $runDir 'shared-root-before.txt') -Encoding utf8
 }
 
-# Resolve the actual shared Main worktree revision, not Coop's cached refresh record.
+# Resolve the actual shared Main worktree revision, not Burrow's cached refresh record.
 $sharedMain = Join-Path $ScoopRoot 'buckets/main'
 if (-not (Test-Path -LiteralPath (Join-Path $sharedMain '.git'))) { throw "Shared Main bucket is not a Git worktree: $sharedMain" }
 $sharedMainHead = Get-WorktreeRevision $sharedMain
@@ -255,7 +255,7 @@ function Add-InventoryBucket([string]$Name,[string]$Url,[string]$Revision) {
     $arguments = @('--root',$InventoryRoot,'bucket','add',$Name,$Url)
     if ($Revision) { $arguments += @('--revision',$Revision) }
     $arguments += '--json'
-    $result = Invoke-Coop $arguments "add-$Name"
+    $result = Invoke-Burrow $arguments "add-$Name"
     if ($result.exit -ne 0) { throw "bucket add $Name failed: $($result.text)" }
 }
 function Assert-InventoryRevision([string]$Name,[string]$Expected) {
@@ -398,12 +398,12 @@ if ($VerifiedFacts) {
                 if ($null -eq $step) { continue }
                 [string]$stepName = $step.step
                 if (-not $steps[$entry.package].Contains($stepName)) { $steps[$entry.package].Add($stepName) }
-                foreach ($key in @('verification','coop_verify','scoop_verify')) {
+                foreach ($key in @('verification','burrow_verify','scoop_verify')) {
                     $verification = $step.$key
                     if (-not $verification) { continue }
                     $lifecycleVerifications[$entry.package].Add([ordered]@{
                         step = $stepName; label = [string]$verification.label
-                        coop_version = [string]$verification.coop_version
+                        burrow_version = [string]$verification.burrow_version
                         scoop_version = [string]$verification.scoop_version
                         run_exit = $verification.run_exit
                         current_target = [string]$verification.current_target
@@ -447,7 +447,7 @@ $denominator = [ordered]@{
 $baseline.denominator = $denominator
 Write-Output ("denominator: Main={0} Extras={1} total={2} (Main revision {3}, Extras revision {4})" -f $denominator.main,$denominator.extras,$denominator.total,$mainRevision,$extrasRevision)
 if ($sharedMainRecord -and -not $baseline.shared_root.main_registry_matches_worktree) {
-    Write-Warning ("Coop's cached Main revision {0} differs from the actual shared worktree HEAD {1}; the inventory uses the worktree HEAD" -f $sharedMainRecord.revision,$sharedMainHead.revision)
+    Write-Warning ("Burrow's cached Main revision {0} differs from the actual shared worktree HEAD {1}; the inventory uses the worktree HEAD" -f $sharedMainRecord.revision,$sharedMainHead.revision)
 }
 
 $FeatureHelperPath = Join-Path $PSScriptRoot 'coverage-manifest-features.ps1'
@@ -459,7 +459,7 @@ foreach ($bucket in @('main','extras')) {
     Write-Output ("reading and planning {0} {1} manifests with {2} parallel workers" -f $entries.Count,$bucket,$ThrottleLimit)
     $results = $ids | ForEach-Object -Parallel {
         . $using:FeatureHelperPath
-        $exe = $using:CoopExe
+        $exe = $using:BurrowExe
         $root = $using:InventoryRoot
         $id = $_
         $parts = $id -split '/',2
@@ -564,7 +564,7 @@ foreach ($record in $allRecords) {
         $matchingVerifications = @()
         foreach ($verification in @($fact.lifecycle_verifications)) {
             if ($verification.run_exit -ne 0) { continue }
-            if (($verification.coop_version -eq $currentVersion) -or ($verification.scoop_version -eq $currentVersion)) {
+            if (($verification.burrow_version -eq $currentVersion) -or ($verification.scoop_version -eq $currentVersion)) {
                 $matchingVerifications += $verification
             }
         }
@@ -766,9 +766,9 @@ foreach ($id in $samples) {
     $parts = $id -split '/',2
     $destination = Join-Path $sampleDir ($parts[0]+'/'+$parts[1])
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
-    $infoResult = Invoke-Coop @('--root',$InventoryRoot,'--arch','64bit','info',$id,'--json') ('sample-info-'+$parts[1])
+    $infoResult = Invoke-Burrow @('--root',$InventoryRoot,'--arch','64bit','info',$id,'--json') ('sample-info-'+$parts[1])
     $infoResult.text | Set-Content -LiteralPath (Join-Path $destination 'info.json') -Encoding utf8
-    $planResult = Invoke-Coop @('--root',$InventoryRoot,'--arch','64bit','install',$id,'--dry-run','--json') ('sample-plan-'+$parts[1])
+    $planResult = Invoke-Burrow @('--root',$InventoryRoot,'--arch','64bit','install',$id,'--dry-run','--json') ('sample-plan-'+$parts[1])
     $planResult.text | Set-Content -LiteralPath (Join-Path $destination 'plan.json') -Encoding utf8
     $script:CommandLines.Add(('sample {0} :: info exit={1} plan exit={2}' -f $id,$infoResult.exit,$planResult.exit))
 }
@@ -777,7 +777,7 @@ $summary = [ordered]@{
     schema = 1
     generated_at = $baseline.generated_at
     project_head = $baseline.project_head
-    coop = $baseline.coop
+    burrow = $baseline.burrow
     platform = $baseline.platform
     buckets = $baseline.buckets
     scope = $baseline.scope
@@ -811,8 +811,8 @@ $summary = [ordered]@{
     external_helper_links = $helperTargets
 }
 foreach ($record in $allRecords) {
-    $script:CommandLines.Add(('measure {0} :: coop --root {1} --arch 64bit info {0} --json :: exit={2}' -f $record.id,$InventoryRoot,$record.read.exit))
-    $script:CommandLines.Add(('measure {0} :: coop --root {1} --arch 64bit install {0} --dry-run --json :: exit={2}' -f $record.id,$InventoryRoot,$record.plan.exit))
+    $script:CommandLines.Add(('measure {0} :: burrow --root {1} --arch 64bit info {0} --json :: exit={2}' -f $record.id,$InventoryRoot,$record.read.exit))
+    $script:CommandLines.Add(('measure {0} :: burrow --root {1} --arch 64bit install {0} --dry-run --json :: exit={2}' -f $record.id,$InventoryRoot,$record.plan.exit))
 }
 $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $runDir 'summary.json') -Encoding utf8
 $allRecords | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $runDir 'manifests.json') -Encoding utf8
@@ -825,7 +825,7 @@ $baselineProjection = [ordered]@{
     schema = 1
     generated_at = $baseline.generated_at
     project_head = $baseline.project_head
-    coop = $baseline.coop
+    burrow = $baseline.burrow
     platform = $baseline.platform
     scope = $baseline.scope
     buckets = $baseline.buckets

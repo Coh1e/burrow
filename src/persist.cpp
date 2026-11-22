@@ -8,7 +8,7 @@
 #include <set>
 #include <stdexcept>
 
-namespace coop {
+namespace burrow {
 namespace {
 struct ResolvedEntry {
     ir::PersistenceMapping mapping;
@@ -244,7 +244,7 @@ bool same_persistence(const ir::Package& a, const ir::Package& b) {
     return true;
 }
 // The purge scope is the declared persistence of the installed package. Each entry is verified
-// against the actual link and store identity, so no Coop private ownership record is required and
+// against the actual link and store identity, so no Burrow private ownership record is required and
 // a link that changed is still refused. `retained_versions`-style evidence is not used here.
 Json purge_scope(const Context& context, const ir::Package& package, const fs::path& version_directory) {
     require_unique(package);

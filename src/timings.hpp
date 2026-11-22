@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 // Per-run attribution of wall time: how much of an install was the network and how much was this
 // machine. The distinction is the whole point - a number that mixes both cannot be compared with
 // another client, which is why the earlier timing table was withdrawn.

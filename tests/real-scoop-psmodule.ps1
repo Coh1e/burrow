@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][string]$CoopExe,
+    [Parameter(Mandatory)][string]$BurrowExe,
     [Parameter(Mandatory)][string]$EvidenceDir,
     [Parameter(Mandatory)][string]$Package,
     [string]$ScoopRoot = (Join-Path $env:USERPROFILE 'scoop'),
@@ -12,7 +12,7 @@ param(
 # Runs the real CLI against the selected installation root: read-only preview, install, a new
 # PowerShell process that reads the current user environment block and imports the module, the
 # other client's recognition of the same installation, and the removal of the junction plus only
-# the PSModulePath entry Coop itself recorded. `Package` is a qualified request such as
+# the PSModulePath entry Burrow itself recorded. `Package` is a qualified request such as
 # `extras/posh-git` or `main/gsudo`. The current user's PSModulePath and Path are snapshotted and
 # restored in a finally block so a failed run does not leave the human's environment changed.
 #
@@ -21,7 +21,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 New-Item -ItemType Directory -Path $EvidenceDir -Force | Out-Null
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $ScoopRoot = [IO.Path]::GetFullPath($ScoopRoot).TrimEnd('\')
 if ($Package -notmatch '^([^/]+)/([^/]+)$') { throw 'Package must be qualified as bucket/name' }
 $bucket = $Matches[1]
@@ -34,7 +34,7 @@ if (-not $ModuleName) {
 }
 $modulesDirectory = Join-Path $ScoopRoot 'modules'
 $moduleLink = Join-Path $modulesDirectory $ModuleName
-$coopRecord = Join-Path $ScoopRoot ".coop/packages/$packageName.json"
+$burrowRecord = Join-Path $ScoopRoot ".burrow/packages/$packageName.json"
 $commands = [System.Collections.Generic.List[object]]::new()
 $installedByTest = $false
 function Run([string]$name,[string]$exe,[string[]]$arguments) {
@@ -45,7 +45,7 @@ function Run([string]$name,[string]$exe,[string[]]$arguments) {
     $commands.Add([pscustomobject]@{name=$name;exe=$exe;arguments=$arguments;exit=$exit;log=$log})
     return [pscustomobject]@{exit=$exit;output=$output;log=$log}
 }
-function Coop([string]$name,[string[]]$arguments) { return Run $name $CoopExe (@('--root',$ScoopRoot)+$arguments) }
+function Burrow([string]$name,[string[]]$arguments) { return Run $name $BurrowExe (@('--root',$ScoopRoot)+$arguments) }
 function Assert-True([bool]$condition,[string]$message) { if (-not $condition) { throw $message } }
 function Read-Json([object]$output) { return (($output -join "`n") | ConvertFrom-Json) }
 function Get-UserRaw([string]$name) {
@@ -127,16 +127,16 @@ $summary = [ordered]@{
     started = (Get-Date).ToUniversalTime().ToString('o')
 }
 try {
-    $coopVersion = (Run 'coop-version' $CoopExe @('--version')).output.Trim()
-    $summary.coop_version = $coopVersion
+    $burrowVersion = (Run 'burrow-version' $BurrowExe @('--version')).output.Trim()
+    $summary.burrow_version = $burrowVersion
     $bucketHead = (& git -C (Join-Path $ScoopRoot "buckets/$bucket") rev-parse HEAD 2>&1 | Out-String).Trim()
     $summary.bucket_revision = $bucketHead
     $scoopVersionOutput = if ($SkipScoopList) { '' } else { (Run 'scoop-version' (Get-Command scoop.ps1 -ErrorAction Stop).Source @('--version')).output }
     if ($scoopVersionOutput) { $summary.scoop_version = (@(($scoopVersionOutput -split "`r?`n") | Where-Object { $_ -match '^v\d' })[0]).Trim() }
-    if (Test-Path -LiteralPath $coopRecord) { throw "$packageName already has a Coop record; refusing to change the selected root" }
+    if (Test-Path -LiteralPath $burrowRecord) { throw "$packageName already has a Burrow record; refusing to change the selected root" }
 
     # --- Preview: the same operations, no junction and no environment write ---------------------
-    $preview = Coop 'preview' @('install',$Package,'--dry-run','--json')
+    $preview = Burrow 'preview' @('install',$Package,'--dry-run','--json')
     Assert-True ($preview.exit -eq 0) "real psmodule preview failed: $($preview.output)"
     $plan = Read-Json $preview.output
     Assert-True ($plan.execution_available -eq $true) "real psmodule preview was blocked: $($plan.diagnostics | ConvertTo-Json -Compress)"
@@ -151,7 +151,7 @@ try {
     Assert-True ($previewEnvironment.value -eq $psmodulePathBefore.value -and $previewEnvironment.kind -eq $psmodulePathBefore.kind) 'preview changed PSModulePath'
 
     # --- Install and verified module visibility -------------------------------------------------
-    $install = Coop 'install' @('install',$Package,'--json')
+    $install = Burrow 'install' @('install',$Package,'--json')
     Assert-True ($install.exit -eq 0) "real psmodule install failed: $($install.output)"
     $installedByTest = $true
     $result = Read-Json $install.output
@@ -165,9 +165,9 @@ try {
     $installedPath = (Get-UserRaw 'PSModulePath').value
     Assert-PathHas $installedPath $modulesDirectory 'install did not add the modules directory to PSModulePath'
     foreach ($entry in @(Path-Entries $psmodulePathBefore.value)) { Assert-PathHas $installedPath $entry 'install removed an existing PSModulePath entry' }
-    $record = Get-Content -LiteralPath $coopRecord -Raw | ConvertFrom-Json
+    $record = Get-Content -LiteralPath $burrowRecord -Raw | ConvertFrom-Json
     Assert-True ($record.psmodule.name -eq $ModuleName) 'the package record omitted the module name'
-    Assert-True ((Path-Has @($record.psmodule.user_environment.ownership.added) $modulesDirectory)) 'the package record omitted the PSModulePath entry Coop added'
+    Assert-True ((Path-Has @($record.psmodule.user_environment.ownership.added) $modulesDirectory)) 'the package record omitted the PSModulePath entry Burrow added'
     Assert-True ($record.psmodule.user_environment.ownership.previous.value -eq $psmodulePathBefore.value -and
         $record.psmodule.user_environment.ownership.previous.present -eq $psmodulePathBefore.present) 'the package record lost the previous PSModulePath value'
     $probe = Import-InNewPowerShell $ModuleName
@@ -183,13 +183,13 @@ try {
         $scoopList = Run 'scoop-list' (Get-Command scoop.ps1 -ErrorAction Stop).Source @('list')
         Assert-True ($scoopList.exit -eq 0) "scoop list failed: $($scoopList.output)"
         Assert-True (($scoopList.output -split "`r?`n" | Where-Object { $_ -match ('^\s*'+[regex]::Escape($packageName)+'\s') }).Count -ge 1) `
-            "Scoop did not list the Coop-installed package: $($scoopList.output)"
+            "Scoop did not list the Burrow-installed package: $($scoopList.output)"
     }
 
     # --- Dependent packages no longer cascade on an unsupported dependency ----------------------
     foreach ($request in @($ExtraPreviewPackages -split ',' | Where-Object { $_ })) {
         $request = $request.Trim()
-        $dependent = Coop ('preview-'+($request -replace '[\\/:*?"<>|]','-')) @('install',$request,'--dry-run','--json')
+        $dependent = Burrow ('preview-'+($request -replace '[\\/:*?"<>|]','-')) @('install',$request,'--dry-run','--json')
         Assert-True ($dependent.exit -eq 0) "dependent preview for $request failed: $($dependent.output)"
         $dependentPlan = Read-Json $dependent.output
         Assert-True ($dependentPlan.execution_available -eq $true) "dependent preview for $request stayed blocked: $($dependentPlan.diagnostics | ConvertTo-Json -Compress)"
@@ -198,8 +198,8 @@ try {
         Assert-True (@($dependentPlan.dependency_order | Where-Object { $_.package -eq $packageName -and $_.installed -eq $true }).Count -eq 1) "dependent preview for $request did not reuse the installed module package"
     }
 
-    # --- Uninstall removes the junction and only the entry Coop recorded ------------------------
-    $uninstall = Coop 'uninstall' @('uninstall',$packageName,'--json')
+    # --- Uninstall removes the junction and only the entry Burrow recorded ------------------------
+    $uninstall = Burrow 'uninstall' @('uninstall',$packageName,'--json')
     Assert-True ($uninstall.exit -eq 0) "real psmodule uninstall failed: $($uninstall.output)"
     $installedByTest = $false
     $uninstallResult = Read-Json $uninstall.output
@@ -226,7 +226,7 @@ try {
     # Restore the human's environment and remove a package a failed run left behind. The direct
     # registry restore is test scaffolding for a failed run, not a product operation.
     if ($installedByTest) {
-        try { & $CoopExe --root $ScoopRoot uninstall $packageName --json *> (Join-Path $EvidenceDir 'cleanup-uninstall.log') } catch { }
+        try { & $BurrowExe --root $ScoopRoot uninstall $packageName --json *> (Join-Path $EvidenceDir 'cleanup-uninstall.log') } catch { }
     }
     $current = Get-UserRaw 'PSModulePath'
     if ($current.value -ne $psmodulePathBefore.value -or $current.present -ne $psmodulePathBefore.present -or $current.kind -ne $psmodulePathBefore.kind) {

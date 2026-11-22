@@ -19,7 +19,7 @@ try {
         Set-Content -LiteralPath $sentinel -Value 'caller data'
         $arguments = @{ Output = $output }
         if ($name -ne 'acceptance-matrix') { $arguments.ScoopShim = $shim }
-        if ($name -ne 'scoop-baseline') { $arguments.CoopExe = $shim }
+        if ($name -ne 'scoop-baseline') { $arguments.BurrowExe = $shim }
         $failure = $null
         try {
             & (Join-Path $scripts "$name.ps1") @arguments

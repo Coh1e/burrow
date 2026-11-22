@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 // 2 adds the binary names `search` matches against (Scoop matches app names and binaries).
 constexpr int index_format = 2;

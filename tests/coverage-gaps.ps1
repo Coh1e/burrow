@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $repo = Split-Path $PSScriptRoot -Parent
 $baselinePath = Join-Path $PSScriptRoot 'coverage/baseline.json'
 $ledgerPath = Join-Path $PSScriptRoot 'coverage/gaps.json'
@@ -189,7 +189,7 @@ if (-not $ledger.ContainsKey('closure')) {
 } else {
     $closure = $ledger.closure
     if ($closure.code_head -notmatch '^[0-9a-f]{40}$') { Fail 'closure.code_head must be a full commit' }
-    if ($closure.coop_sha256 -notmatch '^[0-9a-f]{64}$') { Fail 'closure.coop_sha256 must be a SHA256' }
+    if ($closure.burrow_sha256 -notmatch '^[0-9a-f]{64}$') { Fail 'closure.burrow_sha256 must be a SHA256' }
     if ([string]::IsNullOrWhiteSpace([string]$closure.verified_at)) { Fail 'closure.verified_at is empty' }
     foreach ($revision in @($closure.inventory.measured.main, $closure.inventory.measured.extras, $closure.inventory.measured.versions)) {
         if ([string]$revision -notmatch '^[0-9a-f]{40}$') { Fail "closure measured revision is not a full commit: $revision" }

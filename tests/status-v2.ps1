@@ -1,8 +1,8 @@
 # Red when: local status v2 omits healthy facts, claims remote freshness, loses diagnostics,
 # mutates state, contacts a remote, emits multiple JSON documents, or changes legacy status JSON.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe test root' }
@@ -10,14 +10,14 @@ $session = Join-Path $TestRoot ([Guid]::NewGuid().ToString('N'))
 $root = Join-Path $session 'root'
 $state = Join-Path $session 'state'
 New-Item -ItemType Directory -Force -Path $root | Out-Null
-$savedState = $env:COOP_STATE_DIR
-$savedApi = $env:COOP_GITHUB_API
+$savedState = $env:BURROW_STATE_DIR
+$savedApi = $env:BURROW_GITHUB_API
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start()
 $port = $listener.LocalEndpoint.Port
 $remote = 'http://127.0.0.1:' + $port
-$env:COOP_STATE_DIR = $state
-$env:COOP_GITHUB_API = $remote
+$env:BURROW_STATE_DIR = $state
+$env:BURROW_GITHUB_API = $remote
 function Check([bool]$Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
 function Snapshot([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return '<absent>' }
@@ -33,7 +33,7 @@ function Read-V2([int]$ExpectedCode = 0,[string]$GlobalRoot = '') {
     $arguments = @('--root',$root,'status','-l','--json=2')
     $beforeGlobal = if ($GlobalRoot) { Snapshot $GlobalRoot } else { '' }
     if ($GlobalRoot) { $arguments += @('--global-root',$GlobalRoot) }
-    $result = Invoke-CoopNativeRaw -Exe $CoopExe -Arguments $arguments
+    $result = Invoke-BurrowNativeRaw -Exe $BurrowExe -Arguments $arguments
     Check ($result.code -eq $ExpectedCode) "v2 exited $($result.code): $($result.err) $($result.out)"
     Check ([string]::IsNullOrWhiteSpace($result.err)) "v2 mixed diagnostics into stderr: $($result.err)"
     $report = $result.out | ConvertFrom-Json
@@ -63,9 +63,9 @@ function Write-GitIndex([string]$Revision,[string[]]$Names) {
 try {
     $empty = Read-V2
     Check (@($empty.apps).Count -eq 0 -and @($empty.buckets).Count -eq 0 -and $empty.summary.complete) 'Empty root is not a complete local report'
-    $coop = @($empty.clients | Where-Object name -eq 'coop')
+    $burrow = @($empty.clients | Where-Object name -eq 'burrow')
     $scoop = @($empty.clients | Where-Object name -eq 'scoop')
-    Check ($coop.Count -eq 1 -and $coop[0].state -eq 'not_checked' -and $coop[0].reason -eq 'local-only') 'Coop remote check claimed freshness'
+    Check ($burrow.Count -eq 1 -and $burrow[0].state -eq 'not_checked' -and $burrow[0].reason -eq 'local-only') 'Burrow remote check claimed freshness'
     Check ($scoop.Count -eq 1 -and $scoop[0].state -eq 'not_applicable' -and -not $scoop[0].data.installed) 'Missing Scoop not represented'
     New-Item -ItemType Directory -Force -Path "$root/buckets/main/bucket" | Out-Null
     '{"version":"1","post_install":"throw ''hooks must not run''"}' | Set-Content "$root/buckets/main/bucket/demo.json" -Encoding ascii
@@ -77,10 +77,10 @@ try {
     $head = & git -C "$root/buckets/main" rev-parse HEAD
     Install-Fact demo 1
     Copy-Item "$root/buckets/main/bucket/demo.json" "$root/apps/demo/current/scoop-manifest.json" -Force
-    $oldBefore = Invoke-CoopNativeRaw -Exe $CoopExe -Arguments @('--root',$root,'status','--json')
+    $oldBefore = Invoke-BurrowNativeRaw -Exe $BurrowExe -Arguments @('--root',$root,'status','--json')
     Check ($oldBefore.code -eq 0 -and $oldBefore.out.Trim() -ceq '[]') 'Legacy baseline changed'
-    New-Item -ItemType Directory -Force -Path "$root/.coop" | Out-Null
-    'legacy' | Set-Content "$root/.coop/sentinel" -Encoding ascii
+    New-Item -ItemType Directory -Force -Path "$root/.burrow" | Out-Null
+    'legacy' | Set-Content "$root/.burrow/sentinel" -Encoding ascii
     $healthy = Read-V2
     $demo = @($healthy.apps | Where-Object name -eq 'demo')
     $bucket = @($healthy.buckets | Where-Object name -eq 'main')
@@ -122,7 +122,7 @@ try {
     Check (@($badRegistry.diagnostics).Count -gt 0 -and @($badRegistry.buckets).Count -eq 1) 'Bad registry hid shared buckets or lacked a diagnostic'
     [IO.File]::Delete("$state/buckets.json")
     Copy-Item "$root/buckets/main/bucket/demo.json" "$root/apps/demo/current/scoop-manifest.json" -Force
-    $legacy = Invoke-CoopNativeRaw -Exe $CoopExe -Arguments @('--root',$root,'status','--json')
+    $legacy = Invoke-BurrowNativeRaw -Exe $BurrowExe -Arguments @('--root',$root,'status','--json')
     Check ($legacy.code -eq 0 -and $legacy.out.Trim() -ceq '[]') 'Legacy JSON shape/content changed'
     '{bad' | Set-Content "$root/apps/demo/current/scoop-install.json" -Encoding ascii
     '{"version":"2"}' | Set-Content "$root/buckets/main/bucket/demo.json" -Encoding ascii
@@ -139,10 +139,10 @@ try {
     $badScoop = Read-V2 1
     Check (@($badScoop.clients | Where-Object { $_.name -eq 'scoop' -and $_.state -eq 'failed' }).Count -eq 1) 'Corrupt Scoop metadata hidden'
     [IO.File]::Delete("$root/apps/scoop/current/.git")
-    Install-Fact coop 0.3.3
-    $rootCoop = Read-V2
-    Check (@($rootCoop.apps | Where-Object name -eq 'coop').Count -eq 0 -and
-        @($rootCoop.clients | Where-Object { $_.name -eq 'coop' -and $_.data.installed }).Count -eq 1) 'Coop client treated as ordinary software'
+    Install-Fact burrow 0.3.3
+    $rootBurrow = Read-V2
+    Check (@($rootBurrow.apps | Where-Object name -eq 'burrow').Count -eq 0 -and
+        @($rootBurrow.clients | Where-Object { $_.name -eq 'burrow' -and $_.data.installed }).Count -eq 1) 'Burrow client treated as ordinary software'
     $globalRoot = Join-Path $session 'global'
     New-Item -ItemType Directory -Force -Path "$globalRoot/apps/demo/current" | Out-Null
     '{"version":"3"}' | Set-Content "$globalRoot/apps/demo/current/scoop-manifest.json" -Encoding ascii
@@ -153,7 +153,7 @@ try {
     $removed = Read-V2
     Check (@($removed.buckets).Count -eq 0) 'Removed bucket was silently reactivated'
     [IO.File]::Delete("$state/buckets.json")
-    $invalid = Invoke-CoopNativeRaw -Exe $CoopExe -Arguments @('--root',$root,'status','-l','--json=3')
+    $invalid = Invoke-BurrowNativeRaw -Exe $BurrowExe -Arguments @('--root',$root,'status','-l','--json=3')
     Check ($invalid.code -eq 2) 'Unsupported JSON version was accepted'
     foreach ($case in @(
         @{args=@('update','--json=2');code=1},
@@ -162,13 +162,13 @@ try {
     )) {
         $before = Snapshot $root
         $beforeState = Snapshot $state
-        $result = Invoke-CoopNativeRaw -Exe $CoopExe -Arguments (@('--root',$root) + $case.args)
+        $result = Invoke-BurrowNativeRaw -Exe $BurrowExe -Arguments (@('--root',$root) + $case.args)
         Check ($result.code -eq $case.code -and [string]::IsNullOrWhiteSpace($result.out)) 'Unsupported/conflicting format silently degraded'
         Check ((Snapshot $root) -ceq $before -and (Snapshot $state) -ceq $beforeState -and -not $listener.Pending()) 'Rejected v2 request had side effects'
     }
-    $alias = Invoke-CoopNativeRaw -Exe $CoopExe -Arguments @('--root',$root,'status','--local','--json=2')
+    $alias = Invoke-BurrowNativeRaw -Exe $BurrowExe -Arguments @('--root',$root,'status','--local','--json=2')
     Check ($alias.code -eq 0 -and ($alias.out | ConvertFrom-Json).scope -eq 'local') 'Local long switch lost v2 support'
-    # Simulate a valid Coop index, followed by a Scoop-side commit while private metadata stays old.
+    # Simulate a valid Burrow index, followed by a Scoop-side commit while private metadata stays old.
     & git -C "$root/buckets/main" add .
     & git -C "$root/buckets/main" -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m cached-baseline
     if ($LASTEXITCODE -ne 0) { throw 'Cannot commit cache baseline' }
@@ -192,6 +192,6 @@ try {
     Write-Output 'PASS local status v2 facts, diagnostics, legacy JSON compatibility and no remote/state effects'
 } finally {
     $listener.Stop()
-    $env:COOP_STATE_DIR = $savedState
-    $env:COOP_GITHUB_API = $savedApi
+    $env:BURROW_STATE_DIR = $savedState
+    $env:BURROW_GITHUB_API = $savedApi
 }

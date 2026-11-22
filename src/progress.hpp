@@ -7,7 +7,7 @@
 #include <thread>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 // Human-readable progress for write commands. It never changes the plan, the execution order or the
 // exit code, and a --json run installs no progress at all (see GLOSSARY: Progress Feedback).
 class Progress {

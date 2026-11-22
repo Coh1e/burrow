@@ -1,13 +1,13 @@
 # Scoop 0.6.0 写命令输出实录
 
-2026-10-28 建立。目的：为 Coop 的输出契约提供可复核的 ground truth，取代此前根据源码推断措辞的做法。术语见 [GLOSSARY.md](../../GLOSSARY.md) 的「进度反馈」。
+2026-10-28 建立。目的：为 Burrow 的输出契约提供可复核的 ground truth，取代此前根据源码推断措辞的做法。术语见 [GLOSSARY.md](../../GLOSSARY.md) 的「进度反馈」。
 
 本文件只记录**实际观察到**的输出。凡未观察到的，写在「未覆盖」里，不用记忆补足。
 
 ## 方法与限制
 
 - Scoop 版本 v0.6.0（`scoop --version`，2026-09-30 发布），源码位置 `<SCOOP_SRC> = C:\Users\Neo\scoop\apps\scoop\current`。
-- 安装根：`D:\Projects\coop\.local\scoop-capture2`（`$env:SCOOP`）。`$env:SCOOP_GLOBAL`、`$env:XDG_CONFIG_HOME` 同样指向 `.local` 下。没有写入 `C:\Users\Neo\scoop`。
+- 安装根：`D:\Projects\burrow\.local\scoop-capture2`（`$env:SCOOP`）。`$env:SCOOP_GLOBAL`、`$env:XDG_CONFIG_HOME` 同样指向 `.local` 下。没有写入 `C:\Users\Neo\scoop`。
 - bucket：`.local\scoop-capture2\buckets\probe` 下的手写 Manifest，`url` 指向 `.local\deps\test-archives` 里的真实归档，`hash` 由 `Get-FileHash -Algorithm SHA256` 现场计算。因此**全程无网络下载**，`Downloading` 行显示 `file://` URL。
 - 偏差：真实生态里 bucket 名是 `main`，这里是 `probe`；根路径在项目内。凡受此影响的行，在下面标注。
 - 首次在新根上运行会出现初始化噪声（`Updating Scoop...`、`Adding ... to your path.`、`Updating Buckets...`、`INFO Converting 'main' bucket to git repo...`、`ERROR 'main' bucket not found.`）。正常根只在 `scoop update` 或首次安装时出现其中一部分。
@@ -23,12 +23,12 @@
 
 ```
 Installing 'ripgrep' (15.2.0) [64bit] from 'probe' bucket
-Downloading file:///D:/Projects/coop/.local/deps/test-archives/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip (1.7 MB)...
+Downloading file:///D:/Projects/burrow/.local/deps/test-archives/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip (1.7 MB)...
 Checking hash of <ESC>[36mripgrep-15.2.0-x86_64-pc-windows-msvc.zip<ESC>[0m... 
 OK.
 Extracting <ESC>[36mripgrep-15.2.0-x86_64-pc-windows-msvc.zip<ESC>[0m... 
 Done.
-Linking D:\Projects\coop\.local\scoop-capture2\apps\ripgrep\current => D:\Projects\coop\.local\scoop-capture2\apps\ripgrep\15.2.0
+Linking D:\Projects\burrow\.local\scoop-capture2\apps\ripgrep\current => D:\Projects\burrow\.local\scoop-capture2\apps\ripgrep\15.2.0
 Creating shim for 'rg'.
 'ripgrep' (15.2.0) was installed successfully!
 ```
@@ -48,12 +48,12 @@ Use 'scoop update ripgrep' to install a new version.
 
 ```
 Installing 'tidy' (5.8.0) [64bit] from 'probe' bucket
-Downloading file:///D:/Projects/coop/.local/deps/test-archives/tidy-5.8.0-win64.zip (1.3 MB)...
+Downloading file:///D:/Projects/burrow/.local/deps/test-archives/tidy-5.8.0-win64.zip (1.3 MB)...
 Checking hash of <ESC>[36mtidy-5.8.0-win64.zip<ESC>[0m... 
 OK.
 Extracting <ESC>[36mtidy-5.8.0-win64.zip<ESC>[0m... 
 Done.
-Linking D:\Projects\coop\.local\scoop-capture2\apps\tidy\current => D:\Projects\coop\.local\scoop-capture2\apps\tidy\5.8.0
+Linking D:\Projects\burrow\.local\scoop-capture2\apps\tidy\current => D:\Projects\burrow\.local\scoop-capture2\apps\tidy\5.8.0
 Creating shim for 'tidy'.
 'tidy' (5.8.0) was installed successfully!
 ```
@@ -66,12 +66,12 @@ Creating shim for 'tidy'.
 
 ```
 Installing 'curl' (8.23.0_5) [64bit] from 'probe' bucket
-Downloading file:///D:/Projects/coop/.local/deps/test-archives/curl-8.23.0_5-win64-mingw.tar.xz (4.7 MB)...
+Downloading file:///D:/Projects/burrow/.local/deps/test-archives/curl-8.23.0_5-win64-mingw.tar.xz (4.7 MB)...
 Checking hash of <ESC>[36mcurl-8.23.0_5-win64-mingw.tar.xz<ESC>[0m... 
 OK.
 Extracting <ESC>[36mcurl-8.23.0_5-win64-mingw.tar.xz<ESC>[0m... 
 Done.
-Linking D:\Projects\coop\.local\scoop-capture2\apps\curl\current => D:\Projects\coop\.local\scoop-capture2\apps\curl\8.23.0_5
+Linking D:\Projects\burrow\.local\scoop-capture2\apps\curl\current => D:\Projects\burrow\.local\scoop-capture2\apps\curl\8.23.0_5
 Creating shim for 'curl'.
 'curl' (8.23.0_5) was installed successfully!
 ```
@@ -80,18 +80,18 @@ Creating shim for 'curl'.
 
 ```
 Installing '7zip' (26.05) [64bit] from 'probe' bucket
-Downloading file:///D:/Projects/coop/.local/deps/test-archives/7z2605-x64.msi (1.9 MB)...
+Downloading file:///D:/Projects/burrow/.local/deps/test-archives/7z2605-x64.msi (1.9 MB)...
 Checking hash of <ESC>[36m7z2605-x64.msi<ESC>[0m... 
 OK.
 Extracting <ESC>[36m7z2605-x64.msi<ESC>[0m... 
 Done.
-Linking D:\Projects\coop\.local\scoop-capture2\apps\7zip\current => D:\Projects\coop\.local\scoop-capture2\apps\7zip\26.05
+Linking D:\Projects\burrow\.local\scoop-capture2\apps\7zip\current => D:\Projects\burrow\.local\scoop-capture2\apps\7zip\26.05
 Creating shim for '7z'.
-Adding D:\Projects\coop\.local\scoop-capture2\shims to your path.
+Adding D:\Projects\burrow\.local\scoop-capture2\shims to your path.
 Creating shim for '7zG'.
-Making D:\Projects\coop\.local\scoop-capture2\shims\7zg.exe a GUI binary.
+Making D:\Projects\burrow\.local\scoop-capture2\shims\7zg.exe a GUI binary.
 Creating shim for '7zFM'.
-Making D:\Projects\coop\.local\scoop-capture2\shims\7zfm.exe a GUI binary.
+Making D:\Projects\burrow\.local\scoop-capture2\shims\7zfm.exe a GUI binary.
 Creating shortcut for 7-Zip\7-Zip File Manager (7zFM.exe)
 Creating shortcut for 7-Zip\7-Zip Help (7-zip.chm)
 Persisting Codecs
@@ -127,7 +127,7 @@ Installing 'ripgrep' ...
 
 ```
 Resetting ripgrep (15.2.0).
-Linking D:\Projects\coop\.local\scoop-capture2\apps\ripgrep\current => D:\Projects\coop\.local\scoop-capture2\apps\ripgrep\15.2.0
+Linking D:\Projects\burrow\.local\scoop-capture2\apps\ripgrep\current => D:\Projects\burrow\.local\scoop-capture2\apps\ripgrep\15.2.0
 Creating shim for 'rg'.
 ```
 
@@ -140,18 +140,18 @@ ripgrep: 15.2.0 -> 15.2.0_1
 Updating one outdated app:
 Updating 'ripgrep' (15.2.0 -> 15.2.0_1)
 Downloading new version
-Downloading file:///D:/Projects/coop/.local/deps/test-archives/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip (1.7 MB)...
+Downloading file:///D:/Projects/burrow/.local/deps/test-archives/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip (1.7 MB)...
 Checking hash of <ESC>[36mripgrep-15.2.0-x86_64-pc-windows-msvc.zip<ESC>[0m... 
 OK.
 Uninstalling 'ripgrep' (15.2.0)
 Removing shim 'rg.shim'.
 Removing shim 'rg.exe'.
-Unlinking D:\Projects\coop\.local\scoop-capture2\apps\ripgrep\current
+Unlinking D:\Projects\burrow\.local\scoop-capture2\apps\ripgrep\current
 Installing 'ripgrep' (15.2.0_1) [64bit] from 'probe' bucket
 Loading ripgrep-15.2.0-x86_64-pc-windows-msvc.zip from cache
 Extracting <ESC>[36mripgrep-15.2.0-x86_64-pc-windows-msvc.zip<ESC>[0m... 
 Done.
-Linking D:\Projects\coop\.local\scoop-capture2\apps\ripgrep\current => D:\Projects\coop\.local\scoop-capture2\apps\ripgrep\15.2.0_1
+Linking D:\Projects\burrow\.local\scoop-capture2\apps\ripgrep\current => D:\Projects\burrow\.local\scoop-capture2\apps\ripgrep\15.2.0_1
 Creating shim for 'rg'.
 'ripgrep' (15.2.0_1) was installed successfully!
 ```
@@ -164,7 +164,7 @@ Creating shim for 'rg'.
 Uninstalling 'ripgrep' (15.2.0_1).
 Removing shim 'rg.shim'.
 Removing shim 'rg.exe'.
-Unlinking D:\Projects\coop\.local\scoop-capture2\apps\ripgrep\current
+Unlinking D:\Projects\burrow\.local\scoop-capture2\apps\ripgrep\current
 'ripgrep' was uninstalled.
 ```
 
@@ -195,10 +195,10 @@ Expected:      000000…000
 Actual:        71b2fef8…afc5
 
 Please try again or create a new issue by using the following link and paste your console output:
-https://github.com/Coh1e/coop/issues/new?title=badhash%401.0.0%3a+hash+check+failed
+https://github.com/Coh1e/burrow/issues/new?title=badhash%401.0.0%3a+hash+check+failed
 ```
 
-退出码 1。`ERROR` 行替代了 `OK.`，随后是一个字段块和一段固定引导语。**问题链接指向 `Coh1e/coop`，不是 `ScoopInstaller/Scoop`**；在本次录制环境里它是从 bucket 的识别信息推出来的，真实根上应指向 Scoop 自己的仓库，此处未验证，见「未覆盖」。
+退出码 1。`ERROR` 行替代了 `OK.`，随后是一个字段块和一段固定引导语。**问题链接指向 `Coh1e/burrow`，不是 `ScoopInstaller/Scoop`**；在本次录制环境里它是从 bucket 的识别信息推出来的，真实根上应指向 Scoop 自己的仓库，此处未验证，见「未覆盖」。
 
 ### 失败：URL 不可达
 
@@ -208,7 +208,7 @@ Installing 'badurl' (1.0.0) [64bit] from 'probe' bucket
 ERROR URL https://example.invalid/nothing.zip is not valid
 ```
 
-退出码 1。第二行是 **Scoop 自己的编码 bug**：一条本地化（中文）提示在 UTF-16/ANSI 边界上被打坏。这不是 Coop 需要复刻的行为，但说明了"逐字对齐"作为目标的边界。
+退出码 1。第二行是 **Scoop 自己的编码 bug**：一条本地化（中文）提示在 UTF-16/ANSI 边界上被打坏。这不是 Burrow 需要复刻的行为，但说明了"逐字对齐"作为目标的边界。
 
 ## 源码依据
 
@@ -245,7 +245,7 @@ ERROR URL https://example.invalid/nothing.zip is not valid
 
 ## 未覆盖
 
-写完后已查清一项，从下面的清单里移出：`suggests installing` 的数据来源是 Manifest 的 `suggest` 字段（`lib/install.ps1:76` 收 `$manifest.suggest`，形状为 feature → `bucket/app`，实测 `ripgrep.json` 为 `{"vcredist":"extras/vcredist2022"}`）。这条不在本文件的实录范围内，改由 [#59](https://github.com/Coh1e/coop/issues/59) 承担。
+写完后已查清一项，从下面的清单里移出：`suggests installing` 的数据来源是 Manifest 的 `suggest` 字段（`lib/install.ps1:76` 收 `$manifest.suggest`，形状为 feature → `bucket/app`，实测 `ripgrep.json` 为 `{"vcredist":"extras/vcredist2022"}`）。这条不在本文件的实录范围内，改由 [#59](https://github.com/Coh1e/burrow/issues/59) 承担。
 
 下面五项仍然未覆盖：
 
@@ -253,4 +253,4 @@ ERROR URL https://example.invalid/nothing.zip is not valid
 - **真实根上的首次输出**：`Updating Scoop...`、`Updating Buckets...` 在正常根上的出现条件未验证。
 - **真实 HTTP 下载**：本文全部用 `file://`，`Content-Length`、分块与重试路径都没有真实网络样本。进度条本身见源码结论，不需要样本。
 - **依赖安装**：没有录到 `depends` 场景（手写 Manifest 未构造依赖）。
-- **hash 失败时的问题链接**：指向 `Coh1e/coop`，与真实根上的行为不同，未查明。
+- **hash 失败时的问题链接**：指向 `Coh1e/burrow`，与真实根上的行为不同，未查明。

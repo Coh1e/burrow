@@ -2,8 +2,8 @@
 #include "data.hpp"
 #include <vector>
 
-namespace coop {
-// Old-version evidence is always derived from local files and Coop's own records. Missing
+namespace burrow {
+// Old-version evidence is always derived from local files and Burrow's own records. Missing
 // historical manifests are reported as missing; this module never reconstructs a download URL.
 Json version_evidence(const fs::path& directory, const std::string& version);
 // Records local file metadata without following reparse points. It detects ordinary later

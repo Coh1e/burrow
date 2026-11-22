@@ -1,87 +1,87 @@
 // Help text from Scoop 0.6.0 (e6aa3b3), MIT; see THIRD_PARTY.md.
-// Client invocations use coop; behavioral differences are documented separately.
-{"alias",R"coophelp(Available subcommands: add, rm, list.
+// Client invocations use burrow; behavioral differences are documented separately.
+{"alias",R"burrowhelp(Available subcommands: add, rm, list.
 
-Aliases are custom coop subcommands that can be created to make common tasks easier.
+Aliases are custom burrow subcommands that can be created to make common tasks easier.
 
 To add an alias:
 
-    coop alias add <name> <command> [<description>]
+    burrow alias add <name> <command> [<description>]
 
 e.g.,
 
-    coop alias add rm 'coop uninstall $args[0]' 'Uninstall an app'
-    coop alias add upgrade 'coop update *' 'Update all apps, just like "brew" or "apt"'
+    burrow alias add rm 'burrow uninstall $args[0]' 'Uninstall an app'
+    burrow alias add upgrade 'burrow update *' 'Update all apps, just like "brew" or "apt"'
 
 To remove an alias:
 
-    coop alias rm <name>
+    burrow alias rm <name>
 
 To list all aliases:
 
-    coop alias list [-v|--verbose]
+    burrow alias list [-v|--verbose]
 
 Options:
-  -v, --verbose  Show alias description and table headers (works only for "list"))coophelp"},
-{"bucket",R"coophelp(Add, list or remove buckets.
+  -v, --verbose  Show alias description and table headers (works only for "list"))burrowhelp"},
+{"bucket",R"burrowhelp(Add, list or remove buckets.
 
-Buckets are repositories of apps available to install. coop comes with
+Buckets are repositories of apps available to install. burrow comes with
 a default bucket, but you can also add buckets that you or others have
 published.
 
 To add a bucket:
-    coop bucket add <name> [<repo>]
+    burrow bucket add <name> [<repo>]
 
 e.g.:
-    coop bucket add extras https://github.com/ScoopInstaller/Extras.git
+    burrow bucket add extras https://github.com/ScoopInstaller/Extras.git
 
 Since the 'extras' bucket is known to Scoop, this can be shortened to:
-    coop bucket add extras
+    burrow bucket add extras
 
 To list all known buckets, use:
-    coop bucket known)coophelp"},
-{"cache",R"coophelp(coop caches downloads so you don't need to download the same files
+    burrow bucket known)burrowhelp"},
+{"cache",R"burrowhelp(burrow caches downloads so you don't need to download the same files
 when you uninstall and re-install the same version of an app.
 
 You can use
-    coop cache show
+    burrow cache show
 to see what's in the cache, and
-    coop cache rm <app> to remove downloads for a specific app.
+    burrow cache rm <app> to remove downloads for a specific app.
 
 To clear everything in your cache, use:
-    coop cache rm *
-You can also use the `-a/--all` switch in place of `*` here)coophelp"},
-{"cat",R"coophelp(Show content of specified manifest.
+    burrow cache rm *
+You can also use the `-a/--all` switch in place of `*` here)burrowhelp"},
+{"cat",R"burrowhelp(Show content of specified manifest.
 If configured, `bat` will be used to pretty-print the JSON.
-See `cat_style` in `coop help config` for further information.)coophelp"},
-{"checkup",R"coophelp(Performs a series of diagnostic tests to try to identify things that may
-cause problems with Scoop.)coophelp"},
-{"cleanup",R"coophelp('coop cleanup' cleans coop apps by removing old versions.
-'coop cleanup <app>' cleans up the old versions of that app if said versions exist.
+See `cat_style` in `burrow help config` for further information.)burrowhelp"},
+{"checkup",R"burrowhelp(Performs a series of diagnostic tests to try to identify things that may
+cause problems with Scoop.)burrowhelp"},
+{"cleanup",R"burrowhelp('burrow cleanup' cleans burrow apps by removing old versions.
+'burrow cleanup <app>' cleans up the old versions of that app if said versions exist.
 
 You can use '*' in place of <app> or `-a`/`--all` switch to cleanup all apps.
 
 Options:
   -a, --all          Cleanup all apps (alternative to '*')
   -g, --global       Cleanup a globally installed app
-  -k, --cache        Remove outdated download cache)coophelp"},
-{"config",R"coophelp(The coop configuration file is saved at ~/.config/scoop/config.json.
+  -k, --cache        Remove outdated download cache)burrowhelp"},
+{"config",R"burrowhelp(The burrow configuration file is saved at ~/.config/scoop/config.json.
 
 To get all configuration settings:
 
-    coop config
+    burrow config
 
 To get a configuration setting:
 
-    coop config <name>
+    burrow config <name>
 
 To set a configuration setting:
 
-    coop config <name> <value>
+    burrow config <name> <value>
 
 To remove a configuration setting:
 
-    coop config rm <name>
+    burrow config rm <name>
 
 Settings
 --------
@@ -93,18 +93,18 @@ use_lessmsi: $true|$false
       Prefer lessmsi utility over native msiexec.
 
 use_sqlite_cache: $true|$false
-      Use SQLite database for caching. This is useful for speeding up 'coop search' and 'coop shim' commands.
+      Use SQLite database for caching. This is useful for speeding up 'burrow search' and 'burrow shim' commands.
 
 use_git_history: $true|$false
       Enable searching for specific versions in git history when installing apps with version specifiers.
-      When enabled, coop will first search the bucket's git history for the exact version before falling back to autoupdate.
+      When enabled, burrow will first search the bucket's git history for the exact version before falling back to autoupdate.
       (Default is $true)
 
 no_junction: $true|$false
       The 'current' version alias will not be used. Shims and shortcuts will point to specific version instead.
 
 scoop_repo: https://github.com/ScoopInstaller/Scoop
-      Git repository containing coop source code.
+      Git repository containing burrow source code.
       This configuration is useful for custom forks.
 
 scoop_branch: master|develop
@@ -113,7 +113,7 @@ scoop_branch: master|develop
       If you want to receive updates earlier to test new functionalities use develop (see: 'https://github.com/ScoopInstaller/Scoop/issues/2939')
 
 proxy: [username:password@]host:port
-      By default, coop will use the proxy settings from Internet Options, but with anonymous authentication.
+      By default, burrow will use the proxy settings from Internet Options, but with anonymous authentication.
 
       * To use the credentials for the current logged-in user, use 'currentuser' in place of username:password
       * To use the system proxy settings configured in Internet Options, use 'default' in place of host:port
@@ -121,7 +121,7 @@ proxy: [username:password@]host:port
       * To bypass the system proxy and connect directly, use 'none' (with no username or password)
 
 autostash_on_conflict: $true|$false
-      When a conflict is detected during updating, coop will auto-stash the uncommitted changes.
+      When a conflict is detected during updating, burrow will auto-stash the uncommitted changes.
       (Default is $false, which will abort the update)
 
 default_architecture: 64bit|32bit|arm64
@@ -135,23 +135,23 @@ force_update: $true|$false
       Force apps updating to bucket's version.
 
 show_update_log: $true|$false
-      Do not show changed commits on 'coop update'
+      Do not show changed commits on 'burrow update'
 
 show_manifest: $true|$false
       Displays the manifest of every app that's about to
       be installed, then asks user if they wish to proceed.
 
 shim: kiennq|scoopcs|71
-      Choose coop shim build.
+      Choose burrow shim build.
 
 root_path: $Env:UserProfile\scoop
-      Path to coop root directory.
+      Path to burrow root directory.
 
 global_path: $Env:ProgramData\scoop
-      Path to coop root directory for global apps.
+      Path to burrow root directory for global apps.
 
 cache_path:
-      For downloads, defaults to 'cache' folder under coop root directory.
+      For downloads, defaults to 'cache' folder under burrow root directory.
 
 gh_token:
       GitHub API token used to make authenticated requests.
@@ -163,15 +163,15 @@ virustotal_api_key:
       See: 'https://support.virustotal.com/hc/en-us/articles/115002088769-Please-give-me-an-API-key'
 
 cat_style:
-      When set to a non-empty string, coop will use 'bat' to display the manifest for
-      the `coop cat` command and while doing manifest review. This requires 'bat' to be
-      installed (run `coop install bat` to install it), otherwise errors will be thrown.
+      When set to a non-empty string, burrow will use 'bat' to display the manifest for
+      the `burrow cat` command and while doing manifest review. This requires 'bat' to be
+      installed (run `burrow install bat` to install it), otherwise errors will be thrown.
       The accepted values are the same as ones passed to the --style flag of 'bat'.
 
 ignore_running_processes: $true|$false
-      When set to $false (default), coop would stop its procedure immediately if it detects
+      When set to $false (default), burrow would stop its procedure immediately if it detects
       any target app process is running. Procedure here refers to reset/uninstall/update.
-      When set to $true, coop only displays a warning message and continues procedure.
+      When set to $true, burrow only displays a warning message and continues procedure.
 
 private_hosts:
       Array of private hosts that need additional authentication.
@@ -179,8 +179,8 @@ private_hosts:
       you need to add the host to this list with 'match' and 'headers' strings.
 
 hold_update_until:
-      Disable/Hold coop self-updates, until the specified date.
-      `coop hold scoop` will set the value to one day later.
+      Disable/Hold burrow self-updates, until the specified date.
+      `burrow hold scoop` will set the value to one day later.
       Should be in the format 'YYYY-MM-DD', 'YYYY/MM/DD' or any other forms that accepted by '[System.DateTime]::Parse()'.
       Ref: https://docs.microsoft.com/dotnet/api/system.datetime.parse?view=netframework-4.5#StringToParse
 
@@ -189,9 +189,9 @@ update_nightly: $true|$false
       Otherwise, nightly version will not be updated unless `--force` is used.
 
 use_isolated_path: $true|$false|[string]
-      When set to $true, coop will use `SCOOP_PATH` environment variable to store apps' `PATH`s.
-      When set to arbitrary non-empty string, coop will use that string as the environment variable name instead.
-      This is useful when you want to isolate coop from the system `PATH`.
+      When set to $true, burrow will use `SCOOP_PATH` environment variable to store apps' `PATH`s.
+      When set to arbitrary non-empty string, burrow will use that string as the environment variable name instead.
+      This is useful when you want to isolate burrow from the system `PATH`.
 
 ARIA2 configuration
 -------------------
@@ -226,99 +226,99 @@ aria2-min-split-size: 5M
 
 aria2-options:
       Array of additional aria2 options.
-      See: 'https://aria2.github.io/manual/en/html/aria2c.html#options')coophelp"},
-{"create",R"coophelp(Create your own custom app manifest)coophelp"},
-{"download",R"coophelp(e.g. The usual way to download an app, without installing it (uses your local 'buckets'):
-     coop download git
+      See: 'https://aria2.github.io/manual/en/html/aria2c.html#options')burrowhelp"},
+{"create",R"burrowhelp(Create your own custom app manifest)burrowhelp"},
+{"download",R"burrowhelp(e.g. The usual way to download an app, without installing it (uses your local 'buckets'):
+     burrow download git
 
 To download a different version of the app
 (note that this will auto-generate the manifest using current version):
-     coop download gh@2.7.0
+     burrow download gh@2.7.0
 
 To download an app from a manifest at a URL:
-     coop download https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/runat.json
+     burrow download https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/runat.json
 
 To download an app from a manifest on your computer
-     coop download path\to\app.json
+     burrow download path\to\app.json
 
 Options:
   -f, --force                     Force download (overwrite cache)
   -s, --skip-hash-check           Skip hash verification (use with caution!)
-  -u, --no-update-scoop           Don't update coop before downloading if it's outdated
-  -a, --arch <32bit|64bit|arm64>  Use the specified architecture, if the app supports it)coophelp"},
-{"export",R"coophelp(Options:
-  -c, --config       Export the coop configuration file too)coophelp"},
-{"hold",R"coophelp(To hold a user-scoped app:
-     coop hold <app>
+  -u, --no-update-scoop           Don't update burrow before downloading if it's outdated
+  -a, --arch <32bit|64bit|arm64>  Use the specified architecture, if the app supports it)burrowhelp"},
+{"export",R"burrowhelp(Options:
+  -c, --config       Export the burrow configuration file too)burrowhelp"},
+{"hold",R"burrowhelp(To hold a user-scoped app:
+     burrow hold <app>
 
 To hold a global app:
-     coop hold -g <app>
+     burrow hold -g <app>
 
 Options:
-  -g, --global  Hold globally installed apps)coophelp"},
-{"import",R"coophelp(To replicate a coop installation from a file stored on Desktop, run
-     coop import Desktop\scoopfile.json)coophelp"},
-{"info",R"coophelp(Options:
-  -v, --verbose   Show full paths and URLs)coophelp"},
-{"install",R"coophelp(e.g. The usual way to install an app (uses your local 'buckets'):
-     coop install git
+  -g, --global  Hold globally installed apps)burrowhelp"},
+{"import",R"burrowhelp(To replicate a burrow installation from a file stored on Desktop, run
+     burrow import Desktop\scoopfile.json)burrowhelp"},
+{"info",R"burrowhelp(Options:
+  -v, --verbose   Show full paths and URLs)burrowhelp"},
+{"install",R"burrowhelp(e.g. The usual way to install an app (uses your local 'buckets'):
+     burrow install git
 
 To install a different version of the app
 (will search sqlite cache if enabled, then git history (if use_git_history is $true), then auto-generate manifest as fallback):
-     coop install gh@2.7.0
+     burrow install gh@2.7.0
 
 To install an app from a manifest at a URL:
-     coop install https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/runat.json
+     burrow install https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/runat.json
 
 To install a different version of the app from a URL:
-      coop install https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/neovim.json@0.9.0
+      burrow install https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/neovim.json@0.9.0
 
 To install an app from a manifest on your computer
-     coop install \path\to\app.json
+     burrow install \path\to\app.json
 
 To install an app from a manifest on your computer
-     coop install \path\to\app.json@version
+     burrow install \path\to\app.json@version
 
 Options:
   -g, --global                    Install the app globally
   -i, --independent               Don't install dependencies automatically
   -k, --no-cache                  Don't use the download cache
   -s, --skip-hash-check           Skip hash validation (use with caution!)
-  -u, --no-update-scoop           Don't update coop before installing if it's outdated
-  -a, --arch <32bit|64bit|arm64>  Use the specified architecture, if the app supports it)coophelp"},
-{"list",R"coophelp(Lists all installed apps, or the apps matching the supplied query.)coophelp"},
-{"reset",R"coophelp(Used to resolve conflicts in favor of a particular app. For example,
-if you've installed 'python' and 'python27', you can use 'coop reset' to switch between
+  -u, --no-update-scoop           Don't update burrow before installing if it's outdated
+  -a, --arch <32bit|64bit|arm64>  Use the specified architecture, if the app supports it)burrowhelp"},
+{"list",R"burrowhelp(Lists all installed apps, or the apps matching the supplied query.)burrowhelp"},
+{"reset",R"burrowhelp(Used to resolve conflicts in favor of a particular app. For example,
+if you've installed 'python' and 'python27', you can use 'burrow reset' to switch between
 using one or the other.
 
-You can use '*' in place of <app> or `-a`/`--all` switch to reset all apps.)coophelp"},
-{"search",R"coophelp(Searches for apps that are available to install.
+You can use '*' in place of <app> or `-a`/`--all` switch to reset all apps.)burrowhelp"},
+{"search",R"burrowhelp(Searches for apps that are available to install.
 
 If used with [query], shows app names that match the query.
   - With 'use_sqlite_cache' enabled, [query] is partially matched against app names, binaries, and shortcuts.
   - Without 'use_sqlite_cache', [query] can be a regular expression to match against app names and binaries.
-Without [query], shows all the available apps.)coophelp"},
-{"shim",R"coophelp(Available subcommands: add, rm, list, info, alter.
+Without [query], shows all the available apps.)burrowhelp"},
+{"shim",R"burrowhelp(Available subcommands: add, rm, list, info, alter.
 
 To add a custom shim, use the 'add' subcommand:
 
-    coop shim add <shim_name> <command_path> [[--|--%] <args>...]
+    burrow shim add <shim_name> <command_path> [[--|--%] <args>...]
 
 To remove shims, use the 'rm' subcommand: (CAUTION: this could remove shims added by an app manifest)
 
-    coop shim rm <shim_name> [<shim_name>...]
+    burrow shim rm <shim_name> [<shim_name>...]
 
 To list all shims or matching shims, use the 'list' subcommand:
 
-    coop shim list [<regex_pattern>...]
+    burrow shim list [<regex_pattern>...]
 
 To show a shim's information, use the 'info' subcommand:
 
-    coop shim info <shim_name>
+    burrow shim info <shim_name>
 
 To alternate a shim's target source, use the 'alter' subcommand:
 
-    coop shim alter <shim_name>
+    burrow shim alter <shim_name>
 
 Options:
   -g, --global       Manipulate global shim(s)
@@ -327,18 +327,18 @@ HINT: The FIRST terminator token ('--' or PowerShell '--%'), if any, is treated 
 terminator and will NOT be included; everything after it is passed to the shim.
 So if you want to pass arguments like '-g' or '--global' to the shim, put them after a '--' or '--%'.
 Examples:
-    POSIX-style:    coop shim add myapp 'D:\path\myapp.exe' '--' myapp_args --global
-    PowerShell:     coop shim add myapp D:\path\myapp.exe --% myapp_args --global
+    POSIX-style:    burrow shim add myapp 'D:\path\myapp.exe' '--' myapp_args --global
+    PowerShell:     burrow shim add myapp D:\path\myapp.exe --% myapp_args --global
 Notes:
   - In PowerShell, '--' should be quoted to avoid parsing.
-  - '--%' disables PowerShell parsing of the remainder; pass literals as needed.)coophelp"},
-{"status",R"coophelp(Options:
+  - '--%' disables PowerShell parsing of the remainder; pass literals as needed.)burrowhelp"},
+{"status",R"burrowhelp(Options:
   -l, --local         Disable remote checks and use local installation data.
   --json=2            Report clients, buckets and software in one JSON document.
                       Combine with --local for a local-only report.
   --json              Return the legacy array of local software findings only.
 Notes:
-  Bare status and remote --json=2 check Coop using its installation bucket,
+  Bare status and remote --json=2 check Burrow using its installation bucket,
   or the official stable release for a standalone installation. They check
   same-root Scoop using its configured upstream.
   Git bucket checks read remote revisions without fetching or refreshing the
@@ -346,22 +346,22 @@ Notes:
 Exit codes:
   0  Checks completed, including when updates are available.
   1  A check could not be completed. Available results are still reported.
-  2  Invalid usage.)coophelp"},
-{"unhold",R"coophelp(To unhold a user-scoped app:
-     coop unhold <app>
+  2  Invalid usage.)burrowhelp"},
+{"unhold",R"burrowhelp(To unhold a user-scoped app:
+     burrow unhold <app>
 
 To unhold a global app:
-     coop unhold -g <app>
+     burrow unhold -g <app>
 
 Options:
-  -g, --global  Unhold globally installed apps)coophelp"},
-{"uninstall",R"coophelp(e.g. coop uninstall git
+  -g, --global  Unhold globally installed apps)burrowhelp"},
+{"uninstall",R"burrowhelp(e.g. burrow uninstall git
 
 Options:
   -g, --global   Uninstall a globally installed app
-  -p, --purge    Remove all persistent data)coophelp"},
-{"update",R"coophelp('coop update' updates coop to the latest version.
-'coop update <app>' installs a new version of that app, if there is one.
+  -p, --purge    Remove all persistent data)burrowhelp"},
+{"update",R"burrowhelp('burrow update' updates burrow to the latest version.
+'burrow update <app>' installs a new version of that app, if there is one.
 Named updates refresh the app's Git bucket and dependency sources before planning.
 With --dry-run, Git revisions are checked read-only. Preview is blocked when
 the shared checkout cannot supply the required revision.
@@ -375,15 +375,15 @@ Options:
   -k, --no-cache         Don't use the download cache
   -s, --skip-hash-check  Skip hash validation (use with caution!)
   -q, --quiet            Hide extraneous messages
-  -a, --all              Update all apps (alternative to '*'))coophelp"},
-{"virustotal",R"coophelp(Look for app's hash or url on virustotal.com
+  -a, --all              Update all apps (alternative to '*'))burrowhelp"},
+{"virustotal",R"burrowhelp(Look for app's hash or url on virustotal.com
 
 Use a single '*' or the '-a/--all' switch to check all installed apps.
 
 To use this command, you have to sign up to VirusTotal's community,
-and get an API key. Then, tell coop about your API key with:
+and get an API key. Then, tell burrow about your API key with:
 
-  coop config virustotal_api_key <your API key: 64 lower case hex digits>
+  burrow config virustotal_api_key <your API key: 64 lower case hex digits>
 
 Exit codes:
  0 -> success
@@ -401,6 +401,6 @@ Options:
                             for analysis (and future retrieval). This requires you to configure
                             your virustotal_api_key.
   -n, --no-depends          By default, all dependencies are checked too. This flag avoids it.
-  -u, --no-update-scoop     Don't update coop before checking if it's outdated
-  -p, --passthru            Return reports as objects)coophelp"},
-{"which",R"coophelp(Locate the path to a shim/executable that was installed with Scoop (similar to 'which' on Linux))coophelp"},
+  -u, --no-update-scoop     Don't update burrow before checking if it's outdated
+  -p, --passthru            Return reports as objects)burrowhelp"},
+{"which",R"burrowhelp(Locate the path to a shim/executable that was installed with Scoop (similar to 'which' on Linux))burrowhelp"},

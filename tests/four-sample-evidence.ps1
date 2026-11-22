@@ -167,13 +167,13 @@ New-Item -ItemType Directory -Path "$root/python-modules/dateutil" -Force | Out-
 $inputFile = Join-Path $root 'sources.json'
 $inputData = @{ sources = $sources; python_exe = $artifact; python_exe_sha256 = $artifactHash; python_modules = "$root/python-modules" }
 Write-FourSampleJson $inputFile $inputData
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $runner = Join-Path $PSScriptRoot '../scripts/verify-four-samples.ps1'
-$out = Invoke-CoopNative 'powershell.exe' @('-NoProfile', '-File', $runner, '-SourceFile', $inputFile, '-CoopExe', $artifact, '-EvidenceDir', "$root/must-not-exist") | Out-String
+$out = Invoke-BurrowNative 'powershell.exe' @('-NoProfile', '-File', $runner, '-SourceFile', $inputFile, '-BurrowExe', $artifact, '-EvidenceDir', "$root/must-not-exist") | Out-String
 if ($LASTEXITCODE -ne 0 -or $out -notmatch 'No Scoop commands' -or (Test-Path "$root/must-not-exist")) { throw "Default mode was not inert: $out" }
 $sources[0].artifact_sha256 = '0' * 64
 Write-FourSampleJson $inputFile $inputData
-$out = Invoke-CoopNative 'powershell.exe' @('-NoProfile', '-File', $runner, '-SourceFile', $inputFile, '-CoopExe', $artifact) | Out-String
+$out = Invoke-BurrowNative 'powershell.exe' @('-NoProfile', '-File', $runner, '-SourceFile', $inputFile, '-BurrowExe', $artifact) | Out-String
 if ($LASTEXITCODE -eq 0 -or $out -notmatch 'Artifact digest mismatch') { throw "Tampered-source rejection missing (exit $LASTEXITCODE): $out" }
 # Scoop's command parameter is scalar: an array expression passed as one argument is not splatting.
 # Exercise the runner's actual S wrapper against a project-local command with that same contract.
@@ -183,14 +183,14 @@ $scoop = Join-Path $root 'scoop-fixture.ps1'
 $fixture = 'param([string]$command,[Parameter(ValueFromRemainingArguments=$true)][string[]]$remaining); ConvertTo-Json -InputObject @{command=$command;remaining=@($remaining)}'
 [IO.File]::WriteAllText($scoop, $fixture, $encoding)
 function Tool([string]$Name, [string]$Exe, [string[]]$Arguments) {
-    $text = Invoke-CoopNative $Exe @Arguments | Out-String
+    $text = Invoke-BurrowNative $Exe @Arguments | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Argument fixture exited $LASTEXITCODE : $text" }
     return $text
 }
 $manifestArgument = "$root/space and 'quote'/jq.json"
 $forwarded = S 'scoop-argument-fixture' @('install', $manifestArgument, '--flag') | ConvertFrom-Json
 if ($forwarded.command -cne 'install' -or @($forwarded.remaining).Count -ne 2 -or $forwarded.remaining[0] -cne $manifestArgument -or $forwarded.remaining[1] -cne '--flag') { throw 'Scoop command/path arguments were combined or changed' }
-# Replay the real Installed function with multiple Coop list entries on Windows PowerShell 5.1.
+# Replay the real Installed function with multiple Burrow list entries on Windows PowerShell 5.1.
 $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Installed' }, $true)
 . ([scriptblock]::Create($definition.Extent.Text))
 $ScoopRoot = Join-Path $root 'list-root'
@@ -205,7 +205,7 @@ $fixture = 'param([string]$command,[Parameter(ValueFromRemainingArguments=$true)
 function C([string]$Name, [string[]]$Arguments) { return '[{"name":"other","version":"9"},{"name":"jq","version":"1.7.1"}]' }
 Installed 'jq' '1.7.1'
 $installationEvidence = Get-Content (Join-Path $run "jq-installation-$($commands.Count).json") -Encoding UTF8 -Raw | ConvertFrom-Json
-if (@($installationEvidence.coop).Count -ne 1 -or $installationEvidence.coop.name -ne 'jq') { throw 'Wrong package selected from Coop list' }
+if (@($installationEvidence.burrow).Count -ne 1 -or $installationEvidence.burrow.name -ne 'jq') { throw 'Wrong package selected from Burrow list' }
 function C([string]$Name, [string[]]$Arguments) { return '[{"name":"jq","version":"2.0"}]' }
 MustReject { Installed 'jq' '1.7.1' }
 function C([string]$Name, [string[]]$Arguments) { return '[{"name":"other","version":"9"}]' }

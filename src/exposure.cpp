@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace coop {
+namespace burrow {
 namespace {
 struct ComUninitialize {
     bool active = false;
@@ -198,15 +198,15 @@ std::string scoop_command_cmd(LauncherKind kind, const fs::path& target, const s
             // diagnose a missing runtime. The product requires an explicit failure before the target
             // runs, the caller's working directory preserved and the target's status propagated.
             "@setlocal",
-            "@set \"coop_java=java.exe\"",
-            "@if defined JAVA_HOME if exist \"%JAVA_HOME%\\bin\\java.exe\" set \"coop_java=%JAVA_HOME%\\bin\\java.exe\"",
-            "@\"%coop_java%\" -version >nul 2>&1",
+            "@set \"burrow_java=java.exe\"",
+            "@if defined JAVA_HOME if exist \"%JAVA_HOME%\\bin\\java.exe\" set \"burrow_java=%JAVA_HOME%\\bin\\java.exe\"",
+            "@\"%burrow_java%\" -version >nul 2>&1",
             "@if errorlevel 1 (echo Java runtime not found for the JAR command entry; set JAVA_HOME or add java.exe to PATH 1>&2 & endlocal & exit /b 1)",
             "@pushd "+path_text(target.parent_path()),
-            "@\"%coop_java%\" -jar \""+path+"\" "+arguments+" %*",
-            "@set \"coop_exit=%errorlevel%\"",
+            "@\"%burrow_java%\" -jar \""+path+"\" "+arguments+" %*",
+            "@set \"burrow_exit=%errorlevel%\"",
             "@popd",
-            "@endlocal & exit /b %coop_exit%"
+            "@endlocal & exit /b %burrow_exit%"
         };
     } else {
         // Scoop quotes each declared argument element for the bash (else) branch.
@@ -289,7 +289,7 @@ std::string scoop_command_shell(LauncherKind kind, const fs::path& target, const
 std::string scoop_command_ps1(const fs::path& target, const std::string& arguments) {
     const auto path = path_text(target);
     // Scoop writes the relative form when the target is on the shim's drive and the absolute form
-    // across drives. Coop always names the stable current path, so the absolute form is the exact
+    // across drives. Burrow always names the stable current path, so the absolute form is the exact
     // equivalent Scoop branch.
     const std::vector<std::string> lines = {
         "# "+path,
@@ -333,7 +333,7 @@ void mark_launcher_gui(const fs::path& launcher) {
 }
 fs::path shortcut_directory(const Context& context) {
     (void)context;
-    const auto override = environment_variable(L"COOP_PROGRAMS_DIR");
+    const auto override = environment_variable(L"BURROW_PROGRAMS_DIR");
     if (!override.empty()) return fs::path(override).lexically_normal();
     return programs_folder()/L"Scoop Apps";
 }
@@ -439,8 +439,8 @@ Json expanded_path_entries(const Context& context, const ir::Package& package, c
 Json exposure_plan_json(const Context& context, const ir::Package& package, const fs::path& base) {
     const auto programs = shortcut_directory(context);
     Json result = {{"shortcut_directory",path_text(programs)},
-        {"shortcut_directory_source",environment_variable(L"COOP_PROGRAMS_DIR").empty() ? "start-menu-programs" : "isolated-override"},
-        {"environment_scope","Declared values are written to the current user's environment (HKCU\\Environment), broadcast with WM_SETTINGCHANGE and also applied to Coop command processes; previous values and ownership are recorded, and user later changes are preserved"},
+        {"shortcut_directory_source",environment_variable(L"BURROW_PROGRAMS_DIR").empty() ? "start-menu-programs" : "isolated-override"},
+        {"environment_scope","Declared values are written to the current user's environment (HKCU\\Environment), broadcast with WM_SETTINGCHANGE and also applied to Burrow command processes; previous values and ownership are recorded, and user later changes are preserved"},
         {"shortcuts",Json::array()},{"environment",expanded_environment(context,package,base)},
         {"path_entries",expanded_path_entries(context,package,base)}};
     const auto argument_base = context.root/L"apps"/wide(package.name)/L"current";
@@ -463,8 +463,8 @@ Json ps_module_plan_json(const Context& context, const std::string& name, const 
         {"user_environment",{{"variable","PSModulePath"},{"entry",path_text(modules)},
             {"scope","HKCU\\Environment"},
             {"effect",removal ?
-                "remove only the entry Coop recorded as its own when no other module link remains; user changes and other entries are preserved" :
-                "prepend the entry when it is absent, record the previous raw value and the entry Coop added"}}},
+                "remove only the entry Burrow recorded as its own when no other module link remains; user changes and other entries are preserved" :
+                "prepend the entry when it is absent, record the previous raw value and the entry Burrow added"}}},
         {"scoop_semantics","Scoop 0.6.0 psmodules.ps1 install_psmodule/uninstall_psmodule: a directory junction <root>/modules/<name> and the user PSModulePath entry for <root>/modules"}};
 }
 }

@@ -8,7 +8,7 @@
 #include <fstream>
 #include <set>
 
-namespace coop {
+namespace burrow {
 namespace {
 std::wstring quote(const std::wstring& argument) {
     std::wstring result = L"\"";
@@ -95,7 +95,7 @@ std::string trim_text(std::string value) {
     return value.substr(first,value.find_last_not_of(" \t\r\n")-first+1);
 }
 // A shared shim lives at <root>/shims/<name>.shim. Its target names the package under
-// <root>/apps/<package>/, so the optional Coop record (environment/path entries) can be found
+// <root>/apps/<package>/, so the optional Burrow record (environment/path entries) can be found
 // without adding non-Scoop keys to the shim file.
 fs::path record_for_target(const fs::path& target) {
     std::vector<fs::path> parts;
@@ -224,14 +224,14 @@ bool run_shim(int argc, wchar_t** argv, int& result) {
     const auto length = GetModuleFileNameW(nullptr,module.data(),static_cast<DWORD>(module.size()));
     if (!length || length >= module.size()) throw std::runtime_error("Cannot locate command executable");
     const auto launcher = fs::path(module.data());
-    const auto coop_metadata = launcher.parent_path()/(launcher.stem().wstring()+L".coop-shim.json");
+    const auto burrow_metadata = launcher.parent_path()/(launcher.stem().wstring()+L".burrow-shim.json");
     const auto scoop_metadata = launcher.parent_path()/(launcher.stem().wstring()+L".shim");
     fs::path target;
     std::string kind;
     std::wstring defaults;
     Json record;
-    if (fs::exists(coop_metadata)) {
-        record = read_json(coop_metadata);
+    if (fs::exists(burrow_metadata)) {
+        record = read_json(burrow_metadata);
         target = wide(record.at("target").get<std::string>());
         kind = record.value("launcher",std::string("direct"));
         defaults = wide(record.value("arguments",std::string{}));

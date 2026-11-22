@@ -37,21 +37,14 @@ State that the task is complete only when the results support this statement.
 1. Give the result first, then the necessary evidence and limits.
 2. Read the relevant skill or procedure when its stated conditions apply.
 
-## C++ rules
+## Cross-platform C and C++
 
-- Match nearby code and the configured formatter. Keep unrelated edits out of the change.
-- Prefer simple control flow and existing abstractions. Add templates or layers only when they reduce real complexity.
-- Use RAII for resources. Make ownership and object lifetimes clear.
-- Prefer values and unique ownership. Use shared ownership only when required.
-- Use raw pointers and references for non-owning access. Document lifetime constraints when needed.
-- Initialize objects. Use `const` where mutation is not required.
-- Check bounds, conversions, overflow, and external input. Avoid undefined behavior.
-- Use types that match the contract. Use fixed-width types where binary width matters.
-- Follow the local error policy. Use assertions for internal invariants, not input validation.
-- Keep headers self-contained. Limit dependencies and public interface exposure.
-- Preserve supported compilers, platforms, and architectures. Isolate platform-specific code.
-- Explain non-obvious constraints in comments. Update documentation when behavior changes.
-- Measure before optimizing. Compare correctness and performance under the same conditions.
+- Write shared product logic in portable C. Keep OS headers, system calls and platform-specific formats in platform implementations. Keep core headers usable from a C translation unit.
+- Use MinGW-w64 as the primary Windows toolchain. Use native toolchains on Linux and macOS. Express platform and compiler differences on the affected CMake targets.
+- Configure third-party C and C++ dependencies in this repository. Pin each dependency to a version or revision, verify downloaded archives by hash, and keep fetched sources and build outputs under the checkout. A clean checkout must build without libraries from another project or a developer-specific installation path.
+- Give C interfaces explicit ownership, buffer sizes, error results and cleanup rules. Test invalid input and partial failure. Preserve existing CLI behavior and stored data formats when moving a module into the core.
+- Establish the C contract and cover it with behavior tests before adding a C++ layer. Use C++ where a specific feature simplifies the implementation. Examples include RAII for resource cleanup and concepts for constraints shared by several callers. Keep exceptions and C++ types inside that layer.
+- Build the shared core and run the same behavior tests on Windows, Linux and macOS. Verify platform-specific behavior through the CLI on the affected host. Report which targets actually passed when describing platform support.
 
 ## Finish
 
@@ -59,13 +52,16 @@ Report the result, key changes, checks run with outcomes, and remaining limitati
 Claim completion only when the evidence supports the agreed acceptance criteria.
 Keep the report concise. Include exact commands when they help reproduce verification.
 
-## Issue tracking
+## Agent skills
 
-Use GitHub Issues in Coh1e/coop for tasks and specifications.
+### Issue tracker
 
-## Next-step guidance
+For tasks, specifications and issue dependencies, follow the [GitHub Issues workflow](docs/agents/issue-tracker.md).
 
-For coding and directly related work, read
-`C:/Users/Neo/.agents/skills/grill-agent/SKILL.md` before ending a response.
-Follow its decision on continuing work or selecting a closing mode. If missing or
-unreadable, report the dependency and do not claim the rules were loaded.
+### Triage labels
+
+When triaging issues, use the [project label mapping](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Before exploring a feature or proposing a design, consult the [domain documentation guide](docs/agents/domain.md).

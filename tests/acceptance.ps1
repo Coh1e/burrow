@@ -1,12 +1,12 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
 New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-$buildDirectory = Split-Path $CoopExe
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+$buildDirectory = Split-Path $BurrowExe
 $guard = Join-Path $buildDirectory 'process_guard.exe'
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $shimSource = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-fixtures/scoop-shim-kiennq.exe'))
@@ -35,10 +35,10 @@ function Convert-JsonOutput([string]$text,[string]$label) {
         return $value
     } catch { throw "$label returned invalid JSON: $_`n$text" }
 }
-function Invoke-Coop([string[]]$arguments) {
-    $errorFile = Join-Path $TestRoot ('coop-stderr-'+[guid]::NewGuid().ToString('N')+'.log')
+function Invoke-Burrow([string[]]$arguments) {
+    $errorFile = Join-Path $TestRoot ('burrow-stderr-'+[guid]::NewGuid().ToString('N')+'.log')
     # `2> file` throws on 5.1 when the child writes a diagnostic; capture both streams in-process.
-    $result = Invoke-CoopNativeRaw $CoopExe @arguments
+    $result = Invoke-BurrowNativeRaw $BurrowExe @arguments
     $output = $result.out
     $exit = $result.code
     $errorText = $result.err
@@ -46,23 +46,23 @@ function Invoke-Coop([string[]]$arguments) {
 }
 function Invoke-Guarded([string]$label,[string[]]$arguments,[int]$timeoutMilliseconds = 180000,[bool]$allowChildren = $false) {
     $errorFile = Join-Path $TestRoot ('guard-'+$label+'-'+[guid]::NewGuid().ToString('N')+'.log')
-    $previousTimeout = $env:COOP_PROCESS_GUARD_TIMEOUT_MS
-    $previousAllowChildren = $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN
-    $env:COOP_PROCESS_GUARD_TIMEOUT_MS = [string]$timeoutMilliseconds
-    if ($allowChildren) { $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN = '1' }
-    $guardArguments = @($CoopExe)+$arguments
+    $previousTimeout = $env:BURROW_PROCESS_GUARD_TIMEOUT_MS
+    $previousAllowChildren = $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN
+    $env:BURROW_PROCESS_GUARD_TIMEOUT_MS = [string]$timeoutMilliseconds
+    if ($allowChildren) { $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN = '1' }
+    $guardArguments = @($BurrowExe)+$arguments
     # `& exe ... 2> file` throws on 5.1 as soon as the guard writes a diagnostic; capture in-process.
     try {
-        $guardResult = Invoke-CoopNativeRaw $guard @guardArguments
+        $guardResult = Invoke-BurrowNativeRaw $guard @guardArguments
         [IO.File]::WriteAllText($errorFile, $guardResult.err)
         $output = $guardResult.out
         $exit = $guardResult.code
     }
     finally {
-        if ($null -eq $previousTimeout) { Remove-Item Env:COOP_PROCESS_GUARD_TIMEOUT_MS -ErrorAction SilentlyContinue }
-        else { $env:COOP_PROCESS_GUARD_TIMEOUT_MS = $previousTimeout }
-        if ($null -eq $previousAllowChildren) { Remove-Item Env:COOP_PROCESS_GUARD_ALLOW_CHILDREN -ErrorAction SilentlyContinue }
-        else { $env:COOP_PROCESS_GUARD_ALLOW_CHILDREN = $previousAllowChildren }
+        if ($null -eq $previousTimeout) { Remove-Item Env:BURROW_PROCESS_GUARD_TIMEOUT_MS -ErrorAction SilentlyContinue }
+        else { $env:BURROW_PROCESS_GUARD_TIMEOUT_MS = $previousTimeout }
+        if ($null -eq $previousAllowChildren) { Remove-Item Env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN -ErrorAction SilentlyContinue }
+        else { $env:BURROW_PROCESS_GUARD_ALLOW_CHILDREN = $previousAllowChildren }
     }
     $guardText = if (Test-Path -LiteralPath $errorFile) { Get-Content -LiteralPath $errorFile -Raw } else { '' }
     Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
@@ -85,7 +85,7 @@ function Assert-NoProcess([hashtable]$result,[string[]]$forbidden,[string]$messa
 }
 function Assert-SingleWorkload([hashtable]$result,[string]$message) {
     if ($result.workloads.Count -ne 1 -or
-        [IO.Path]::GetFullPath($result.workloads[0]) -ine [IO.Path]::GetFullPath($CoopExe)) {
+        [IO.Path]::GetFullPath($result.workloads[0]) -ine [IO.Path]::GetFullPath($BurrowExe)) {
         throw "$message launched an unexpected process: $($result.workloads -join ', ')"
     }
 }
@@ -96,13 +96,13 @@ function Get-TreeEvidence([string]$path) {
 }
 function Get-StateEvidence([string]$root) {
     $items = @()
-    foreach ($path in @("$root/apps","$root/shims","$root/persist","$root/.coop/packages","$root/.coop/backups","$root/.coop/transactions")) {
+    foreach ($path in @("$root/apps","$root/shims","$root/persist","$root/.burrow/packages","$root/.burrow/backups","$root/.burrow/transactions")) {
         $items += Get-TreeEvidence $path
     }
     return $items
 }
 function Assert-NoManagementWrite([string]$root,[string]$message) {
-    foreach ($path in @("$root/.coop/packages","$root/.coop/backups","$root/.coop/transactions")) {
+    foreach ($path in @("$root/.burrow/packages","$root/.burrow/backups","$root/.burrow/transactions")) {
         if (Test-Path -LiteralPath $path) { throw "$message created $path" }
     }
 }
@@ -169,13 +169,13 @@ foreach ($sample in $index.samples) {
     if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLower() -ne $sample.sha256) {
         throw "Corpus sample bytes changed: $id"
     }
-    $infoResult = Invoke-Coop @('--root',$corpusRoot,'info',$id,'--json')
+    $infoResult = Invoke-Burrow @('--root',$corpusRoot,'info',$id,'--json')
     Assert-Exit $infoResult.exit 0 "Corpus sample is not readable: $id" $infoResult.error
     $info = @(Convert-JsonOutput $infoResult.text "info $id")
     if ($info.Count -ne 1 -or $info[0].name -ne $name -or $info[0].version -ne $sample.version) {
         throw "Corpus sample query identity is wrong: $id"
     }
-    $planResult = Invoke-Coop @('--root',$corpusRoot,'install',$id,'--arch','64bit','--dry-run','--json')
+    $planResult = Invoke-Burrow @('--root',$corpusRoot,'install',$id,'--arch','64bit','--dry-run','--json')
     $plan = Convert-JsonOutput $planResult.text "plan $id"
     if ($plan.package.name -ne $name -or $plan.package.version -ne $sample.version) { throw "Corpus plan identity is wrong: $id" }
     if ($plan.manifest_sha256 -ne $sample.sha256) { throw "Corpus plan is not bound to the fixed Manifest bytes: $id" }
@@ -208,7 +208,7 @@ foreach ($sample in $index.samples) {
         lifecycle='not-run'
     }
 }
-if ((Test-Path "$corpusRoot/.coop") -or (Test-Path "$corpusRoot/apps") -or (Test-Path "$corpusRoot/shims")) {
+if ((Test-Path "$corpusRoot/.burrow") -or (Test-Path "$corpusRoot/apps") -or (Test-Path "$corpusRoot/shims")) {
     throw 'Corpus planning wrote installation state'
 }
 if (@(Get-ChildItem -LiteralPath $corpusRoot -Force | Where-Object { $_.Name -ne 'buckets' }).Count) {
@@ -217,7 +217,7 @@ if (@(Get-ChildItem -LiteralPath $corpusRoot -Force | Where-Object { $_.Name -ne
 
 # --- 2. First acceptance path: query a shared installation, explicit bucket update, preview,
 # rejected update, successful update, batch partial failure and uninstall. The installation was not
-# taken over: Coop manages the shared Scoop state directly, with no private record requirement. ---
+# taken over: Burrow manages the shared Scoop state directly, with no private record requirement. ---
 $root = Join-Path $TestRoot ('first-path-'+[guid]::NewGuid().ToString('N'))
 $source = Join-Path $TestRoot ('source-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$root/apps/jq/1.7.1","$source/bucket" -Force | Out-Null
@@ -270,9 +270,9 @@ Start-Sleep -Milliseconds 100
 $bucketUpdate = Invoke-Guarded 'bucket-update' @('--root',$root,'bucket','update','main','--json')
 Assert-Exit $bucketUpdate.exit 0 'Explicit bucket update failed' $bucketUpdate.error
 Assert-SingleWorkload $bucketUpdate 'Explicit bucket update'
-$jqInfo = @(Convert-JsonOutput (Invoke-Coop @('--root',$root,'info','main/jq','--json')).text 'info after bucket update')
+$jqInfo = @(Convert-JsonOutput (Invoke-Burrow @('--root',$root,'info','main/jq','--json')).text 'info after bucket update')
 if ($jqInfo[0].version -ne '1.8.2') { throw 'Explicit bucket update did not expose jq 1.8.2' }
-if ((@(Convert-JsonOutput (Invoke-Coop @('--root',$root,'info','main/ripgrep','--json')).text 'ripgrep info'))[0].version -ne '15.2.0') {
+if ((@(Convert-JsonOutput (Invoke-Burrow @('--root',$root,'info','main/ripgrep','--json')).text 'ripgrep info'))[0].version -ne '15.2.0') {
     throw 'Explicit bucket update did not expose ripgrep 15.2.0'
 }
 
@@ -292,20 +292,20 @@ $corrupt = New-CorpusManifest 'Main/jq' $jq18
 $corrupt.architecture.'64bit'.hash = '0'*64
 Write-JsonFile "$source/bucket/jq.json" $corrupt
 Start-Sleep -Milliseconds 100
-Assert-Exit (Invoke-Coop @('--root',$root,'bucket','update','main','--json')).exit 0 'Bucket update before rejected package update failed'
+Assert-Exit (Invoke-Burrow @('--root',$root,'bucket','update','main','--json')).exit 0 'Bucket update before rejected package update failed'
 $rejected = Invoke-Guarded 'update-rejected' @('--root',$root,'update','jq','--json')
 if ($rejected.exit -eq 0) { throw 'Update with a mismatched SHA256 unexpectedly succeeded' }
 Assert-SingleWorkload $rejected 'Rejected update'
 if (((& "$root/shims/jq.exe" --version) -join "`n") -notmatch '^jq-1\.7\.1') { throw 'Rejected update replaced the current entry' }
 if (Test-Path -LiteralPath "$root/apps/jq/1.8.2") { throw 'Rejected update published a new version directory' }
-$failedList = @(Convert-JsonOutput (Invoke-Coop @('--root',$root,'list','--json')).text 'list after rejected update')
+$failedList = @(Convert-JsonOutput (Invoke-Burrow @('--root',$root,'list','--json')).text 'list after rejected update')
 if ($failedList[0].version -ne '1.7.1' -or $failedList[0].last_operation -ne 'failed' -or $failedList[0].status -ne 'installed') {
     throw 'Rejected update was reported as a successful installed state'
 }
 
 Write-JsonFile "$source/bucket/jq.json" (New-CorpusManifest 'Main/jq' $jq18)
 Start-Sleep -Milliseconds 100
-Assert-Exit (Invoke-Coop @('--root',$root,'bucket','update','main','--json')).exit 0 'Bucket update after repairing the Manifest failed'
+Assert-Exit (Invoke-Burrow @('--root',$root,'bucket','update','main','--json')).exit 0 'Bucket update after repairing the Manifest failed'
 $updated = Invoke-Guarded 'update' @('--root',$root,'update','jq','--json')
 Assert-Exit $updated.exit 0 'Update of the shared package failed' $updated.error
 Assert-SingleWorkload $updated 'Shared update'
@@ -338,7 +338,7 @@ $uninstallResult = Convert-JsonOutput $uninstall.text 'uninstall'
 if ($uninstallResult.status -ne 'success' -or '1.7.1' -notin @($uninstallResult.retained_versions)) {
     throw 'Uninstall did not report the retained old version'
 }
-if ((Test-Path "$root/shims/jq.exe") -or (Test-Path "$root/apps/jq/current") -or (Test-Path "$root/.coop/packages/jq.json")) {
+if ((Test-Path "$root/shims/jq.exe") -or (Test-Path "$root/apps/jq/current") -or (Test-Path "$root/.burrow/packages/jq.json")) {
     throw 'Uninstall left current or management state behind'
 }
 if (-not (Test-Path "$root/apps/jq/1.7.1/jq.exe")) { throw 'Uninstall deleted the separately retained old version' }
@@ -348,7 +348,7 @@ $nodeRoot = Join-Path $TestRoot ('data-'+[guid]::NewGuid().ToString('N'))
 $nodeSource = Join-Path $TestRoot ('node-source-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$nodeRoot/buckets/main/bucket" -Force | Out-Null
 Write-JsonFile "$nodeRoot/buckets/main/bucket/nodejs.json" (New-CorpusManifest 'Main/nodejs' $nodeArchive)
-$nodePreview = Invoke-Coop @('--root',$nodeRoot,'install','main/nodejs','--dry-run','--json')
+$nodePreview = Invoke-Burrow @('--root',$nodeRoot,'install','main/nodejs','--dry-run','--json')
 Assert-Exit $nodePreview.exit 0 'Real nodejs preview failed' $nodePreview.error
 $nodePlan = Convert-JsonOutput $nodePreview.text 'node preview'
 if (-not $nodePlan.execution_available -or $nodePlan.artifacts[0].archive -ne '7z' -or $nodePlan.package.persistence.Count -ne 2) {
@@ -377,7 +377,7 @@ if ($npmrc -notmatch [regex]::Escape("prefix=$persistRoot\bin") -or $npmrc -notm
 }
 New-Item -ItemType Directory -Path "$persistRoot/cache" -Force | Out-Null
 [IO.File]::WriteAllText("$persistRoot/cache/acceptance-marker.txt",'must survive normal uninstall')
-$purgePreview = Invoke-Coop @('--root',$nodeRoot,'uninstall','nodejs','--purge','--dry-run','--json')
+$purgePreview = Invoke-Burrow @('--root',$nodeRoot,'uninstall','nodejs','--purge','--dry-run','--json')
 Assert-Exit $purgePreview.exit 0 'Purge preview failed' $purgePreview.error
 $purgePlan = Convert-JsonOutput $purgePreview.text 'purge preview'
 if (-not $purgePlan.purge.requested -or @($purgePlan.purge.scope).Count -ne 2 -or
@@ -385,14 +385,14 @@ if (-not $purgePlan.purge.requested -or @($purgePlan.purge.scope).Count -ne 2 -o
     throw 'Purge preview did not list only the declared persist stores'
 }
 if (-not (Test-Path "$persistRoot/cache/acceptance-marker.txt")) { throw 'Purge preview deleted persistent data' }
-$nodeUninstall = Invoke-Coop @('--root',$nodeRoot,'uninstall','nodejs','--json')
+$nodeUninstall = Invoke-Burrow @('--root',$nodeRoot,'uninstall','nodejs','--json')
 Assert-Exit $nodeUninstall.exit 0 'Real nodejs uninstall failed' $nodeUninstall.error
 $nodeRemoved = Convert-JsonOutput $nodeUninstall.text 'node uninstall'
 if ($nodeRemoved.status -ne 'success' -or -not $nodeRemoved.data_retained) { throw 'Real nodejs uninstall did not report retained data' }
 if (-not (Test-Path "$persistRoot/cache/acceptance-marker.txt") -or -not (Test-Path "$persistRoot/bin")) {
     throw 'Normal uninstall discarded declared persistent data'
 }
-if ((Test-Path "$nodeRoot/apps/nodejs/current") -or (Test-Path "$nodeRoot/.coop/packages/nodejs.json")) {
+if ((Test-Path "$nodeRoot/apps/nodejs/current") -or (Test-Path "$nodeRoot/.burrow/packages/nodejs.json")) {
     throw 'Normal uninstall left the current program or management record behind'
 }
 
@@ -408,8 +408,8 @@ foreach ($item in $corpusResults) {
 $evidence = [ordered]@{
     schema=1
     generated_by='tests/acceptance.ps1'
-    coop_version=((& $CoopExe --version) -join ' ').Trim()
-    coop_sha256=(Get-FileHash -LiteralPath $CoopExe -Algorithm SHA256).Hash.ToLower()
+    burrow_version=((& $BurrowExe --version) -join ' ').Trim()
+    burrow_sha256=(Get-FileHash -LiteralPath $BurrowExe -Algorithm SHA256).Hash.ToLower()
     os=[Environment]::OSVersion.VersionString
     windows_architecture=$env:PROCESSOR_ARCHITECTURE
     powershell=$PSVersionTable.PSVersion.ToString()

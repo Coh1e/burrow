@@ -1,6 +1,6 @@
 ﻿# Red when: the default (non---json) output of `list`, `search` or `info` changes shape — the header
 # lines, the column widths, the aligned info block, `list`'s query filter, or the empty-state warnings.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
@@ -16,7 +16,7 @@ Copy-Item "$PSScriptRoot/corpus/main/jq.json" "$root/apps/jq/1.8.2/scoop-manifes
 New-Item -ItemType Junction -Path "$root/apps/jq/current" -Target "$root/apps/jq/1.8.2" | Out-Null
 
 # list: `Installed apps:`, one blank line, then a table whose every line shares one width.
-$lines = @(& $CoopExe --root $root list)
+$lines = @(& $BurrowExe --root $root list)
 if ($LASTEXITCODE -cne 0) { throw 'list failed' }
 if ($lines.Count -cne 5) { throw "list printed $($lines.Count) lines: $($lines -join ' | ')" }
 if ($lines[0] -cne 'Installed apps:') { throw "list header is '$($lines[0])'" }
@@ -34,15 +34,15 @@ foreach ($line in $lines[2..4]) {
 }
 
 # list [query] filters installed apps; a query with no match keeps the header and prints no rows.
-$lines = @(& $CoopExe --root $root list jq)
+$lines = @(& $BurrowExe --root $root list jq)
 if ($LASTEXITCODE -cne 0 -or $lines[0] -cne "Installed apps matching 'jq':") { throw "list query header is '$($lines[0])'" }
 if ($lines.Count -cne 5) { throw 'list query dropped or added rows' }
-$lines = @(& $CoopExe --root $root list zzznomatch)
+$lines = @(& $BurrowExe --root $root list zzznomatch)
 if ($LASTEXITCODE -cne 0 -or $lines[0] -cne "Installed apps matching 'zzznomatch':") { throw "list query header is '$($lines[0])'" }
 if ($lines.Count -cne 4) { throw "a non-matching query printed $($lines.Count) lines" }
 
 # info: the aligned key/value block Scoop prints, in its order.
-$lines = @(& $CoopExe --root $root info main/jq)
+$lines = @(& $BurrowExe --root $root info main/jq)
 if ($LASTEXITCODE -cne 0) { throw 'info failed' }
 $expected = @(
     'Name        : jq'
@@ -62,7 +62,7 @@ if (($lines -join "`n") -cne ($expected -join "`n")) {
 # search: header, blank line, then Name/Version/Source/Binaries; no match means the warning alone.
 # A name match prints an empty Binaries column, exactly like Scoop (`search_bucket` records '' when
 # the app name matched); only a binary match fills it. `scoop search jq` shows the same empty cell.
-$lines = @(& $CoopExe --root $root search jq)
+$lines = @(& $BurrowExe --root $root search jq)
 if ($LASTEXITCODE -cne 0) { throw 'search failed' }
 if ($lines.Count -cne 6 -or $lines[5] -cne '') { throw "search lines are '$($lines -join ' | ')'" }
 if ($lines[0] -cne 'Results from local buckets...') { throw "search header is '$($lines[0])'" }
@@ -71,20 +71,20 @@ if ($lines[2] -notmatch '^Name\s+Version\s+Source\s+Binaries\s*$') { throw "sear
 if ($lines[3] -notmatch '^----\s+-------\s+------\s+--------\s*$') { throw "search rule is '$($lines[3])'" }
 if ($lines[4] -notmatch '^jq\s+1\.8\.2\s+main\s*$') { throw "search row is '$($lines[4])'" }
 # A query that matches only a binary lists that binary in the Binaries column.
-$lines = @(& $CoopExe --root $root search 'jq\.exe')
+$lines = @(& $BurrowExe --root $root search 'jq\.exe')
 if ($lines.Count -cne 6 -or $lines[4] -notmatch '^jq\s+1\.8\.2\s+main\s+jq\.exe\s*$') {
     throw "binary match row is '$($lines -join ' | ')'"
 }
 '{"version":"1.0","bin":["bin\\scoop-tool.bat","other/scoop-helper.cmd"]}' |
     Set-Content "$root/buckets/main/bucket/tool.json" -Encoding ascii
-$lines = @(& $CoopExe --root $root search scoop)
+$lines = @(& $BurrowExe --root $root search scoop)
 if ($LASTEXITCODE -cne 0 -or $lines[4] -cne 'tool 1.0     main   scoop-tool.bat | scoop-helper.cmd') {
     throw "nested binary match row is '$($lines -join ' | ')'"
 }
 if ($lines[2] -cne 'Name Version Source Binaries' -or $lines[3] -cne '---- ------- ------ --------') {
     throw "search table pads its last column: '$($lines -join ' | ')'"
 }
-$lines = @(& $CoopExe --root $root search zzznomatch)
+$lines = @(& $BurrowExe --root $root search zzznomatch)
 if ($LASTEXITCODE -cne 0 -or ($lines -join '|') -cne 'WARN  No matches found.') {
     throw "empty search is '$($lines -join ' | ')'"
 }
@@ -92,9 +92,9 @@ if ($LASTEXITCODE -cne 0 -or ($lines -join '|') -cne 'WARN  No matches found.') 
 # An empty root warns instead of printing an empty table.
 $empty = Join-Path $TestRoot 'empty'
 New-Item -ItemType Directory -Path $empty -Force | Out-Null
-$lines = @(& $CoopExe --root $empty list)
+$lines = @(& $BurrowExe --root $empty list)
 if ($LASTEXITCODE -cne 0 -or ($lines -join '|') -cne "WARN  There aren't any apps installed.") {
     throw "empty list is '$($lines -join ' | ')'"
 }
-if (Test-Path (Join-Path $empty '.coop')) { throw 'a read-only query created Coop state' }
+if (Test-Path (Join-Path $empty '.burrow')) { throw 'a read-only query created Burrow state' }
 Write-Output 'PASS: Scoop-shaped list, list query, info block, search and empty states'

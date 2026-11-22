@@ -1,16 +1,16 @@
 # status JSON v2 与共用结果模型
 
-任务 [#104](https://github.com/Coh1e/coop/issues/104)，父规格 [#102](https://github.com/Coh1e/coop/issues/102)。本阶段交付 `coop status -l --json=2`；`--local` 与 `-l` 等价。原 `status --json` 继续返回原来的本地异常软件数组，原文本形状与退出码不变。
+任务 [#104](https://github.com/Coh1e/burrow/issues/104)，父规格 [#102](https://github.com/Coh1e/burrow/issues/102)。本阶段交付 `burrow status -l --json=2`；`--local` 与 `-l` 等价。原 `status --json` 继续返回原来的本地异常软件数组，原文本形状与退出码不变。
 
-#107 的远端 `status --json=2` 检查未固定修订的 Git bucket。软件字段仍来自本地清单。bucket 可能落后时，报告 `attention / stale-manifests`、`data.manifests_may_be_stale: true` 和与文本相同的提示。远端 v2 检查 Coop 的安装来源与同根 Scoop 配置的上游。同根有 Coop 安装记录时按该记录的 bucket 检查。Git bucket 的清单可能过期时，Coop 检查失败并报告原因。没有同根 Coop 安装时查询官方稳定发布。检查完成退出 0，即使有更新或清单可能过期。检查失败或版本无法比较时退出 1，并保留其他可读取的结果。版本无法比较报告 `blocked / version-incomparable`，请求失败报告 `failed / remote-check-failed`。用法错误退出 2。
+#107 的远端 `status --json=2` 检查未固定修订的 Git bucket。软件字段仍来自本地清单。bucket 可能落后时，报告 `attention / stale-manifests`、`data.manifests_may_be_stale: true` 和与文本相同的提示。远端 v2 检查 Burrow 的安装来源与同根 Scoop 配置的上游。同根有 Burrow 安装记录时按该记录的 bucket 检查。Git bucket 的清单可能过期时，Burrow 检查失败并报告原因。没有同根 Burrow 安装时查询官方稳定发布。检查完成退出 0，即使有更新或清单可能过期。检查失败或版本无法比较时退出 1，并保留其他可读取的结果。版本无法比较报告 `blocked / version-incomparable`，请求失败报告 `failed / remote-check-failed`。用法错误退出 2。
 
-各 `status` 入口直接读取旧根的 `.coop/buckets.json` 作为回退，不触发状态迁移。
+各 `status` 入口直接读取旧根的 `.burrow/buckets.json` 作为回退，不触发状态迁移。
 
 ## 检查范围
 
-v2 本地报告读取当前运行的 Coop、同根 Scoop、已登记或共用 bucket，以及用户级和显式系统级根中的安装事实。正常软件也列入 `apps`，系统级项带 `read_only: true`。同根作为软件包安装的 Coop 归入客户端，不重复列为普通软件。
+v2 本地报告读取当前运行的 Burrow、同根 Scoop、已登记或共用 bucket，以及用户级和显式系统级根中的安装事实。正常软件也列入 `apps`，系统级项带 `read_only: true`。同根作为软件包安装的 Burrow 归入客户端，不重复列为普通软件。
 
-这是只读检查：不访问远端、不 fetch、不创建索引或隔离 Git 配置、不迁移 `<root>/.coop`、不写运行或事务记录。完整本地检查直接扫描当前工作树的清单，不使用可能落后于 Scoop 改动或未提交修改的索引。读取已有 bucket 登记时优先使用外部状态，缺席时可只读使用遗留登记；登记损坏时报告诊断并继续发现共享 bucket。已撤销的登记不会被共享目录自动重新激活。
+这是只读检查：不访问远端、不 fetch、不创建索引或隔离 Git 配置、不迁移 `<root>/.burrow`、不写运行或事务记录。完整本地检查直接扫描当前工作树的清单，不使用可能落后于 Scoop 改动或未提交修改的索引。读取已有 bucket 登记时优先使用外部状态，缺席时可只读使用遗留登记；登记损坏时报告诊断并继续发现共享 bucket。已撤销的登记不会被共享目录自动重新激活。
 
 客户端和 bucket 的远端状态为 `not_checked`，原因 `local-only`；这不表示它们已是最新。Scoop 缺席为 `not_applicable`，原因 `not-installed`。本地 Git 修订从实际 HEAD 读取，不把登记中缓存的修订当成当前事实。非 Git 或空仓库的修订可以为 null。
 

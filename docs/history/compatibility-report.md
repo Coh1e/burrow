@@ -2,11 +2,11 @@
 
 > 历史报告：本页记录 T18/#20 当时的原型状态（含脚本子集分类）。#31/R10 已把生命周期脚本改为真实 PowerShell + 固定 Scoop 兼容库执行，脚本文本不再作为可执行性判据；#33/R12 已启用 MSI 只读镜像提取，不再以机器缓存限制阻塞；#34/R13 已启用 Inno Setup 的 `innosetup` 提取（通过 root 内声明的 innounp helper）。当前脚本语义见[生命周期 Hook 与真实 PowerShell](../script-support.md)，当前 MSI 与 Inno Setup 语义见[Installer/Uninstaller 与特殊安装机制](../installer-support.md)，当前固定样本分类由 `tests/acceptance.ps1` 输出；官方 Main／Extras 的完整分母、机制缺口与真机验证数量见 [Main／Extras 全量兼容盘点](../coverage-report.md)。下方分类只作追溯。
 
-日期：2026-10-25。任务：[T18 / #20](https://github.com/Coh1e/coop/issues/20)，父规格 [#2](https://github.com/Coh1e/coop/issues/2)。代码基线为 `7426d346cfc83c1c484e924e71d3b944d2605ff9` 之后的 T18 提交；本轮工具为 Windows 11 x64、Coop 0.1.0、PowerShell 7.6.5、CMake 4.4.4、Ninja 1.13.2。所有安装、更新、卸载和数据测试都在被忽略的 `.local/tests` 项目内根目录执行，不读取或修改真实用户 Scoop 根。
+日期：2026-10-25。任务：[T18 / #20](https://github.com/Coh1e/burrow/issues/20)，父规格 [#2](https://github.com/Coh1e/burrow/issues/2)。代码基线为 `7426d346cfc83c1c484e924e71d3b944d2605ff9` 之后的 T18 提交；本轮工具为 Windows 11 x64、Burrow 0.1.0、PowerShell 7.6.5、CMake 4.4.4、Ninja 1.13.2。所有安装、更新、卸载和数据测试都在被忽略的 `.local/tests` 项目内根目录执行，不读取或修改真实用户 Scoop 根。
 
 ## 结论
 
-- 固定 [20 份真实 Manifest](../../tests/corpus/index.json) 全部保持字节不变并可被 `coop info` 读取；64bit 计划中 7 份可执行、9 份明确不支持、4 份因输入或前置条件被拒绝。数量不代表生态兼容率。
+- 固定 [20 份真实 Manifest](../../tests/corpus/index.json) 全部保持字节不变并可被 `burrow info` 读取；64bit 计划中 7 份可执行、9 份明确不支持、4 份因输入或前置条件被拒绝。数量不代表生态兼容率。
 - 本轮实际跑通“原有 Scoop 安装 → 预览 → 原地接管 → 本地查询 → 显式更新 bucket → 更新预览 → 失败拒绝 → 更新 → 批量部分失败 → 卸载”的真实 jq 路径，并验证失败更新保留当前版本、成功更新保留旧版本、卸载保留单独记录的旧版本。
 - 真实 `Main/nodejs` 的 7z、`persist`、`env_add_path` 与 `post_install` 安装成功，程序返回 `v26.12.1`；普通卸载保留 `persist/nodejs/bin`、`persist/nodejs/cache` 和测试标记，`uninstall --purge` 预览只列出这两个声明 store。
 - 真实 `Main/ripgrep` 与 `Main/air` 的归档生命周期由本轮 `archive_lifecycle` 测试补充验证；`Main/jq`、`Main/nodejs` 由本轮新增 `acceptance` 测试验证。
@@ -19,15 +19,15 @@
 | 步骤 | 实际命令 | 退出码 | 观察到的状态 |
 | --- | --- | --- | --- |
 | 原有安装可运行 | `shims/jq.exe --version` | 0 | `jq-1.7.1`，原程序、Manifest、安装记录与 shim 摘要记录在案 |
-| 接管预览（历史） | `coop --root ROOT adopt jq --dry-run --json` | 0 | `eligibility=eligible`，`update/uninstall=supported-path`，程序与入口未变，无管理记录。R22（#43）已移除该命令，同一共享安装现在直接由 `update`/`uninstall` 管理 |
-| 原地接管（历史） | `coop --root ROOT adopt jq --json` | 0 | `status=adopted`、`version=1.7.1`；原程序、Manifest、安装记录和命令入口摘要全部不变。R22 后不再需要此步骤 |
-| 本地查询 | `coop --root ROOT list --json`、`info main/jq --json` | 0 | `management=managed`、`origin=scoop`、`version=1.7.1`；进程守卫只观察到 Coop 本身。当前实现中 Scoop 创建的安装无私有记录时为 `management=unadopted`，同样可更新/卸载 |
-| 显式更新 bucket | `coop --root ROOT bucket update main --json` | 0 | 本地来源刷新后可查询 jq 1.8.2 与 ripgrep 15.2.0；未启动 git.exe 或 PowerShell |
-| 更新预览 | `coop --root ROOT update jq --dry-run --json` | 0 | `previous_package.version=1.7.1`，目标 1.8.2，`execution_available=true`，安装状态和入口不变 |
-| 拒绝错误输入 | 将 bucket 中 jq 1.8.2 的 SHA256 改为全零后 `coop update jq --json` | 1 | 当前入口仍为 `jq-1.7.1`，没有 `apps/jq/1.8.2`；`list` 报 `last_operation=failed` 且仍为已安装、可查询 |
-| 正常更新 | 恢复真实 SHA256 后 `coop update jq --json` | 0 | `status=success`、`version=1.8.2`，入口返回 `jq-1.8.2`，旧 `apps/jq/1.7.1/jq.exe` 返回 `jq-1.7.1` |
-| 批量部分失败 | `coop --root ROOT install main/ripgrep ghostpkg --json` | 1 | 两项逐包报告：`main/ripgrep=success`、`ghostpkg=failed`；每包独立事务，失败不回滚已成功的 ripgrep；`rg --version` 返回 `ripgrep 15.2.0` |
-| 卸载接管包 | `coop --root ROOT uninstall jq --json` | 0 | 当前入口、`current` 与管理记录删除；旧 `1.7.1` 目录按记录保留，供显式 `cleanup` 处理 |
+| 接管预览（历史） | `burrow --root ROOT adopt jq --dry-run --json` | 0 | `eligibility=eligible`，`update/uninstall=supported-path`，程序与入口未变，无管理记录。R22（#43）已移除该命令，同一共享安装现在直接由 `update`/`uninstall` 管理 |
+| 原地接管（历史） | `burrow --root ROOT adopt jq --json` | 0 | `status=adopted`、`version=1.7.1`；原程序、Manifest、安装记录和命令入口摘要全部不变。R22 后不再需要此步骤 |
+| 本地查询 | `burrow --root ROOT list --json`、`info main/jq --json` | 0 | `management=managed`、`origin=scoop`、`version=1.7.1`；进程守卫只观察到 Burrow 本身。当前实现中 Scoop 创建的安装无私有记录时为 `management=unadopted`，同样可更新/卸载 |
+| 显式更新 bucket | `burrow --root ROOT bucket update main --json` | 0 | 本地来源刷新后可查询 jq 1.8.2 与 ripgrep 15.2.0；未启动 git.exe 或 PowerShell |
+| 更新预览 | `burrow --root ROOT update jq --dry-run --json` | 0 | `previous_package.version=1.7.1`，目标 1.8.2，`execution_available=true`，安装状态和入口不变 |
+| 拒绝错误输入 | 将 bucket 中 jq 1.8.2 的 SHA256 改为全零后 `burrow update jq --json` | 1 | 当前入口仍为 `jq-1.7.1`，没有 `apps/jq/1.8.2`；`list` 报 `last_operation=failed` 且仍为已安装、可查询 |
+| 正常更新 | 恢复真实 SHA256 后 `burrow update jq --json` | 0 | `status=success`、`version=1.8.2`，入口返回 `jq-1.8.2`，旧 `apps/jq/1.7.1/jq.exe` 返回 `jq-1.7.1` |
+| 批量部分失败 | `burrow --root ROOT install main/ripgrep ghostpkg --json` | 1 | 两项逐包报告：`main/ripgrep=success`、`ghostpkg=failed`；每包独立事务，失败不回滚已成功的 ripgrep；`rg --version` 返回 `ripgrep 15.2.0` |
+| 卸载接管包 | `burrow --root ROOT uninstall jq --json` | 0 | 当前入口、`current` 与管理记录删除；旧 `1.7.1` 目录按记录保留，供显式 `cleanup` 处理 |
 
 真实数据保留用 `Main/nodejs` 26.12.1 单独执行：安装退出 0，`post_install` 退出 0，`node_modules/npm/npmrc` 写入项目内 `persist/nodejs/bin` 与 `persist/nodejs/cache`；写入测试标记后，`uninstall --purge --dry-run` 退出 0 且列出两个 store、不删除标记；普通 `uninstall` 退出 0 且 `data_retained=true`，标记和两个持久化目录仍在，`current` 与管理记录删除。
 
@@ -64,9 +64,9 @@
 
 | 要求 | 本轮实际证据 |
 | --- | --- |
-| 无 Git 前置 | 本轮实际运行 `tests/git-live.ps1`（退出 0）：子进程 PATH 仅含 `System32`，`https://github.com/ScoopInstaller/Main` 克隆成功（`c31ed805...`，882055 字节），刷新保持同一 revision 且仅 113 字节、未重新发布，GitLab HTTPS 克隆成功；进程守卫在克隆/刷新中都只观察到 Coop 一个工作负载。同一测试还验证不可达代理退出 1 且不改已发布状态、自签名证书退出 1。本地查询与本地 bucket 更新同样只记录一个工作负载；`bucket` 测试另覆盖内嵌 libgit2 的分支/固定修订/增量刷新。 |
-| 普通包无外部 7-Zip | 真实 nodejs 7z 安装的工作负载只有 `coop.exe` 和声明 `post_install` 所需的 `pwsh.exe`，没有 `7z.exe`/`7za.exe`/`7zr.exe`；`installers` 测试另用不带脚本的真实 7z 产物断言没有外部解压进程。MSI 仍明确阻塞。 |
-| 本地查询无 PowerShell | `list`/`info`/`search` 由进程守卫断言只有 Coop 进程；查询不刷新 bucket、不启动脚本。 |
+| 无 Git 前置 | 本轮实际运行 `tests/git-live.ps1`（退出 0）：子进程 PATH 仅含 `System32`，`https://github.com/ScoopInstaller/Main` 克隆成功（`c31ed805...`，882055 字节），刷新保持同一 revision 且仅 113 字节、未重新发布，GitLab HTTPS 克隆成功；进程守卫在克隆/刷新中都只观察到 Burrow 一个工作负载。同一测试还验证不可达代理退出 1 且不改已发布状态、自签名证书退出 1。本地查询与本地 bucket 更新同样只记录一个工作负载；`bucket` 测试另覆盖内嵌 libgit2 的分支/固定修订/增量刷新。 |
+| 普通包无外部 7-Zip | 真实 nodejs 7z 安装的工作负载只有 `burrow.exe` 和声明 `post_install` 所需的 `pwsh.exe`，没有 `7z.exe`/`7za.exe`/`7zr.exe`；`installers` 测试另用不带脚本的真实 7z 产物断言没有外部解压进程。MSI 仍明确阻塞。 |
+| 本地查询无 PowerShell | `list`/`info`/`search` 由进程守卫断言只有 Burrow 进程；查询不刷新 bucket、不启动脚本。 |
 | 数据保留 | 真实 nodejs 普通卸载保留两个声明 store 与标记；`persistence` 测试覆盖链接归属、拒绝重定向和 `--purge` 实际删除。 |
 | 依赖保护 | `dependencies` 测试覆盖依赖顺序、已安装依赖跳过、循环/缺失/歧义拒绝、批量逐包结果与反向依赖卸载保护；不自动连带卸载。 |
 | 平台范围 | 本轮为 Windows 11 x64；32bit air 真实执行；arm64 只有计划检查，未运行。非 Windows 不支持。 |
@@ -75,8 +75,8 @@
 ## 本轮改动与证据
 
 - 新增 `tests/acceptance.ps1` 与 CTest `acceptance`：逐样本读取/计划分类、真实 jq 首条路径、真实 nodejs 7z/持久化保留；测试根在 `.local/tests/acceptance 中文 space`。
-- 固定真实 jq 1.7.1/1.8.2 归档并加入 `scripts/fetch-deps.ps1`；`tests/process_guard.cpp` 增加只对声明 Hook 子进程生效的 `COOP_PROCESS_GUARD_ALLOW_CHILDREN=1` 观测选项。
-- 补全 `coop --help` 的 `bucket`/`install`/`update`/`adopt` 与 `--arch`/`--dry-run`，并扩展 `tests/cli.cmake` 校验；修正 `tests/git-live.ps1` 从进程守卫 stderr 读取观测结果，恢复无 git.exe 的 HTTPS/刷新/代理/证书验收。
+- 固定真实 jq 1.7.1/1.8.2 归档并加入 `scripts/fetch-deps.ps1`；`tests/process_guard.cpp` 增加只对声明 Hook 子进程生效的 `BURROW_PROCESS_GUARD_ALLOW_CHILDREN=1` 观测选项。
+- 补全 `burrow --help` 的 `bucket`/`install`/`update`/`adopt` 与 `--arch`/`--dry-run`，并扩展 `tests/cli.cmake` 校验；修正 `tests/git-live.ps1` 从进程守卫 stderr 读取观测结果，恢复无 git.exe 的 HTTPS/刷新/代理/证书验收。
 - 新增本报告；README 增加项目内准备、构建、运行、已知限制与恢复范围；`AGENTS.md` 记录 pi 编码主力与独立验收的默认分工。
 - 本轮实际命令：`fetch-deps.ps1` 退出 0；`build.ps1 -Action build` 退出 0；直接 `acceptance.ps1` 退出 0；`ctest` 全量 27/27 退出 0；提交后 acceptance/cli 2/2 退出 0；`git-live.ps1` 退出 0。完整日志、`git-live` 证据与 `acceptance-evidence.json` 在 `.local/pi/tasks/20/evidence`，其中记录代码 SHA256、OS、PowerShell、逐样本计划、首条路径状态和进程观测。
 

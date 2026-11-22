@@ -1,12 +1,12 @@
-﻿param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+﻿param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$build = Split-Path $CoopExe
+$build = Split-Path $BurrowExe
 $fixture1 = Join-Path $build 'fixture-1.exe'
 $fixture2 = Join-Path $build 'fixture-2.exe'
 $fixtureGui = Join-Path $build 'fixture-gui.exe'
@@ -91,7 +91,7 @@ function Assert-Shortcut([string]$link,[string]$target,[string]$arguments,[strin
         $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
     } catch {
         # A host whose shell refuses to read the link back cannot verify it. The file exists, which is
-        # what the coop side had to produce; the read-back is skipped and reported.
+        # what the burrow side had to produce; the read-back is skipped and reported.
         Write-Output "skipped shortcut read-back for ${link}: the shell refused it ($($_.Exception.Message))"
         return
     }
@@ -139,7 +139,7 @@ function Build-EnvironmentPackage([string]$root,[string]$version,[string]$jarFil
 }
 # The JAR entry is verified with a real Java runtime when a JDK is available; otherwise the
 # launcher must fail with an explicit missing-runtime error instead of pretending to run.
-$jarPath = Join-Path $TestRoot ('coop-t12-'+[guid]::NewGuid().ToString('N')+'.jar')
+$jarPath = Join-Path $TestRoot ('burrow-t12-'+[guid]::NewGuid().ToString('N')+'.jar')
 $jarAvailable = $false
 $javac = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/javac.exe' } else { $null }
 $jarTool = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/jar.exe' } else { $null }
@@ -147,8 +147,8 @@ if ($javac -and $jarTool -and (Test-Path -LiteralPath $javac) -and (Test-Path -L
     # javac on Windows takes its arguments through the ANSI code page, so a path under a non-ASCII
     # test root arrives as "??" on a machine whose code page is not CJK. The fixture is built in a
     # short ASCII directory and the finished jar is copied into the Unicode root, which is the root
-    # the coop side of this test still exercises.
-    $buildRoot = Join-Path $env:TEMP ('coop-jar-'+[guid]::NewGuid().ToString('N'))
+    # the burrow side of this test still exercises.
+    $buildRoot = Join-Path $env:TEMP ('burrow-jar-'+[guid]::NewGuid().ToString('N'))
     $source = Join-Path $buildRoot 'src'
     New-Item -ItemType Directory -Path $source -Force | Out-Null
     $code = @('public class App {','  public static void main(String[] args) throws Exception {',
@@ -201,9 +201,9 @@ if (-not $shortcutReadable) {
 try {
 $root = New-TestRoot
 $programs = Join-Path $root 'programs'
-$env:COOP_PROGRAMS_DIR = $programs
+$env:BURROW_PROGRAMS_DIR = $programs
 $tag = 'T12'+([guid]::NewGuid().ToString('N').Substring(0,8))
-$mainShortcut = "Coop $tag\工具 应用"
+$mainShortcut = "Burrow $tag\工具 应用"
 $failShortcut = "Fail-$tag"
 $subShortcut = "Git $tag\Git Bash"
 $bin = @(
@@ -225,7 +225,7 @@ Build-EnvironmentPackage $root '1' $jarPath 'declared-value' $shortcuts $bin
 
 # Preview exposes the forwarded launcher types, shortcut destination and expanded environment
 # without creating state, shortcuts or an isolated Start Menu folder.
-$preview = Read-Json (& $CoopExe --root $root install test/envapp --dry-run --json)
+$preview = Read-Json (& $BurrowExe --root $root install test/envapp --dry-run --json)
 Assert-Exit 'complex command preview failed'
 if (-not $preview.execution_available) { throw "complex command preview is blocked: $($preview.diagnostics | ConvertTo-Json -Compress)" }
 if ($preview.exposure.shortcut_directory -ne $programs -or $preview.exposure.shortcut_directory_source -ne 'isolated-override') { throw 'preview did not disclose the isolated shortcut directory' }
@@ -239,11 +239,11 @@ if ((Join-Path $root 'apps/envapp/current/bin') -notin $pathEntries -or (Join-Pa
 if (@($preview.exposure.shortcuts).Count -ne 4 -or @($preview.exposure.shortcuts | Where-Object name -eq $mainShortcut).Count -ne 1) { throw 'preview shortcut disclosure is incomplete' }
 $expandPreview = @($preview.exposure.shortcuts | Where-Object name -eq $expandShortcut)[0]
 if ($expandPreview.arguments -ne "--data=$(Join-Path $root 'persist/envapp/data') --dir=$(Join-Path $root 'apps/envapp/current')") { throw "preview did not expand shortcut arguments: $($expandPreview.arguments)" }
-if ((Test-Path $programs) -or (Test-Path "$root/apps") -or (Test-Path "$root/shims") -or (Test-Path "$root/.coop")) { throw 'command preview changed product state' }
+if ((Test-Path $programs) -or (Test-Path "$root/apps") -or (Test-Path "$root/shims") -or (Test-Path "$root/.burrow")) { throw 'command preview changed product state' }
 
-$install = & $CoopExe --root $root install test/envapp --json
+$install = & $BurrowExe --root $root install test/envapp --json
 Assert-Exit "complex command install failed: $($install -join "`n")"
-$record = Get-Content -LiteralPath "$root/.coop/packages/envapp.json" -Raw | ConvertFrom-Json
+$record = Get-Content -LiteralPath "$root/.burrow/packages/envapp.json" -Raw | ConvertFrom-Json
 if (@($record.commands).Count -ne 11) { throw 'management record omitted command entries' }
 if (@($record.shortcuts).Count -ne 4) { throw 'management record omitted shortcuts' }
 if (@($record.environment | Where-Object name -eq 'FIXTURE_ENV').value -ne 'declared-value') { throw 'management record omitted environment ownership' }
@@ -253,7 +253,7 @@ if (-not (Path-Has (Get-UserRaw 'Path').value (Join-Path $root 'apps/envapp/curr
 
 $cmdOutput = ((& "$root/shims/cmd-tool.cmd" hello 'two words') -join "`n")
 if ($LASTEXITCODE -ne 0 -or $cmdOutput -notmatch 'cmd-args:' -or $cmdOutput -notmatch '--default' -or $cmdOutput -notmatch 'two words' -or $cmdOutput -notmatch 'cmd-1') { throw "CMD entry did not forward arguments: $cmdOutput" }
-$failOutput = ((Invoke-CoopNative "$root/shims/fail-tool.cmd" )) -join "`n"
+$failOutput = ((Invoke-BurrowNative "$root/shims/fail-tool.cmd" )) -join "`n"
 if ($LASTEXITCODE -ne 7 -or $failOutput -notmatch '--boom') { throw "CMD entry did not propagate the exit code: $failOutput" }
 $batOutput = ((& "$root/shims/bat-tool.cmd" hello) -join "`n")
 if ($LASTEXITCODE -ne 0 -or $batOutput -notmatch 'bat-args:' -or $batOutput -notmatch '--bat') { throw "BAT entry did not forward arguments: $batOutput" }
@@ -272,7 +272,7 @@ $expandedData = Join-Path $root 'persist/envapp/data'
 $expandedCurrent = Join-Path $root 'apps/envapp/current'
 if ($expandOutput -notmatch [regex]::Escape("args=--data=$expandedData --dir=$expandedCurrent --original=$expandedCurrent")) { throw "entry arguments were not expanded like Scoop: $expandOutput" }
 if ($showOutput -notmatch [regex]::Escape((Join-Path $root 'apps/envapp/current/bin')) -or $showOutput -notmatch [regex]::Escape("$env:SystemRoot\System32")) { throw 'PATH exposure did not prepend package entries nor keep the existing PATH' }
-$psOutput = ((Invoke-CoopNative "$root/shims/ps-tool.cmd"  one 'two words')) -join "`n"
+$psOutput = ((Invoke-BurrowNative "$root/shims/ps-tool.cmd"  one 'two words')) -join "`n"
 $psEntrySkipped = $false
 if ($LASTEXITCODE -ne 3) {
     # Some Windows security policies (WDAC/AppLocker) refuse to authorize any local .ps1 file even
@@ -302,7 +302,7 @@ try {
 } finally { $gui.Dispose() }
 if (-not (Test-Path -LiteralPath "$root/apps/envapp/current/gui-marker.txt")) { throw 'GUI target did not run' }
 if ($jarAvailable) {
-    $jarOutput = ((Invoke-CoopNative "$root/shims/jar-tool.cmd"  x 'y z')) -join "`n"
+    $jarOutput = ((Invoke-BurrowNative "$root/shims/jar-tool.cmd"  x 'y z')) -join "`n"
     if ($jarOutput -match 'Unable to access jarfile') {
         # java.exe takes its arguments through the ANSI code page, so the non-ASCII test root is not
         # addressable on a host whose code page is not CJK. The entry files are still asserted below;
@@ -320,7 +320,7 @@ $savedJava = $env:JAVA_HOME
 try {
     $env:JAVA_HOME = $null
     $env:PATH = "$env:SystemRoot\System32"
-    $jarOutput = ((Invoke-CoopNative "$root/shims/jar-tool.cmd" )) -join "`n"
+    $jarOutput = ((Invoke-BurrowNative "$root/shims/jar-tool.cmd" )) -join "`n"
     $jarCode = $LASTEXITCODE
 } finally { $env:PATH = $savedPath; $env:JAVA_HOME = $savedJava }
 if ($jarCode -eq 0 -or $jarOutput -notmatch 'Java runtime') { throw "JAR entry without a runtime did not fail explicitly: $jarOutput" }
@@ -330,7 +330,7 @@ Assert-Shortcut (Join-Path $programs "$subShortcut.lnk") "$root/apps/envapp/curr
 Assert-Shortcut (Join-Path $programs "$expandShortcut.lnk") "$root/apps/envapp/current/bin/show.cmd" "--data=$expandedData --dir=$expandedCurrent"
 $foreignLink = Join-Path $programs "Unrelated-$tag.lnk"
 [IO.File]::WriteAllText($foreignLink,'foreign shortcut')
-if (Test-Path -LiteralPath (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Scoop Apps\Coop $tag")) { throw 'isolated test wrote into the real Start Menu' }
+if (Test-Path -LiteralPath (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Scoop Apps\Burrow $tag")) { throw 'isolated test wrote into the real Start Menu' }
 
 $mainLink = Join-Path $programs "$mainShortcut.lnk"
 try {
@@ -347,14 +347,14 @@ try {
     Write-Output "skipped shortcut rewrite: the shell refused the link ($($_.Exception.Message))"
 }
 
-# Update replaces entries and removes only shortcuts Coop created for the previous version.
+# Update replaces entries and removes only shortcuts Burrow created for the previous version.
 # Rebuild each surviving bin tuple as a string array: a bare Where-Object pipeline leaves PSObject
 # wrappers, and Windows PowerShell 5.1 serializes those as {"value":...,"Count":...} instead of a
 # JSON array, which the IR correctly rejects as an invalid bin entry.
 $bin = @($bin | Where-Object { $_[1] -ne 'fail-tool' } | ForEach-Object { ,([string[]]@($_)) })
 $shortcuts = @(@('tool.exe',$mainShortcut),@('tool.exe',$subShortcut),@('bin/show.cmd',$expandShortcut,'--data=$persist_dir\data --dir=$dir'))
 Build-EnvironmentPackage $root '2' $jarPath 'declared-v2' $shortcuts $bin
-$update = & $CoopExe --root $root update envapp --json
+$update = & $BurrowExe --root $root update envapp --json
 Assert-Exit "complex command update failed: $($update -join "`n")"
 $cmdOutput = ((& "$root/shims/cmd-tool.cmd" hello) -join "`n")
 if ($LASTEXITCODE -ne 0 -or $cmdOutput -notmatch 'cmd-2') { throw 'updated CMD entry did not run the new version' }
@@ -366,28 +366,28 @@ if (Test-Path -LiteralPath (Join-Path $programs "$failShortcut.lnk")) { throw 'u
 Assert-Shortcut (Join-Path $programs "$mainShortcut.lnk") "$root/apps/envapp/current/tool.exe" ''
 Assert-Shortcut (Join-Path $programs "$subShortcut.lnk") "$root/apps/envapp/current/tool.exe" ''
 Assert-Shortcut (Join-Path $programs "$expandShortcut.lnk") "$root/apps/envapp/current/bin/show.cmd" "--data=$expandedData --dir=$expandedCurrent"
-$record = Get-Content -LiteralPath "$root/.coop/packages/envapp.json" -Raw | ConvertFrom-Json
+$record = Get-Content -LiteralPath "$root/.burrow/packages/envapp.json" -Raw | ConvertFrom-Json
 if (@($record.shortcuts).Count -ne 3) { throw 'updated management record kept the removed shortcut' }
 
 # A locked shortcut is left in place; the uninstall fails and rolls back instead of killing anything.
 $mainLink = Join-Path $programs "$mainShortcut.lnk"
 $lock = [IO.File]::Open($mainLink,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
 try {
-    $failed = Invoke-CoopNative $CoopExe  --root $root uninstall envapp --json
+    $failed = Invoke-BurrowNative $BurrowExe  --root $root uninstall envapp --json
     if ($LASTEXITCODE -eq 0) { throw 'locked shortcut was removed' }
     if (-not (Test-Path "$root/apps/envapp/current") -or -not (Test-Path "$root/shims/cmd-tool.cmd")) { throw 'failed shortcut removal did not roll back the installation' }
-    $blockedJournals = @(Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object { $_.action -eq 'uninstall' -and $_.state -eq 'rolled-back' })
+    $blockedJournals = @(Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object { $_.action -eq 'uninstall' -and $_.state -eq 'rolled-back' })
     if ($blockedJournals.Count -lt 1 -or -not ($blockedJournals[-1].moves | Where-Object { $_.error })) { throw 'failed uninstall journal did not record the blocking error' }
 } finally { $lock.Dispose() }
 $mainLink = Join-Path $programs "$mainShortcut.lnk"
 $original = [Convert]::ToBase64String([IO.File]::ReadAllBytes($mainLink))
 [IO.File]::WriteAllBytes($mainLink,[Text.Encoding]::UTF8.GetBytes('not a shortcut'))
-$failed = Invoke-CoopNative $CoopExe  --root $root uninstall envapp --json
+$failed = Invoke-BurrowNative $BurrowExe  --root $root uninstall envapp --json
 if ($LASTEXITCODE -eq 0) { throw 'externally modified shortcut was removed' }
 if (-not (Test-Path "$root/apps/envapp/current") -or -not (Test-Path "$root/shims/cmd-tool.cmd")) { throw 'refused uninstall damaged the installation' }
 if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($mainLink)) -ne [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('not a shortcut'))) { throw 'externally modified shortcut was overwritten' }
 [IO.File]::WriteAllBytes($mainLink,[Convert]::FromBase64String($original))
-# Scoop reset recreates its own .cmd/.ps1/sh wrappers beside Coop's launcher. The plan lists the
+# Scoop reset recreates its own .cmd/.ps1/sh wrappers beside Burrow's launcher. The plan lists the
 # wrappers it can confirm as this package's, and uninstall removes only those.
 $scoopMarker = "$root\apps\envapp\current\bin\tool.cmd"
 foreach ($wrapper in @('cmd-tool.cmd','cmd-tool.ps1','cmd-tool')) {
@@ -395,7 +395,7 @@ foreach ($wrapper in @('cmd-tool.cmd','cmd-tool.ps1','cmd-tool')) {
 }
 $foreignWrapper = "$root/shims/foreign-tool.cmd"
 [IO.File]::WriteAllText($foreignWrapper,'@rem C:\other\apps\foreign\current\tool.cmd'+"`r`n@echo foreign`r`n")
-$uninstallPreview = Read-Json (& $CoopExe --root $root uninstall envapp --dry-run --json)
+$uninstallPreview = Read-Json (& $BurrowExe --root $root uninstall envapp --dry-run --json)
 Assert-Exit 'uninstall preview with Scoop wrappers failed'
 foreach ($wrapper in @('cmd-tool.cmd','cmd-tool.ps1','cmd-tool')) {
     if ([IO.Path]::GetFullPath((Join-Path $root "shims/$wrapper")) -notin @($uninstallPreview.scoop_entry_wrappers)) { throw "uninstall preview omitted the Scoop wrapper $wrapper" }
@@ -403,120 +403,120 @@ foreach ($wrapper in @('cmd-tool.cmd','cmd-tool.ps1','cmd-tool')) {
 if ([IO.Path]::GetFullPath($foreignWrapper) -in @($uninstallPreview.scoop_entry_wrappers)) { throw 'uninstall preview claimed an unrelated Scoop wrapper' }
 $expandUninstall = @($uninstallPreview.exposure.shortcuts | Where-Object name -eq $expandShortcut)[0]
 if ($expandUninstall.arguments -ne "--data=$expandedData --dir=$expandedCurrent") { throw "uninstall preview did not keep expanded shortcut arguments: $($expandUninstall.arguments)" }
-$uninstall = & $CoopExe --root $root uninstall envapp --json
+$uninstall = & $BurrowExe --root $root uninstall envapp --json
 Assert-Exit "complex command uninstall failed: $($uninstall -join "`n")"
 if ((Test-Path "$root/apps/envapp/current") -or (Test-Path "$root/apps/envapp/2") -or (Test-Path "$root/shims/cmd-tool.cmd") -or (Test-Path -LiteralPath $mainLink)) { throw 'uninstall left published entries or shortcuts' }
 if ((Test-Path "$root/shims/cmd-tool.cmd") -or (Test-Path "$root/shims/cmd-tool.ps1") -or (Test-Path "$root/shims/cmd-tool")) { throw 'uninstall left Scoop-created wrappers for the removed package' }
 if (-not (Test-Path $foreignWrapper)) { throw 'uninstall removed a Scoop-style wrapper that does not belong to the package' }
 Remove-Item -LiteralPath $foreignWrapper -Force
-if ((Get-UserRaw 'FIXTURE_ENV').value -ne $userEnvironmentSnapshots['FIXTURE_ENV'].value) { throw 'uninstall did not restore the pre-Coop user environment value' }
+if ((Get-UserRaw 'FIXTURE_ENV').value -ne $userEnvironmentSnapshots['FIXTURE_ENV'].value) { throw 'uninstall did not restore the pre-Burrow user environment value' }
 if (Path-Has (Get-UserRaw 'Path').value (Join-Path $root 'apps/envapp/current/bin')) { throw 'uninstall left the persistent user PATH entry behind' }
-if ((Test-Path (Join-Path $programs "Coop $tag")) -or (Test-Path (Join-Path $programs "Git $tag"))) { throw 'uninstall left empty shortcut subfolders behind' }
-if (-not (Test-Path -LiteralPath $foreignLink)) { throw 'uninstall removed a shortcut Coop does not own' }
+if ((Test-Path (Join-Path $programs "Burrow $tag")) -or (Test-Path (Join-Path $programs "Git $tag"))) { throw 'uninstall left empty shortcut subfolders behind' }
+if (-not (Test-Path -LiteralPath $foreignLink)) { throw 'uninstall removed a shortcut Burrow does not own' }
 Remove-Item -LiteralPath $foreignLink -Force
 
-# Coop publishes Scoop's own .shim view and nothing else in shims/ for an executable entry. The
+# Burrow publishes Scoop's own .shim view and nothing else in shims/ for an executable entry. The
 # other client may republish that view (for example after `scoop reset`); version switching must
 # keep accepting the shared entry and republish the Scoop view instead of refusing it.
 $sharedRoot = New-TestRoot
-$env:COOP_PROGRAMS_DIR = Join-Path $sharedRoot 'programs'
+$env:BURROW_PROGRAMS_DIR = Join-Path $sharedRoot 'programs'
 Build-EnvironmentPackage $sharedRoot '1' $jarPath 'declared-v1' @() @(@('tool.exe','tool'),@('tool.exe','tool-alt'))
-$sharedInstall = & $CoopExe --root $sharedRoot install envapp --json
+$sharedInstall = & $BurrowExe --root $sharedRoot install envapp --json
 Assert-Exit "shared entry fixture install failed: $($sharedInstall -join "`n")"
 Build-EnvironmentPackage $sharedRoot '2' $jarPath 'declared-v2' @() @(@('tool.exe','tool'),@('tool.exe','tool-alt'))
-$sharedUpdate = & $CoopExe --root $sharedRoot update envapp --json
+$sharedUpdate = & $BurrowExe --root $sharedRoot update envapp --json
 Assert-Exit "shared entry fixture update failed: $($sharedUpdate -join "`n")"
 $sharedScoopView = Join-Path $sharedRoot 'shims/tool.shim'
-$sharedCoopView = Join-Path $sharedRoot 'shims/tool.coop-shim.json'
-if (-not (Test-Path -LiteralPath $sharedScoopView)) { throw 'Coop did not publish the Scoop command view for an environment-declaring package' }
-if (Test-Path -LiteralPath $sharedCoopView) { throw 'Coop published its own metadata file into shims/' }
+$sharedBurrowView = Join-Path $sharedRoot 'shims/tool.burrow-shim.json'
+if (-not (Test-Path -LiteralPath $sharedScoopView)) { throw 'Burrow did not publish the Scoop command view for an environment-declaring package' }
+if (Test-Path -LiteralPath $sharedBurrowView) { throw 'Burrow published its own metadata file into shims/' }
 $sharedScoopText = 'path = "' + (Join-Path $sharedRoot 'apps/envapp/current/tool.exe') + '"' + "`r`n"
 [IO.File]::WriteAllText($sharedScoopView,$sharedScoopText)
-$sharedResetOne = & $CoopExe --root $sharedRoot reset envapp@1 --json
+$sharedResetOne = & $BurrowExe --root $sharedRoot reset envapp@1 --json
 Assert-Exit "reset with a coexisting Scoop shim view failed: $($sharedResetOne -join "`n")"
 $null = & (Join-Path $sharedRoot 'shims/tool.exe')
 if ($LASTEXITCODE -ne 0) { throw 'reset with a coexisting Scoop shim view left a broken entry' }
 if ((Get-Item -LiteralPath (Join-Path $sharedRoot 'apps/envapp/current')).Target -notmatch '\\1$') { throw 'reset with a coexisting Scoop shim view did not publish the retained version' }
 [IO.File]::WriteAllText($sharedScoopView,$sharedScoopText)
-$sharedResetTwo = & $CoopExe --root $sharedRoot reset envapp@2 --json
+$sharedResetTwo = & $BurrowExe --root $sharedRoot reset envapp@2 --json
 Assert-Exit "reset back with a coexisting Scoop shim view failed: $($sharedResetTwo -join "`n")"
 $null = & (Join-Path $sharedRoot 'shims/tool.exe')
 if ($LASTEXITCODE -ne 0) { throw 'reset back with a coexisting Scoop shim view left a broken entry' }
 if ((Get-Item -LiteralPath (Join-Path $sharedRoot 'apps/envapp/current')).Target -notmatch '\\2$') { throw 'reset back with a coexisting Scoop shim view did not publish the current version' }
-if (-not (Test-Path -LiteralPath $sharedScoopView)) { throw 'Coop did not republish the Scoop view after the version switch' }
-if (Test-Path -LiteralPath $sharedCoopView) { throw 'Coop published its own metadata file into shims/' }
-$sharedUninstall = & $CoopExe --root $sharedRoot uninstall envapp --json
+if (-not (Test-Path -LiteralPath $sharedScoopView)) { throw 'Burrow did not republish the Scoop view after the version switch' }
+if (Test-Path -LiteralPath $sharedBurrowView) { throw 'Burrow published its own metadata file into shims/' }
+$sharedUninstall = & $BurrowExe --root $sharedRoot uninstall envapp --json
 Assert-Exit "shared entry uninstall failed: $($sharedUninstall -join "`n")"
 foreach ($sharedEntry in @('tool.exe','tool.shim')) {
     if (Test-Path -LiteralPath (Join-Path $sharedRoot "shims/$sharedEntry")) { throw "shared entry uninstall left $sharedEntry" }
 }
 
-# A pre-existing shortcut is a conflict, not something Coop may overwrite.
+# A pre-existing shortcut is a conflict, not something Burrow may overwrite.
 $conflictRoot = New-TestRoot
 $conflictPrograms = Join-Path $conflictRoot 'programs'
-$env:COOP_PROGRAMS_DIR = $conflictPrograms
+$env:BURROW_PROGRAMS_DIR = $conflictPrograms
 $conflictName = "Conflict-$tag"
 $conflictLink = Join-Path $conflictPrograms "$conflictName.lnk"
 New-Item -ItemType Directory -Path (Split-Path $conflictLink) -Force | Out-Null
 [IO.File]::WriteAllText($conflictLink,'foreign shortcut')
 Build-EnvironmentPackage $conflictRoot '1' $jarPath 'declared-value' (,@('tool.exe',$conflictName)) (,@('tool.exe','plain-tool'))
-$failed = Invoke-CoopNative $CoopExe  --root $conflictRoot install test/envapp --json
+$failed = Invoke-BurrowNative $BurrowExe  --root $conflictRoot install test/envapp --json
 if ($LASTEXITCODE -eq 0 -or (Test-Path "$conflictRoot/apps/envapp") -or (Get-Content -LiteralPath $conflictLink -Raw) -ne 'foreign shortcut') { throw 'existing shortcut was overwritten or an install published state' }
 
 # A failure while creating a shortcut rolls the whole install back with a journaled state.
 $rollbackRoot = New-TestRoot
 $rollbackPrograms = Join-Path $rollbackRoot 'programs'
-$env:COOP_PROGRAMS_DIR = $rollbackPrograms
+$env:BURROW_PROGRAMS_DIR = $rollbackPrograms
 New-Item -ItemType Directory -Path $rollbackPrograms -Force | Out-Null
 $blockingName = "Blocked-$tag"
 [IO.File]::WriteAllText((Join-Path $rollbackPrograms $blockingName),'not a directory')
 Build-EnvironmentPackage $rollbackRoot '1' $jarPath 'declared-value' (,@('tool.exe',"$blockingName\Inner")) (,@('tool.exe','plain-tool'))
-$rollback = Invoke-CoopNative $CoopExe  --root $rollbackRoot install test/envapp --json
+$rollback = Invoke-BurrowNative $BurrowExe  --root $rollbackRoot install test/envapp --json
 if ($LASTEXITCODE -eq 0) { throw 'shortcut creation failure was reported as success' }
-if ((Test-Path "$rollbackRoot/apps/envapp/current") -or (Test-Path "$rollbackRoot/shims/plain-tool.exe") -or (Test-Path "$rollbackRoot/.coop/packages/envapp.json")) { throw 'shortcut failure did not roll back the install' }
-$rollbackJournals = @(Get-ChildItem "$rollbackRoot/.coop/transactions" -Recurse -Filter journal.json | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json })
+if ((Test-Path "$rollbackRoot/apps/envapp/current") -or (Test-Path "$rollbackRoot/shims/plain-tool.exe") -or (Test-Path "$rollbackRoot/.burrow/packages/envapp.json")) { throw 'shortcut failure did not roll back the install' }
+$rollbackJournals = @(Get-ChildItem "$rollbackRoot/.burrow/transactions" -Recurse -Filter journal.json | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json })
 if ('rolled-back' -notin $rollbackJournals.state -or 'pending' -in $rollbackJournals.state) { throw 'shortcut failure journal is inaccurate' }
 if ((Get-Content -LiteralPath (Join-Path $rollbackPrograms $blockingName) -Raw) -ne 'not a directory') { throw 'shortcut failure modified an unowned file' }
 
-# A shortcut deleted outside Coop is already revoked: update and uninstall continue, recreate
+# A shortcut deleted outside Burrow is already revoked: update and uninstall continue, recreate
 # declared shortcuts, and record the observation instead of becoming an unrecoverable dead end.
 $missingRoot = New-TestRoot
 $missingPrograms = Join-Path $missingRoot 'programs'
-$env:COOP_PROGRAMS_DIR = $missingPrograms
+$env:BURROW_PROGRAMS_DIR = $missingPrograms
 $missingMain = "Missing-$tag"
 $missingSub = "MissingSub-$tag\Inner"
 $missingBin = ,@('tool.exe','plain-tool')
 Build-EnvironmentPackage $missingRoot '1' $jarPath 'missing-v1' (,@('tool.exe',$missingMain)) $missingBin
-$install = & $CoopExe --root $missingRoot install test/envapp --json
+$install = & $BurrowExe --root $missingRoot install test/envapp --json
 Assert-Exit "missing-shortcut install failed: $($install -join "`n")"
 $missingLink = Join-Path $missingPrograms "$missingMain.lnk"
 Remove-Item -LiteralPath $missingLink -Force
 Build-EnvironmentPackage $missingRoot '2' $jarPath 'missing-v2' @(@('tool.exe',$missingMain),@('tool.exe',$missingSub)) $missingBin
-$preview = Read-Json (& $CoopExe --root $missingRoot update envapp --dry-run --json)
+$preview = Read-Json (& $BurrowExe --root $missingRoot update envapp --dry-run --json)
 Assert-Exit 'update preview after an absent owned shortcut failed'
 if ($missingMain -notin @($preview.exposure.missing_shortcuts)) { throw 'update preview did not disclose the absent owned shortcut' }
-$update = Read-Json (& $CoopExe --root $missingRoot update envapp --json)
+$update = Read-Json (& $BurrowExe --root $missingRoot update envapp --json)
 Assert-Exit 'update after an absent owned shortcut failed'
 if ($missingMain -notin @($update.shortcuts_already_absent)) { throw 'update result did not record the already absent shortcut' }
 if (-not (Test-Path -LiteralPath $missingLink) -or -not (Test-Path -LiteralPath (Join-Path $missingPrograms "$missingSub.lnk"))) { throw 'update did not recreate the declared shortcuts' }
 $plainOutput = ((& "$missingRoot/shims/plain-tool.exe") -join "`n")
 if ($LASTEXITCODE -ne 0 -or $plainOutput -notmatch 'fixture 1') { throw 'update after an absent shortcut did not restore a working entry' }
 Remove-Item -LiteralPath $missingLink -Force
-$uninstall = Read-Json (& $CoopExe --root $missingRoot uninstall envapp --json)
+$uninstall = Read-Json (& $BurrowExe --root $missingRoot uninstall envapp --json)
 Assert-Exit 'uninstall after an absent owned shortcut failed'
 if ($missingMain -notin @($uninstall.shortcuts_already_absent)) { throw 'uninstall result did not record the already absent shortcut' }
 if ((Test-Path "$missingRoot/apps/envapp/current") -or (Test-Path "$missingRoot/shims/plain-tool.exe")) { throw 'uninstall after an absent shortcut left published state' }
-$missingJournals = @(Get-ChildItem "$missingRoot/.coop/transactions" -Recurse -Filter journal.json | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object { $_.action -eq 'uninstall' -and $_.state -eq 'committed' })
+$missingJournals = @(Get-ChildItem "$missingRoot/.burrow/transactions" -Recurse -Filter journal.json | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object { $_.action -eq 'uninstall' -and $_.state -eq 'committed' })
 if ($missingJournals.Count -lt 1 -or $missingMain -notin @($missingJournals[-1].shortcuts_already_absent)) { throw 'uninstall journal did not record the absent shortcut observation' }
 if (Test-Path (Join-Path $missingPrograms "MissingSub-$tag")) { throw 'uninstall left the empty sub-folder after revoking its last shortcut' }
 
 # Unsafe command target paths are refused before any wrapper or entry is created. Every target
 # now has a Scoop host (the else branch is bash), so the remaining refusal is the path boundary.
 $badRoot = New-TestRoot
-$env:COOP_PROGRAMS_DIR = Join-Path $badRoot 'programs'
+$env:BURROW_PROGRAMS_DIR = Join-Path $badRoot 'programs'
 $badManifest = @{version='1';url=((File-Uri $fixture1)+'#/tool.sh');hash=(Get-FileHash -LiteralPath $fixture1 -Algorithm SHA256).Hash.ToLower();bin='..\tool.sh'}
 Write-Manifest $badRoot 'badcmd' $badManifest
-$bad = (Invoke-CoopNative $CoopExe  --root $badRoot install test/badcmd --dry-run --json) -join "`n"
+$bad = (Invoke-BurrowNative $BurrowExe  --root $badRoot install test/badcmd --dry-run --json) -join "`n"
 if ($bad -notmatch 'Invalid path component' -or ($bad | ConvertFrom-Json).execution_available -ne $false) { throw 'unsafe command target path was not refused explicitly' }
 if (Test-Path "$badRoot/shims") { throw 'unsafe command preview created an entry' }
 
@@ -525,7 +525,7 @@ if (Test-Path "$badRoot/shims") { throw 'unsafe command preview created an entry
 # and environment values, and uninstall removes the shared entries it still owns.
 $adoptRoot = New-TestRoot
 $adoptPrograms = Join-Path $adoptRoot 'programs'
-$env:COOP_PROGRAMS_DIR = $adoptPrograms
+$env:BURROW_PROGRAMS_DIR = $adoptPrograms
 $legacyName = "Legacy-$tag"
 $legacyShortcut = "Legacy $tag"
 New-Item -ItemType Directory -Path "$adoptRoot/apps/Legacy/1","$adoptRoot/shims",$adoptPrograms -Force | Out-Null
@@ -554,20 +554,20 @@ if (((& "$adoptRoot/shims/legacy.exe" --caller) -join "`n") -notmatch 'fixture 2
 $updateManifest = @{version='2';url=((File-Uri $fixtureEnv)+'#/legacy.exe');hash=(Get-FileHash -LiteralPath $fixtureEnv -Algorithm SHA256).Hash.ToLower();
     bin=$legacyBins;shortcuts=$legacyShortcuts;env_set=@{FIXTURE_ENV='updated-value'};env_add_path='.'}
 Write-Manifest $adoptRoot 'legacy' $updateManifest
-if (Test-Path "$adoptRoot/.coop/packages/Legacy.json") { throw 'the shared fixture unexpectedly had a private management record' }
-$sharedPreview = Read-Json (& $CoopExe --root $adoptRoot update legacy --dry-run --json)
+if (Test-Path "$adoptRoot/.burrow/packages/Legacy.json") { throw 'the shared fixture unexpectedly had a private management record' }
+$sharedPreview = Read-Json (& $BurrowExe --root $adoptRoot update legacy --dry-run --json)
 Assert-Exit 'legacy complex entry shared update preview failed'
 if (-not $sharedPreview.execution_available) { throw "shared legacy entry update is blocked: $($sharedPreview.diagnostics | ConvertTo-Json -Compress)" }
-if ((Test-Path "$adoptRoot/.coop") -or -not (Test-Path -LiteralPath $legacyLink)) { throw 'shared update preview changed state or shortcuts' }
-$update = & $CoopExe --root $adoptRoot update legacy --json
+if ((Test-Path "$adoptRoot/.burrow") -or -not (Test-Path -LiteralPath $legacyLink)) { throw 'shared update preview changed state or shortcuts' }
+$update = & $BurrowExe --root $adoptRoot update legacy --json
 Assert-Exit "shared complex entry update failed: $($update -join "`n")"
-$updateRecord = Get-Content -LiteralPath "$adoptRoot/.coop/packages/Legacy.json" -Raw | ConvertFrom-Json
+$updateRecord = Get-Content -LiteralPath "$adoptRoot/.burrow/packages/Legacy.json" -Raw | ConvertFrom-Json
 if ($updateRecord.origin -ne 'scoop') { throw 'updating a shared installation did not keep the Scoop origin' }
 if (@($updateRecord.environment | Where-Object name -eq 'FIXTURE_ENV').value -ne 'updated-value') { throw 'the update record omitted the declared environment exposure' }
 $updatedOutput = ((& "$adoptRoot/shims/legacy2.exe" --caller) -join "`n")
 if ($LASTEXITCODE -ne 0 -or $updatedOutput -notmatch '\[--two\]' -or $updatedOutput -notmatch '\[--caller\]' -or $updatedOutput -notmatch 'env=updated-value') { throw "shared update did not forward arguments and environment: $updatedOutput" }
 Assert-Shortcut $legacyLink "$adoptRoot/apps/Legacy/current/legacy.exe" ''
-$uninstall = & $CoopExe --root $adoptRoot uninstall Legacy --json
+$uninstall = & $BurrowExe --root $adoptRoot uninstall Legacy --json
 Assert-Exit "shared complex entry uninstall failed: $($uninstall -join "`n")"
 if (Test-Path -LiteralPath $legacyLink) { throw 'shared uninstall left the owned shortcut behind' }
 if (Test-Path "$adoptRoot/shims/legacy.exe") { throw 'shared uninstall left command entries behind' }
@@ -576,7 +576,7 @@ if (Test-Path "$adoptRoot/shims/legacy.exe") { throw 'shared uninstall left comm
 # left alone; an unknown .shim key does not make the shared entry unmanageable.
 $changedRoot = New-TestRoot
 $changedPrograms = Join-Path $changedRoot 'programs'
-$env:COOP_PROGRAMS_DIR = $changedPrograms
+$env:BURROW_PROGRAMS_DIR = $changedPrograms
 New-Item -ItemType Directory -Path "$changedRoot/apps/Changed/1","$changedRoot/shims",$changedPrograms -Force | Out-Null
 Copy-Item -LiteralPath $fixture2 -Destination "$changedRoot/apps/Changed/1/changed.exe"
 $changedSingleBin = ,@('changed.exe','changed')
@@ -596,25 +596,25 @@ $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($changedLink)
 $shortcut.TargetPath = "$changedRoot/apps/Changed/current/changed.exe"
 $shortcut.Arguments = '--different'
 $shortcut.Save()
-$changedPreview = Read-Json (Invoke-CoopNative $CoopExe  --root $changedRoot update changed --dry-run --json)
+$changedPreview = Read-Json (Invoke-BurrowNative $BurrowExe  --root $changedRoot update changed --dry-run --json)
 if ($changedPreview.execution_available -ne $false) { throw "a changed shared shortcut was not refused by the preview: $($changedPreview.execution_available)" }
 if (@($changedPreview.diagnostics | Where-Object { $_.message -match 'Shared shortcut uses different arguments|Shortcut was modified externally' }).Count -eq 0) { throw "the changed shortcut refusal has no explanation: $($changedPreview.diagnostics | ConvertTo-Json -Compress)" }
-$changedExecution = Invoke-CoopNative $CoopExe  --root $changedRoot update changed --json
+$changedExecution = Invoke-BurrowNative $BurrowExe  --root $changedRoot update changed --json
 if ($LASTEXITCODE -eq 0) { throw 'execution accepted a changed shared shortcut the preview refused' }
 Remove-Item -LiteralPath $changedLink -Force
-$missingPreview = Read-Json (Invoke-CoopNative $CoopExe  --root $changedRoot update changed --dry-run --json)
+$missingPreview = Read-Json (Invoke-BurrowNative $BurrowExe  --root $changedRoot update changed --dry-run --json)
 if ($missingPreview.execution_available -ne $true -or $script:LASTEXITCODE -ne 0) { throw "a missing shared shortcut blocked the update: $($missingPreview.diagnostics | ConvertTo-Json -Compress)" }
 if (@($missingPreview.exposure.missing_shortcuts) -notcontains 'Changed 应用') { throw 'the missing shared shortcut was not reported' }
 [IO.File]::AppendAllText("$changedRoot/shims/changed.shim","future = value`r`n")
-$unknownPreview = Read-Json (Invoke-CoopNative $CoopExe  --root $changedRoot update changed --dry-run --json)
+$unknownPreview = Read-Json (Invoke-BurrowNative $BurrowExe  --root $changedRoot update changed --dry-run --json)
 if ($unknownPreview.execution_available -ne $true) { throw "an unknown .shim key made the shared entry unmanageable: $($unknownPreview.diagnostics | ConvertTo-Json -Compress)" }
-if ((Test-Path "$changedRoot/.coop") -or (Test-Path "$changedRoot/shims/changed.coop-shim.json")) { throw 'shared shortcut preview changed state' }
+if ((Test-Path "$changedRoot/.burrow") -or (Test-Path "$changedRoot/shims/changed.burrow-shim.json")) { throw 'shared shortcut preview changed state' }
 
-# A Scoop-installed script-host package has only .cmd/sh wrappers, no .exe/.shim pair. Coop must
+# A Scoop-installed script-host package has only .cmd/sh wrappers, no .exe/.shim pair. Burrow must
 # recognize that evidence, update it without requiring a private record, republish the Scoop wrapper
 # view beside its own launcher, and remove every entry on uninstall.
 $scriptRoot = New-TestRoot
-$env:COOP_PROGRAMS_DIR = Join-Path $scriptRoot 'programs'
+$env:BURROW_PROGRAMS_DIR = Join-Path $scriptRoot 'programs'
 $scriptArchive = Join-Path $scriptRoot 'scopebat-v2.zip'
 New-ZipPackage $scriptArchive @{ 'tool.bat' = "@echo off`r`necho wrapper-v2 %*`r`nexit /b 0" }
 $scriptHash = (Get-FileHash -LiteralPath $scriptArchive -Algorithm SHA256).Hash.ToLower()
@@ -628,26 +628,26 @@ New-Item -ItemType Junction -Path "$scriptRoot/apps/scopebat/current" -Target "$
 $scriptTarget = [IO.Path]::GetFullPath("$scriptRoot/apps/scopebat/current/tool.bat")
 [IO.File]::WriteAllText("$scriptRoot/shims/scopebat-run.cmd","@rem $scriptTarget`r`n@`"$scriptTarget`" %*`r`n")
 [IO.File]::WriteAllText("$scriptRoot/shims/scopebat-run","#!/bin/sh`n# $scriptTarget`nMSYS2_ARG_CONV_EXCL=/C cmd.exe /C `"$scriptTarget`" `"`$@`"`n")
-$scriptPreview = Read-Json (& $CoopExe --root $scriptRoot update scopebat --dry-run --json)
+$scriptPreview = Read-Json (& $BurrowExe --root $scriptRoot update scopebat --dry-run --json)
 Assert-Exit 'Scoop script-host update preview failed'
 if ($scriptPreview.execution_available -ne $true -or @($scriptPreview.scoop_entry_wrappers).Count -ne 2) { throw 'Scoop script-host wrappers were not recognized in the update plan' }
-$scriptUpdate = & $CoopExe --root $scriptRoot update scopebat --json
+$scriptUpdate = & $BurrowExe --root $scriptRoot update scopebat --json
 Assert-Exit "Scoop script-host update failed: $($scriptUpdate -join "`n")"
 $scriptOutput = ((& "$scriptRoot/shims/scopebat-run.cmd" one) -join "`n")
 if ($LASTEXITCODE -ne 0 -or $scriptOutput -notmatch 'wrapper-v2' -or $scriptOutput -notmatch 'one') { throw "updated Scoop script-host entry did not run: $scriptOutput" }
 if (-not (Test-Path "$scriptRoot/shims/scopebat-run.cmd") -or -not (Test-Path "$scriptRoot/shims/scopebat-run")) { throw 'update did not republish the Scoop script-host wrappers beside the launcher' }
 $scriptWrapperTarget = Join-Path $scriptRoot 'apps/scopebat/current/tool.bat'
 if (([IO.File]::ReadAllText("$scriptRoot/shims/scopebat-run.cmd")) -notmatch [regex]::Escape($scriptWrapperTarget)) { throw 'the republished .cmd wrapper does not target the current version' }
-$scriptRecord = Get-Content -LiteralPath "$scriptRoot/.coop/packages/scopebat.json" -Raw | ConvertFrom-Json
+$scriptRecord = Get-Content -LiteralPath "$scriptRoot/.burrow/packages/scopebat.json" -Raw | ConvertFrom-Json
 if ($scriptRecord.origin -ne 'scoop') { throw 'updating a Scoop script-host installation did not preserve its origin' }
-$scriptUninstall = & $CoopExe --root $scriptRoot uninstall scopebat --json
+$scriptUninstall = & $BurrowExe --root $scriptRoot uninstall scopebat --json
 Assert-Exit "Scoop script-host uninstall failed: $($scriptUninstall -join "`n")"
 if ((Test-Path "$scriptRoot/apps/scopebat/current") -or (Test-Path "$scriptRoot/shims/scopebat-run.exe") -or
-    (Test-Path "$scriptRoot/shims/scopebat-run.coop-shim.json") -or (Test-Path "$scriptRoot/shims/scopebat-run.cmd") -or
+    (Test-Path "$scriptRoot/shims/scopebat-run.burrow-shim.json") -or (Test-Path "$scriptRoot/shims/scopebat-run.cmd") -or
     (Test-Path "$scriptRoot/shims/scopebat-run")) { throw 'Scoop script-host uninstall left published state' }
 # A wrapper-only Scoop installation is also removable directly, without first being updated.
 $directRoot = New-TestRoot
-$env:COOP_PROGRAMS_DIR = Join-Path $directRoot 'programs'
+$env:BURROW_PROGRAMS_DIR = Join-Path $directRoot 'programs'
 New-Item -ItemType Directory -Path "$directRoot/apps/scopebat/1","$directRoot/shims" -Force | Out-Null
 [IO.File]::WriteAllText("$directRoot/apps/scopebat/1/tool.bat","@echo off`r`nexit /b 0")
 $directBin = ,@('tool.bat','scopebat-run')
@@ -656,11 +656,11 @@ $directBin = ,@('tool.bat','scopebat-run')
 New-Item -ItemType Junction -Path "$directRoot/apps/scopebat/current" -Target "$directRoot/apps/scopebat/1" | Out-Null
 $directTarget = [IO.Path]::GetFullPath("$directRoot/apps/scopebat/current/tool.bat")
 [IO.File]::WriteAllText("$directRoot/shims/scopebat-run.cmd","@rem $directTarget`r`n@`"$directTarget`" %*`r`n")
-$directUninstall = & $CoopExe --root $directRoot uninstall scopebat --json
+$directUninstall = & $BurrowExe --root $directRoot uninstall scopebat --json
 Assert-Exit "direct Scoop script-host uninstall failed: $($directUninstall -join "`n")"
 if ((Test-Path "$directRoot/apps/scopebat/current") -or (Test-Path "$directRoot/shims/scopebat-run.cmd")) { throw 'direct Scoop script-host uninstall left published state' }
 
-@{coop=$CoopExe;root=$root;adopt_root=$adoptRoot;jar_available=$jarAvailable;jar=$jarPath;programs=$programs;script_root=$scriptRoot;direct_root=$directRoot} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $TestRoot 'exposure-evidence.json') -Encoding utf8
+@{burrow=$BurrowExe;root=$root;adopt_root=$adoptRoot;jar_available=$jarAvailable;jar=$jarPath;programs=$programs;script_root=$scriptRoot;direct_root=$directRoot} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $TestRoot 'exposure-evidence.json') -Encoding utf8
 Write-Output "PASS complex command entries, shortcuts and environment exposure: $TestRoot"
 exit 0
 } finally {

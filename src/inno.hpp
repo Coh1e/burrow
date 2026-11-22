@@ -3,10 +3,10 @@
 #include "data.hpp"
 #include <vector>
 
-namespace coop {
-// Coop does not reimplement the Inno Setup archive format. The declared external helper that Scoop
+namespace burrow {
+// Burrow does not reimplement the Inno Setup archive format. The declared external helper that Scoop
 // itself uses (innounp, a separate software dependency installed in the selected root) unpacks the
-// vendor installer's file payload, and Coop then publishes the same layout Scoop's
+// vendor installer's file payload, and Burrow then publishes the same layout Scoop's
 // Expand-InnoArchive produces: the files below the selected Inno directory, without running the
 // vendor installer. The helper is detected, never downloaded or installed, and the vendor
 // installer's own [Run], [Registry], service, shell and uninstall-registration effects are not
@@ -32,7 +32,7 @@ struct InnoArguments {
 InnoArguments inno_arguments(const fs::path& setup, const fs::path& destination,
                              const std::string& extract_directory);
 
-// Unpack the vendor installer payload into an empty, Coop-owned directory and return the journal
+// Unpack the vendor installer payload into an empty, Burrow-owned directory and return the journal
 // record. stdout and stderr are kept in the transaction, and a non-zero helper exit fails the
 // operation before any version is published.
 Json extract_inno_archive(const Context& context, const fs::path& helper, const fs::path& setup,

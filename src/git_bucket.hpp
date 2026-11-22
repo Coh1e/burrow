@@ -1,7 +1,7 @@
 #pragma once
 #include "data.hpp"
 
-namespace coop {
+namespace burrow {
 // Refreshes the shared bucket that Scoop itself uses at <root>/buckets/<name>.
 // A null previous record performs the first refresh (clone); an existing record refreshes the
 // working tree in place. Both paths use the embedded Git library and never start git.exe.

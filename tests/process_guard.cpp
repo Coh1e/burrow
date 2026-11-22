@@ -49,7 +49,7 @@ int wmain(int argc, wchar_t** argv) {
     bool done = false;
     unsigned long timeout = 10000;
     wchar_t configured_timeout[32]{};
-    const auto timeout_length = GetEnvironmentVariableW(L"COOP_PROCESS_GUARD_TIMEOUT_MS",configured_timeout,32);
+    const auto timeout_length = GetEnvironmentVariableW(L"BURROW_PROCESS_GUARD_TIMEOUT_MS",configured_timeout,32);
     if (timeout_length && timeout_length < 32) {
         try { timeout = std::stoul(configured_timeout); } catch (...) { timeout = 10000; }
         if (!timeout || timeout > 120000) timeout = 120000;
@@ -57,7 +57,7 @@ int wmain(int argc, wchar_t** argv) {
     // Lifecycle hooks intentionally start a real PowerShell child. This opt-in keeps the
     // observation and the workload exit code while allowing more than one workload process.
     wchar_t configured_allow_children[8]{};
-    const auto allow_children = GetEnvironmentVariableW(L"COOP_PROCESS_GUARD_ALLOW_CHILDREN",configured_allow_children,8) &&
+    const auto allow_children = GetEnvironmentVariableW(L"BURROW_PROCESS_GUARD_ALLOW_CHILDREN",configured_allow_children,8) &&
         std::wstring(configured_allow_children) == L"1";
     const auto deadline = GetTickCount64()+timeout;
     while (!done) {

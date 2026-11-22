@@ -1,10 +1,10 @@
 # 写作标准
 
-本文件规定 Coop 两类文本的写法：**机器读文本**与**人类读文本**。目标是让机器读的文本可预测、让人读的文本不产生歧义，而不是把所有文字改成同一种风格。规则参考 ASD-STE100（简化技术英语）的“一个词一个意思、一句一个指令、主动语态”，但只在适用处使用。
+本文件规定 Burrow 两类文本的写法：**机器读文本**与**人类读文本**。目标是让机器读的文本可预测、让人读的文本不产生歧义，而不是把所有文字改成同一种风格。规则参考 ASD-STE100（简化技术英语）的“一个词一个意思、一句一个指令、主动语态”，但只在适用处使用。
 
 ## 两类文本
 
-**机器读文本**：由程序按精确内容或形状读取的文本。包括 `--json` 键与状态值、稳定 kebab-case 码、退出码、CLI 文本模式下与 Scoop 同形的行、`.coop/` 运行记录与事务日志字段、`coop <版本>` 版本行、`ir_operations` 名称、发布资产名。
+**机器读文本**：由程序按精确内容或形状读取的文本。包括 `--json` 键与状态值、稳定 kebab-case 码、退出码、CLI 文本模式下与 Scoop 同形的行、`.burrow/` 运行记录与事务日志字段、`burrow <版本>` 版本行、`ir_operations` 名称、发布资产名。
 
 **人类读文本**：README、`docs/`、`GLOSSARY.md`、源码注释、Issue 与提交说明。
 
@@ -12,11 +12,11 @@
 
 以下文本是契约，不得为了“更好读”改措辞。改它们属于接口变更，必须同时改文档、测试与调用方，并按 ADR 评审。
 
-1. CLI 文本模式的 Scoop 0.6.0 同形输出：`Installed apps:`、`Results from local buckets...`、表头与列宽、`WARN  ` 前缀、`info` 键值块、`Everything is ok!`、`Usage: coop ...`、`Command`/`Summary` 表。
-2. 写命令进度行与 `OK.`/`Done.`、`Timings` 块、stall 行、`purge`/`persist`/`suggest`/`notes` 行；这些行同时是 `.coop/runs/*.json` 的 `stage` 值。
+1. CLI 文本模式的 Scoop 0.6.0 同形输出：`Installed apps:`、`Results from local buckets...`、表头与列宽、`WARN  ` 前缀、`info` 键值块、`Everything is ok!`、`Usage: burrow ...`、`Command`/`Summary` 表。
+2. 写命令进度行与 `OK.`/`Done.`、`Timings` 块、stall 行、`purge`/`persist`/`suggest`/`notes` 行；这些行同时是 `.burrow/runs/*.json` 的 `stage` 值。
 3. `--json` 键、稳定码、IR 操作名、状态值、退出码 0/1/2。
-4. `.coop/` 下运行记录、计时、事务日志、包记录的字段名与值。
-5. `coop <x.y.z>` 版本行、release 资产名、workflow 的 `GITHUB_OUTPUT` 键。
+4. `.burrow/` 下运行记录、计时、事务日志、包记录的字段名与值。
+5. `burrow <x.y.z>` 版本行、release 资产名、workflow 的 `GITHUB_OUTPUT` 键。
 6. `assets/scoop-lib/**`：上游逐字节副本，任何改动都是错误。
 
 ## 新增机器读文本

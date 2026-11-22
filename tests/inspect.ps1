@@ -3,10 +3,10 @@
 # `which` stops resolving a shim's target, `home` stops failing on a manifest without a homepage,
 # `depends` stops listing the declared dependency before the app itself, `export` stops listing
 # buckets/apps, `checkup` stops reporting a broken shim, `help` and `--help` stop listing the same
-# commands, or a listed command stops answering `coop <command> --help`.
-param([Parameter(Mandatory)][string]$CoopExe, [Parameter(Mandatory)][string]$TestRoot)
+# commands, or a listed command stops answering `burrow <command> --help`.
+param([Parameter(Mandatory)][string]$BurrowExe, [Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\') + '\'
 if (-not ($TestRoot.TrimEnd('\') + '\').StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -27,35 +27,35 @@ Set-Content -LiteralPath $target -Value 'stub' -Encoding ascii
 "path = `"$target`"" | Set-Content "$root/shims/demo.shim" -Encoding utf8
 
 # status reports the outdated package with both versions.
-$lines = @(& $CoopExe --root $root status -l)
+$lines = @(& $BurrowExe --root $root status -l)
 if ($LASTEXITCODE -cne 0) { throw "status failed: $($lines -join ' | ')" }
 if ($lines[0] -cne 'Name Installed Version Latest Version Missing Dependencies Info') { throw "status header is '$($lines[0])'" }
 if ($lines[2] -cnotmatch '^demo\s+1\.7\.1\s+1\.8\.2\s') { throw "status row is '$($lines[2])'" }
 # Both spellings of the local-only switch must be accepted.
-$lines = @(& $CoopExe --root $root status --local)
+$lines = @(& $BurrowExe --root $root status --local)
 if ($LASTEXITCODE -cne 0) { throw "status -l failed: $($lines -join ' | ')" }
 
 # prefix prints the same `current` path Scoop prints.
-$lines = @(& $CoopExe --root $root prefix demo)
+$lines = @(& $BurrowExe --root $root prefix demo)
 if ($LASTEXITCODE -cne 0 -or $lines[0] -cne "$root\apps\demo\current") { throw "prefix printed '$($lines -join ' | ')'" }
 
 # which resolves the shim's target instead of the shim file.
-$lines = @(& $CoopExe --root $root which demo)
+$lines = @(& $BurrowExe --root $root which demo)
 if ($LASTEXITCODE -cne 0 -or $lines[0] -cne $target) { throw "which printed '$($lines -join ' | ')'" }
-$lines = @(& $CoopExe --root $root which zzznope)
+$lines = @(& $BurrowExe --root $root which zzznope)
 if ($LASTEXITCODE -cne 1 -or ($lines -join '|') -cne "WARN  'zzznope' not found, not a scoop shim, or a broken shim.") {
     throw "which on a missing name said '$($lines -join ' | ')'"
 }
 
 # cat echoes the stored manifest, declaration order intact.
-$lines = @(& $CoopExe --root $root cat demo)
+$lines = @(& $BurrowExe --root $root cat demo)
 if ($LASTEXITCODE -cne 0 -or ($lines -join "`n") -cnotmatch '"version": "1\.8\.2"') { throw 'cat did not print the manifest' }
 if ($lines[0] -cne '{') { throw "cat first line is '$($lines[0])'" }
 
 # A manifest without a homepage makes `home` fail instead of opening anything.
 '{"version":"1.0","url":"https://example.invalid/x.zip","hash":"0000000000000000000000000000000000000000000000000000000000000000"}' |
     Set-Content "$root/buckets/main/bucket/nohome.json" -Encoding utf8
-$lines = Invoke-CoopNative $CoopExe  --root $root home nohome
+$lines = Invoke-BurrowNative $BurrowExe  --root $root home nohome
 if ($LASTEXITCODE -cne 1 -or ($lines -join '|') -cnotmatch 'No homepage is declared') { throw "home on a manifest without homepage said '$($lines -join ' | ')'" }
 
 # Once the installed version matches the manifest, status reports the clean state.
@@ -64,20 +64,20 @@ Copy-Item "$PSScriptRoot/corpus/main/jq.json" "$root/apps/demo/1.8.2/scoop-manif
 '{"bucket":"main","architecture":"64bit"}' | Set-Content "$root/apps/demo/1.8.2/scoop-install.json" -Encoding utf8
 (Get-Item "$root/apps/demo/current").Delete()
 New-Item -ItemType Junction -Path "$root/apps/demo/current" -Target "$root/apps/demo/1.8.2" | Out-Null
-$lines = @(& $CoopExe --root $root status -l)
+$lines = @(& $BurrowExe --root $root status -l)
 if ($LASTEXITCODE -cne 0 -or ($lines -join '|') -cne 'Everything is ok!') { throw "clean status said '$($lines -join ' | ')'" }
 
 # depends lists the declared dependency first and the app itself last, like Scoop.
 '{"version":"2.0","url":"https://example.invalid/dep.zip","hash":"1111111111111111111111111111111111111111111111111111111111111111","depends":"demo"}' |
     Set-Content "$root/buckets/main/bucket/dep.json" -Encoding utf8
-$lines = @(& $CoopExe --root $root depends dep)
+$lines = @(& $BurrowExe --root $root depends dep)
 if ($LASTEXITCODE -cne 0) { throw "depends failed: $($lines -join ' | ')" }
 if (($lines -join "`n") -cnotmatch '(?s)^Source\s+Name\s+------\s+----\s+main\s+demo\s+main\s+dep\s*$') {
     throw "depends printed '`n$($lines -join "`n")'"
 }
 
 # export is a Scoopfile: buckets and apps with Scoop's field names.
-$export = (& $CoopExe --root $root export) -join "`n"
+$export = (& $BurrowExe --root $root export) -join "`n"
 if ($LASTEXITCODE -cne 0) { throw 'export failed' }
 $file = $export | ConvertFrom-Json
 if (@($file.buckets | Where-Object Name -CEQ 'main').Count -cne 1) { throw 'export omitted the bucket' }
@@ -85,20 +85,20 @@ if (@($file.apps | Where-Object Name -CEQ 'demo').Count -cne 1) { throw 'export 
 
 # checkup reports a shim whose target disappeared, and still exits 0.
 "path = `"$root\apps\demo\current\gone.exe`"" | Set-Content "$root/shims/broken.shim" -Encoding utf8
-$lines = @(& $CoopExe --root $root checkup)
+$lines = @(& $BurrowExe --root $root checkup)
 if ($LASTEXITCODE -cne 0) { throw "checkup exited $LASTEXITCODE" }
 if (($lines -join "`n") -cnotmatch "Shim 'broken' points to a missing target") { throw "checkup said '`n$($lines -join "`n")'" }
 
-# help: `coop help` is `scoop help` verbatim, program name aside. The two surfaces once held
+# help: `burrow help` is `scoop help` verbatim, program name aside. The two surfaces once held
 # separate lists (`--help` omitted ten implemented commands and `init`/`recover` answered "unknown
-# command"); now `coop`, `coop --help` and `coop help` print the same page, and the rows and
-# summaries are pinned so a rewritten summary or an added Coop-only row fails here.
-$page = @(& $CoopExe help)
+# command"); now `burrow`, `burrow --help` and `burrow help` print the same page, and the rows and
+# summaries are pinned so a rewritten summary or an added Burrow-only row fails here.
+$page = @(& $BurrowExe help)
 if ($LASTEXITCODE -cne 0) { throw "help exited $LASTEXITCODE" }
-if ($page[0] -cne 'Usage: coop <command> [<args>]') { throw "help started with '$($page[0])'" }
+if ($page[0] -cne 'Usage: burrow <command> [<args>]') { throw "help started with '$($page[0])'" }
 $pageText = $page -join "`n"
 if ($pageText -cnotmatch 'Available commands are listed below\.' -or
-    $pageText -cnotmatch "Type 'coop help <command>' to get more help for a specific command\.") {
+    $pageText -cnotmatch "Type 'burrow help <command>' to get more help for a specific command\.") {
     throw 'help lost Scoop''s header lines'
 }
 $helpNames = @($page | Where-Object { $_ -cmatch '^[a-z][a-z0-9]*\s+\S' } | ForEach-Object { ($_ -split '\s+')[0] })
@@ -106,41 +106,41 @@ $expectedNames = 'alias','bucket','cache','cat','checkup','cleanup','config','cr
 if (($helpNames -join ',') -cne ($expectedNames -join ',')) { throw "help rows are '$($helpNames -join ',')'" }
 if ($pageText -cnotmatch 'Show content of specified manifest\.') { throw 'help rewrote the cat summary' }
 if ($pageText -cnotmatch "Locate a shim/executable \(similar to 'which' on Linux\)") { throw 'help rewrote the which summary' }
-$other = @(& $CoopExe --help)
+$other = @(& $BurrowExe --help)
 if ($LASTEXITCODE -cne 0 -or (($other -join "`n") -cne $pageText)) { throw '--help and help print different pages' }
-$other = @(& $CoopExe)
+$other = @(& $BurrowExe)
 if ($LASTEXITCODE -cne 0 -or (($other -join "`n") -cne $pageText)) { throw 'the bare command and help print different pages' }
 foreach ($name in $expectedNames) {
-    $lines = @(& $CoopExe $name --help)
-    if ($LASTEXITCODE -ne 0 -or $lines[0] -cnotlike "Usage: coop $name*") {
-        throw "coop $name --help exited $LASTEXITCODE with '$($lines -join ' | ')'"
+    $lines = @(& $BurrowExe $name --help)
+    if ($LASTEXITCODE -ne 0 -or $lines[0] -cnotlike "Usage: burrow $name*") {
+        throw "burrow $name --help exited $LASTEXITCODE with '$($lines -join ' | ')'"
     }
 }
-# The Coop-only commands are not on Scoop's page, but their own help still resolves.
-$lines = @(& $CoopExe help init)
-if ($LASTEXITCODE -ne 0 -or $lines[0] -cne 'Usage: coop init [--dry-run]') { throw "coop help init printed '$($lines -join ' | ')'" }
-$lines = @(& $CoopExe recover --help)
-if ($LASTEXITCODE -ne 0 -or $lines[0] -cne 'Usage: coop recover [package...] [--dry-run]') { throw "coop recover --help printed '$($lines -join ' | ')'" }
-$lines = @(& $CoopExe --root $root list --help)
-if ($LASTEXITCODE -cne 0 -or $lines[0] -cne 'Usage: coop list [query]') { throw "list --help printed '$($lines -join ' | ')'" }
+# The Burrow-only commands are not on Scoop's page, but their own help still resolves.
+$lines = @(& $BurrowExe help init)
+if ($LASTEXITCODE -ne 0 -or $lines[0] -cne 'Usage: burrow init [--dry-run]') { throw "burrow help init printed '$($lines -join ' | ')'" }
+$lines = @(& $BurrowExe recover --help)
+if ($LASTEXITCODE -ne 0 -or $lines[0] -cne 'Usage: burrow recover [package...] [--dry-run]') { throw "burrow recover --help printed '$($lines -join ' | ')'" }
+$lines = @(& $BurrowExe --root $root list --help)
+if ($LASTEXITCODE -cne 0 -or $lines[0] -cne 'Usage: burrow list [query]') { throw "list --help printed '$($lines -join ' | ')'" }
 
 # hold writes the flag Scoop itself reads; list shows it and update refuses until unhold.
-$lines = @(& $CoopExe --root $root hold demo)
+$lines = @(& $BurrowExe --root $root hold demo)
 if ($LASTEXITCODE -cne 0 -or ($lines -join "`n") -cnotmatch 'is now held and can not be updated anymore') {
     throw "hold said '$($lines -join ' | ')'"
 }
-$lines = @(& $CoopExe --root $root list)
+$lines = @(& $BurrowExe --root $root list)
 if ($lines -join "`n" -cnotmatch 'Held package') { throw 'list did not report the held package' }
-$plan = (Invoke-CoopNative $CoopExe  --root $root update demo --dry-run) -join "`n"
+$plan = (Invoke-BurrowNative $BurrowExe  --root $root update demo --dry-run) -join "`n"
 if ($plan -cnotmatch 'held-package' -or $plan -cnotmatch 'blocked') {
     throw 'a held package was allowed to update'
 }
-$lines = @(& $CoopExe --root $root hold demo)
+$lines = @(& $BurrowExe --root $root hold demo)
 if ($lines -join "`n" -cnotmatch 'is already held') { throw "a second hold said '$($lines -join ' | ')'" }
-$lines = @(& $CoopExe --root $root unhold demo)
+$lines = @(& $BurrowExe --root $root unhold demo)
 if ($LASTEXITCODE -cne 0 -or $lines -join "`n" -cnotmatch 'is no longer held') { throw "unhold said '$($lines -join ' | ')'" }
-$lines = @(& $CoopExe --root $root list)
+$lines = @(& $BurrowExe --root $root list)
 if ($lines -join "`n" -cmatch 'Held package') { throw 'list still reports a held package after unhold' }
-$lines = Invoke-CoopNative $CoopExe  --root $root hold nosuchpackage
+$lines = Invoke-BurrowNative $BurrowExe  --root $root hold nosuchpackage
 if ($LASTEXITCODE -cne 1 -or ($lines -join '|') -cnotmatch 'is not installed') { throw "hold on a missing package said '$($lines -join ' | ')'" }
 Write-Output 'PASS: status, prefix, cat, which, home, depends, export, checkup and help'

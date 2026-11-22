@@ -12,7 +12,7 @@
 #include <stdexcept>
 #include <thread>
 
-namespace coop {
+namespace burrow {
 namespace {
 struct InternetHandle {
     HINTERNET value;
@@ -66,7 +66,7 @@ void download_file(const std::string& url, const fs::path& destination,
     if (!WinHttpCrackUrl(address.c_str(),0,0,&components) ||
         (components.nScheme != INTERNET_SCHEME_HTTPS && components.nScheme != INTERNET_SCHEME_HTTP) ||
         components.dwUserNameLength || components.dwPasswordLength) throw std::runtime_error("Unsupported artifact URL");
-    InternetHandle session{WinHttpOpen(L"Coop/0.1",WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0)};
+    InternetHandle session{WinHttpOpen(L"Burrow/0.1",WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0)};
     if (!session.value) throw std::runtime_error("Cannot initialize native downloader");
     WinHttpSetTimeouts(session.value,15000,15000,30000,30000);
     const std::wstring host(components.lpszHostName,components.dwHostNameLength);
@@ -122,7 +122,7 @@ std::string http_get_text(const std::string& url,const std::vector<std::pair<std
     if (!WinHttpCrackUrl(address.c_str(),0,0,&components) ||
         (components.nScheme != INTERNET_SCHEME_HTTPS && components.nScheme != INTERNET_SCHEME_HTTP))
         throw std::runtime_error("Unsupported API URL");
-    InternetHandle session{WinHttpOpen(L"Coop/0.1",WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0)};
+    InternetHandle session{WinHttpOpen(L"Burrow/0.1",WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0)};
     if (!session.value) throw std::runtime_error("Cannot initialize the HTTPS client");
     WinHttpSetTimeouts(session.value,15000,15000,30000,30000);
     const std::wstring host(components.lpszHostName,components.dwHostNameLength);

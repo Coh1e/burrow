@@ -1,12 +1,12 @@
-param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
-# #60: Scoop hard-codes ANSI escapes into its own output, so a redirected run keeps them. coop has to
+param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
+# #60: Scoop hard-codes ANSI escapes into its own output, so a redirected run keeps them. burrow has to
 # write the same bytes, and --json has to stay free of them.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not (($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase))) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
 $archives = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/deps/test-archives'))
 $tidy = Join-Path $archives 'tidy-5.8.0-win64.zip'
 if (-not (Test-Path -LiteralPath $tidy)) { throw "Missing fixed test input: $tidy; run scripts/fetch-deps.ps1" }
@@ -22,8 +22,8 @@ $manifest = [ordered]@{
 [IO.File]::WriteAllText("$root/buckets/test/bucket/coloured.json",
     ($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 
-function Invoke-Coop([string[]]$arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new($CoopExe)
+function Invoke-Burrow([string[]]$arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new($BurrowExe)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -34,7 +34,7 @@ function Invoke-Coop([string[]]$arguments) {
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'coop timed out' }
+    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'burrow timed out' }
     $result = [pscustomobject]@{ exit = $process.ExitCode
         output = $stdout.GetAwaiter().GetResult(); error = $stderr.GetAwaiter().GetResult() }
     $process.Dispose()
@@ -42,7 +42,7 @@ function Invoke-Coop([string[]]$arguments) {
 }
 
 $esc = [string][char]27
-$install = Invoke-Coop @('--root',$root,'install','test/coloured')
+$install = Invoke-Burrow @('--root',$root,'install','test/coloured')
 if ($install.exit -ne 0) { throw "the install failed: $($install.error)$($install.output)" }
 
 # The filename in the hash and extract lines is wrapped in Scoop's cyan.
@@ -55,9 +55,9 @@ $yellow = "$esc[33m'coloured' suggests installing 'extras/vcredist2022'.$esc[0m"
 if (-not $install.output.Contains($yellow)) { throw "the suggestion line is not dark yellow: $($install.output)" }
 
 # Machine output carries no escapes at all.
-$json = Invoke-Coop @('--root',$root,'uninstall','coloured','--json')
+$json = Invoke-Burrow @('--root',$root,'uninstall','coloured','--json')
 if ($json.exit -ne 0) { throw "the uninstall failed: $($json.error)" }
-$again = Invoke-Coop @('--root',$root,'install','test/coloured','--json')
+$again = Invoke-Burrow @('--root',$root,'install','test/coloured','--json')
 if ($again.exit -ne 0) { throw "the second install failed: $($again.error)" }
 if ($again.output.Contains($esc) -or $again.error.Contains($esc)) { throw '--json contained an ANSI escape' }
 

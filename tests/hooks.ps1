@@ -1,16 +1,16 @@
-﻿param([Parameter(Mandatory)][string]$CoopExe,[Parameter(Mandatory)][string]$TestRoot)
+﻿param([Parameter(Mandatory)][string]$BurrowExe,[Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-coop.ps1')
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.local/tests')).TrimEnd('\')+'\'
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 if (-not ($TestRoot.TrimEnd('\')+'\').StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test root outside project' }
-$CoopExe = [IO.Path]::GetFullPath($CoopExe)
-$coopDirectory = Split-Path $CoopExe
-$fixture1 = Join-Path $coopDirectory 'fixture-1.exe'
-$fixture2 = Join-Path $coopDirectory 'fixture-2.exe'
-$guard = Join-Path $coopDirectory 'process_guard.exe'
-$scoopLibrary = Join-Path $coopDirectory 'scoop-lib'
+$BurrowExe = [IO.Path]::GetFullPath($BurrowExe)
+$burrowDirectory = Split-Path $BurrowExe
+$fixture1 = Join-Path $burrowDirectory 'fixture-1.exe'
+$fixture2 = Join-Path $burrowDirectory 'fixture-2.exe'
+$guard = Join-Path $burrowDirectory 'process_guard.exe'
+$scoopLibrary = Join-Path $burrowDirectory 'scoop-lib'
 $pwshPath = (Get-Process -Id $PID).Path
 foreach ($path in @($fixture1,$fixture2,$guard,$pwshPath,(Join-Path $scoopLibrary 'core.ps1'))) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing fixed test input: $path" } }
 
@@ -55,7 +55,7 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     foreach ($argument in $arguments) { Add-ProcessArgument $start ($argument) }
     $start.EnvironmentVariables['TEMP'] = "$root/temp"
     $start.EnvironmentVariables['TMP'] = "$root/temp"
-    $start.EnvironmentVariables['COOP_PROGRAMS_DIR'] = "$root/programs"
+    $start.EnvironmentVariables['BURROW_PROGRAMS_DIR'] = "$root/programs"
     $start.EnvironmentVariables['SCOOP_CACHE'] = ''
     foreach ($key in $environment.Keys) { $start.EnvironmentVariables[$key] = $environment[$key] }
     $process = [Diagnostics.Process]::Start($start)
@@ -68,11 +68,11 @@ function Invoke-Process([string]$label,[string]$file,[string[]]$arguments,[hasht
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ("$root/run-{0:d2}-{1}.json" -f $script:runs,$label) -Encoding utf8
     return $result
 }
-function Invoke-Coop([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $CoopExe $arguments $environment
+function Invoke-Burrow([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
+    return Invoke-Process $label $BurrowExe $arguments $environment
 }
 function Invoke-Guard([string]$label,[string[]]$arguments,[hashtable]$environment = @{}) {
-    return Invoke-Process $label $guard (@($CoopExe)+$arguments) $environment
+    return Invoke-Process $label $guard (@($BurrowExe)+$arguments) $environment
 }
 function Parse-Json([string]$label,$result) {
     try { return $result.output | ConvertFrom-Json } catch { throw "$label did not print JSON: $($result.output)" }
@@ -84,7 +84,7 @@ function Get-CorpusScript([string]$relative,[string]$field) {
     return $value
 }
 function Last-Journal([string]$package) {
-    $journals = @(Get-ChildItem "$root/.coop/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
+    $journals = @(Get-ChildItem "$root/.burrow/transactions" -Recurse -Filter journal.json -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } |
         Where-Object { $_.package -eq $package })
@@ -111,7 +111,7 @@ Check ($guardRun.exit -eq 0) "hook-free install failed: $($guardRun.error)"
 Check ($guardRun.error -match 'Observed workload processes: 1') 'hook-free install started an unexpected child process'
 $plainResult = Parse-Json 'no-hook-install' $guardRun
 Check (@($plainResult.scripts).Count -eq 0) 'hook-free install reported hook scripts'
-$transactionsAfterPlain = @(Get-ChildItem "$root/.coop/transactions" -Directory | Select-Object -ExpandProperty Name)
+$transactionsAfterPlain = @(Get-ChildItem "$root/.burrow/transactions" -Directory | Select-Object -ExpandProperty Name)
 
 # --- 1. Preview lists the real script text without starting PowerShell. ------
 $notesZip1 = New-PayloadZip 'notes-1' @{'notepad++.exe'=$null;'stylers.model.xml'='model';'plugins.original/v1.txt'='plugin v1'}
@@ -136,11 +136,11 @@ Check ($preview.package.script_support.problem -eq '') 'preview reported a host 
 Check (($preview.package.script_support.phases -join ',') -eq 'pre_install,installer,post_install,pre_uninstall,uninstaller,post_uninstall') 'preview did not disclose all six lifecycle phases'
 Check ((@($preview.package.script_support.undefined_context) -join ' ') -match '\$cmd') 'preview did not explain that $cmd is not a Scoop hook variable'
 Check (@($preview.ir_operations | Where-Object { $_.operation -eq 'hook' }).Count -eq 2) 'preview did not list both hook operations'
-$transactionsAfterPreview = @(Get-ChildItem "$root/.coop/transactions" -Directory | Select-Object -ExpandProperty Name)
+$transactionsAfterPreview = @(Get-ChildItem "$root/.burrow/transactions" -Directory | Select-Object -ExpandProperty Name)
 Check (-not (Test-Path -LiteralPath "$root/apps/notes") -and ($transactionsAfterPreview -join ',') -eq ($transactionsAfterPlain -join ',')) 'preview executed a hook or wrote installation state'
 
 # --- 2. Install with the real notepadplusplus pre/post hooks. ----------------
-$installRun = Invoke-Coop 'install-notes' @('--root',$root,'install','extras/notes','--json')
+$installRun = Invoke-Burrow 'install-notes' @('--root',$root,'install','extras/notes','--json')
 Check ($installRun.exit -eq 0) "hook install failed: $($installRun.error)"
 $install = Parse-Json 'install-notes' $installRun
 Check (@($install.scripts).Count -eq 2) 'install did not record both hooks'
@@ -182,7 +182,7 @@ Remove-Item -LiteralPath $notesZip2 -Force
 [IO.Compression.ZipFile]::CreateFromDirectory("$root/build/notes-2",$notesZip2)
 Write-Manifest 'extras' 'notes' @{version='2';url=([Uri]$notesZip2).AbsoluteUri;hash=(File-Hash $notesZip2);bin='notepad++.exe';
     persist=$notesPersist;pre_install=$nppPreInstall;post_install=$nppPostInstall}
-$updateRun = Invoke-Coop 'update-notes' @('--root',$root,'update','notes','--json')
+$updateRun = Invoke-Burrow 'update-notes' @('--root',$root,'update','notes','--json')
 Check ($updateRun.exit -eq 0) "hook update failed: $($updateRun.error)"
 $update = Parse-Json 'update-notes' $updateRun
 Check (@($update.scripts | Where-Object { $_.exit_code -ne 0 }).Count -eq 0) 'update hooks did not succeed'
@@ -191,7 +191,7 @@ Check (Test-Path -LiteralPath "$root/persist/notes/plugins/v2.txt") 'the new pos
 Check ($update.retained_versions -contains '1') 'update did not retain the previous version'
 $version = & "$root/shims/notepad++.exe"
 Check ($LASTEXITCODE -eq 0 -and $version -eq 'fixture 2') 'the updated command entry runs the wrong version'
-$notesUninstall = Invoke-Coop 'uninstall-notes' @('--root',$root,'uninstall','notes','--json')
+$notesUninstall = Invoke-Burrow 'uninstall-notes' @('--root',$root,'uninstall','notes','--json')
 Check ($notesUninstall.exit -eq 0) "notes uninstall failed: $($notesUninstall.error)"
 Check ((Test-Path -LiteralPath "$root/persist/notes/config.xml") -and -not (Test-Path -LiteralPath "$root/apps/notes/current")) 'notes uninstall did not retain persistent data'
 
@@ -203,7 +203,7 @@ Remove-Item -LiteralPath $gitZip -Force
 [IO.Compression.ZipFile]::CreateFromDirectory("$root/build/git-1",$gitZip)
 Write-Manifest 'main' 'git' @{version='1';url=([Uri]$gitZip).AbsoluteUri;hash=(File-Hash $gitZip);bin='cmd/git.exe';
     post_install=$gitPostInstall}
-$gitInstall = Invoke-Coop 'install-git' @('--root',$root,'install','main/git','--json')
+$gitInstall = Invoke-Burrow 'install-git' @('--root',$root,'install','main/git','--json')
 Check ($gitInstall.exit -eq 0) "real git post_install failed: $($gitInstall.error)"
 $gitResult = Parse-Json 'install-git' $gitInstall
 Check ($gitResult.scripts[0].phase -eq 'post_install' -and $gitResult.scripts[0].exit_code -eq 0) 'real git post_install did not run'
@@ -224,7 +224,7 @@ Remove-Item -LiteralPath $orderZip1 -Force
 [IO.Compression.ZipFile]::CreateFromDirectory("$root/build/order-1",$orderZip1)
 Write-Manifest 'main' 'order' @{version='1';url=([Uri]$orderZip1).AbsoluteUri;hash=(File-Hash $orderZip1);bin='app.exe';
     pre_uninstall=$gitPreUninstall}
-$orderInstall = Invoke-Coop 'install-order-1' @('--root',$root,'install','main/order','--json')
+$orderInstall = Invoke-Burrow 'install-order-1' @('--root',$root,'install','main/order','--json')
 Check ($orderInstall.exit -eq 0) "order fixture install failed: $($orderInstall.error)"
 Check (-not (Test-Path -LiteralPath "$root/persist/order/etc/gitconfig")) 'pre_uninstall ran during install'
 $orderZip2 = New-PayloadZip 'order-2' @{'app.exe'=$null;'mingw64/.keep'='';'etc/.keep'='';'node_modules/npm/.keep'=''}
@@ -233,7 +233,7 @@ Remove-Item -LiteralPath $orderZip2 -Force
 [IO.Compression.ZipFile]::CreateFromDirectory("$root/build/order-2",$orderZip2)
 Write-Manifest 'main' 'order' @{version='2';url=([Uri]$orderZip2).AbsoluteUri;hash=(File-Hash $orderZip2);bin='app.exe';
     pre_install=$gitPreInstall;post_install=$nodePostInstall}
-$orderUpdate = Invoke-Coop 'update-order' @('--root',$root,'update','order','--json')
+$orderUpdate = Invoke-Burrow 'update-order' @('--root',$root,'update','order','--json')
 Check ($orderUpdate.exit -eq 0) "real git hook update failed: $($orderUpdate.error)"
 $orderResult = Parse-Json 'update-order' $orderUpdate
 $orderPhases = @($orderResult.scripts | ForEach-Object { $_.phase })
@@ -252,7 +252,7 @@ $persistText = [IO.Path]::GetFullPath("$root/persist/order")
 Check ($npmrc.TrimEnd() -eq "prefix=$persistText\bin`ncache=$persistText\cache") 'the real nodejs post_install did not receive $persist_dir'
 $orderJournal = Last-Journal 'order'
 Check (@($orderJournal.scripts | Where-Object { $_.previous_package -eq $true }).Count -eq 1) 'journal lost the previous-package hook record'
-$orderUninstall = Invoke-Coop 'uninstall-order' @('--root',$root,'uninstall','order','--json')
+$orderUninstall = Invoke-Burrow 'uninstall-order' @('--root',$root,'uninstall','order','--json')
 Check ($orderUninstall.exit -eq 0) "order uninstall failed: $($orderUninstall.error)"
 Check ((Test-Path -LiteralPath "$root/persist/order/etc/gitconfig") -and -not (Test-Path -LiteralPath "$root/apps/order/current")) 'uninstall did not retain persistent data'
 
@@ -263,11 +263,11 @@ Remove-Item -LiteralPath $unhookZip -Force
 [IO.Compression.ZipFile]::CreateFromDirectory("$root/build/unhook-1",$unhookZip)
 Write-Manifest 'main' 'unhook' @{version='1';url=([Uri]$unhookZip).AbsoluteUri;hash=(File-Hash $unhookZip);bin='app.exe';
     pre_uninstall=$gitPreUninstall}
-$unhookInstall = Invoke-Coop 'install-unhook' @('--root',$root,'install','main/unhook','--json')
+$unhookInstall = Invoke-Burrow 'install-unhook' @('--root',$root,'install','main/unhook','--json')
 Check ($unhookInstall.exit -eq 0) "plain uninstall fixture install failed: $($unhookInstall.error)"
 $unhookPreview = Invoke-Guard 'preview-uninstall-unhook' @('--root',$root,'uninstall','unhook','--dry-run','--json')
 Check ($unhookPreview.exit -eq 0 -and $unhookPreview.error -match 'Observed workload processes: 1') 'uninstall preview executed PowerShell'
-$unhookRun = Invoke-Coop 'uninstall-unhook' @('--root',$root,'uninstall','unhook','--json')
+$unhookRun = Invoke-Burrow 'uninstall-unhook' @('--root',$root,'uninstall','unhook','--json')
 Check ($unhookRun.exit -eq 0) "plain uninstall hook failed: $($unhookRun.error)"
 $unhook = Parse-Json 'uninstall-unhook' $unhookRun
 Check (@($unhook.scripts).Count -eq 1) 'plain uninstall did not record the pre_uninstall hook'
@@ -276,7 +276,7 @@ Check ([IO.Path]::GetFullPath($unhook.scripts[0].directory) -eq [IO.Path]::GetFu
 Check ($unhook.data_retained -eq $true) 'plain uninstall did not report retained data'
 Check ((Get-Content -LiteralPath "$root/persist/unhook/etc/gitconfig" -Raw) -eq 'config before uninstall') 'plain uninstall pre_uninstall did not save config to $persist_dir'
 Check (-not (Test-Path -LiteralPath "$root/apps/unhook/current") -and -not (Test-Path -LiteralPath "$root/apps/unhook/1") -and
-    -not (Test-Path -LiteralPath "$root/shims/app.exe") -and -not (Test-Path -LiteralPath "$root/.coop/packages/unhook.json")) 'plain uninstall left package state'
+    -not (Test-Path -LiteralPath "$root/shims/app.exe") -and -not (Test-Path -LiteralPath "$root/.burrow/packages/unhook.json")) 'plain uninstall left package state'
 $unhookJournal = Last-Journal 'unhook'
 Check ($unhookJournal.action -eq 'uninstall' -and $unhookJournal.state -eq 'committed' -and
     @($unhookJournal.scripts).Count -eq 1 -and $unhookJournal.scripts[0].phase -eq 'pre_uninstall') 'plain uninstall journal does not record the hook'
@@ -326,7 +326,7 @@ $contextScript = @(
 )
 Write-Manifest 'main' 'contextdemo' @{version='1';description=$contextDescription;url=([Uri]$contextZip).AbsoluteUri;hash=(File-Hash $contextZip);bin='context.exe';
     pre_install=$contextScript}
-$contextInstall = Invoke-Coop 'install-contextdemo' @('--root',$root,'install','main/contextdemo','--json')
+$contextInstall = Invoke-Burrow 'install-contextdemo' @('--root',$root,'install','main/contextdemo','--json')
 Check ($contextInstall.exit -eq 0) "context hook install failed: $($contextInstall.error)"
 $contextInstallResult = Parse-Json 'install-contextdemo' $contextInstall
 $contextSnapshot = Get-Content -LiteralPath "$root/apps/contextdemo/1/context.json" -Raw | ConvertFrom-Json
@@ -369,9 +369,9 @@ $afterScript = @(
 )
 Write-Manifest 'main' 'after' @{version='1';url=([Uri]$afterZip).AbsoluteUri;hash=(File-Hash $afterZip);bin='after.exe';
     persist=@('state');post_uninstall=$afterScript}
-$afterInstall1 = Invoke-Coop 'install-after-1' @('--root',$root,'install','main/after','--json')
+$afterInstall1 = Invoke-Burrow 'install-after-1' @('--root',$root,'install','main/after','--json')
 Check ($afterInstall1.exit -eq 0) "post_uninstall fixture install failed: $($afterInstall1.error)"
-$afterUninstall1 = Invoke-Coop 'uninstall-after-1' @('--root',$root,'uninstall','after','--json')
+$afterUninstall1 = Invoke-Burrow 'uninstall-after-1' @('--root',$root,'uninstall','after','--json')
 Check ($afterUninstall1.exit -eq 0) "post_uninstall hook failed: $($afterUninstall1.error)"
 $afterResult1 = Parse-Json 'uninstall-after-1' $afterUninstall1
 Check ($afterResult1.scripts[0].phase -eq 'post_uninstall') 'post_uninstall did not run on uninstall'
@@ -382,9 +382,9 @@ Check ($afterSnapshot.manifest_null -eq $false -and $afterSnapshot.manifest_vers
 $afterLog1 = Get-Content -LiteralPath $afterResult1.scripts[0].stdout_log -Raw
 Check ($afterLog1 -match 'manifest_null=False manifest_version=1') 'post_uninstall stdout did not report the bound Manifest'
 Check ($afterResult1.scripts[0].manifest -ne '') 'post_uninstall record did not name the staged Manifest'
-$afterInstall2 = Invoke-Coop 'install-after-2' @('--root',$root,'install','main/after','--json')
+$afterInstall2 = Invoke-Burrow 'install-after-2' @('--root',$root,'install','main/after','--json')
 Check ($afterInstall2.exit -eq 0) "post_uninstall fixture reinstall failed: $($afterInstall2.error)"
-$afterUninstall2 = Invoke-Coop 'uninstall-after-2' @('--root',$root,'uninstall','after','--purge','--json')
+$afterUninstall2 = Invoke-Burrow 'uninstall-after-2' @('--root',$root,'uninstall','after','--purge','--json')
 Check ($afterUninstall2.exit -eq 0) "purge uninstall failed: $($afterUninstall2.error)"
 $afterResult2 = Parse-Json 'uninstall-after-2' $afterUninstall2
 Check ($afterResult2.purge.requested -eq $true -and $afterResult2.purge.status -eq 'deleted') 'purge did not delete the declared store'
@@ -432,7 +432,7 @@ Write-Manifest 'main' 'freeform' @{version='1';url=([Uri]$freeZip).AbsoluteUri;h
     pre_install=$freeformPre;post_install=$freeformPost}
 $freePreview = Invoke-Guard 'preview-freeform' @('--root',$root,'install','main/freeform','--dry-run','--json')
 Check ($freePreview.exit -eq 0 -and $freePreview.error -match 'Observed workload processes: 1') 'free-form preview started a hook'
-$freeInstall = Invoke-Coop 'install-freeform' @('--root',$root,'install','main/freeform','--json')
+$freeInstall = Invoke-Burrow 'install-freeform' @('--root',$root,'install','main/freeform','--json')
 Check ($freeInstall.exit -eq 0) "free-form PowerShell hook failed: $($freeInstall.error)"
 $freeResult = Parse-Json 'install-freeform' $freeInstall
 $freeText = Get-Content -LiteralPath "$root/apps/freeform/1/freeform.txt" -Raw
@@ -444,11 +444,11 @@ Check (Test-Path -LiteralPath "$root/apps/freeform/1/sub.txt") 'the hook Set-Con
 Check ((Get-Content -LiteralPath "$root/apps/freeform/1/freeform-copy.txt" -Raw) -match 'part-2') 'the post_install did not observe the pre_install output'
 Check ($freeResult.scripts[1].stdout_tail -match 'lines=') 'the post_install stdout was not captured'
 # A legitimate edit of a real upstream script (extra comment and extra statement) still runs.
-$editedPreInstall = @('# Coop harness comment: a legitimate edit must not be a capability refusal.') +
+$editedPreInstall = @('# Burrow harness comment: a legitimate edit must not be a capability refusal.') +
     $nppPreInstall + @('Set-Content -LiteralPath (Join-Path $dir ''edited.txt'') -Value ''edited by the hook'' -Encoding Ascii')
 Write-Manifest 'extras' 'edited' @{version='1';url=([Uri]$notesZip1).AbsoluteUri;hash=(File-Hash $notesZip1);bin='notepad++.exe';
     persist=$notesPersist;pre_install=$editedPreInstall;post_install=$nppPostInstall}
-$editedInstall = Invoke-Coop 'install-edited' @('--root',$root,'install','extras/edited','--json')
+$editedInstall = Invoke-Burrow 'install-edited' @('--root',$root,'install','extras/edited','--json')
 Check ($editedInstall.exit -eq 0) "an edited upstream hook was refused or failed: $($editedInstall.error)"
 Check ((Get-Content -LiteralPath "$root/apps/edited/1/edited.txt" -Raw).Trim() -eq 'edited by the hook') 'the edited hook did not run its added statement'
 Check (Test-Path -LiteralPath "$root/apps/edited/1/stylers.xml") 'the edited hook did not keep the original statements'
@@ -462,10 +462,10 @@ $rclonePreUninstall = @('Set-Content -Path "$dir\pre-uninstall.txt" -Value "pre"
 Write-Manifest 'main' 'rclonepkg' @{version='1';url=([Uri]$rcloneZip).AbsoluteUri;hash=(File-Hash $rcloneZip);bin='rclone.exe';
     persist='data';pre_uninstall=$rclonePreUninstall;uninstaller=@{script=$rcloneUninstaller}}
 Check ($rcloneUninstaller -match 'LinkType') 'real rclone uninstaller text was not loaded'
-$rcloneInstall = Invoke-Coop 'rclone-install' @('--root',$root,'install','main/rclonepkg','--json')
+$rcloneInstall = Invoke-Burrow 'rclone-install' @('--root',$root,'install','main/rclonepkg','--json')
 Check ($rcloneInstall.exit -eq 0) "rclone package install failed: $($rcloneInstall.error)"
 Check (Test-Path -LiteralPath "$root/persist/rclonepkg/data/config.txt") 'rclone persist directory was not created'
-$rcloneUninstall = Invoke-Coop 'rclone-uninstall' @('--root',$root,'uninstall','rclonepkg','--json')
+$rcloneUninstall = Invoke-Burrow 'rclone-uninstall' @('--root',$root,'uninstall','rclonepkg','--json')
 Check ($rcloneUninstall.exit -eq 0) "rclone uninstall failed: $($rcloneUninstall.error)"
 $rcloneResult = Parse-Json 'rclone-uninstall' $rcloneUninstall
 Check ((@($rcloneResult.scripts | ForEach-Object { $_.phase }) -join ',') -eq 'pre_uninstall,uninstaller') 'uninstaller script lifecycle order is wrong'
@@ -481,25 +481,25 @@ Remove-Item -LiteralPath $brokenZip -Force
 [IO.Compression.ZipFile]::CreateFromDirectory("$root/build/broken",$brokenZip)
 Write-Manifest 'main' 'broken' @{version='1';url=([Uri]$brokenZip).AbsoluteUri;hash=(File-Hash $brokenZip);bin='broken.exe';
     pre_install=@('Copy-Item "$dir\absent.txt" "$dir\copied.txt"')}
-$brokenRun = Invoke-Coop 'install-broken' @('--root',$root,'install','main/broken','--json')
+$brokenRun = Invoke-Burrow 'install-broken' @('--root',$root,'install','main/broken','--json')
 Check ($brokenRun.exit -ne 0) 'a failing hook was reported as success'
 Check ($brokenRun.error -match 'pre_install hook failed with exit code 1') "hook failure was not propagated: $($brokenRun.error)"
 Check (-not (Test-Path -LiteralPath "$root/apps/broken/1") -and -not (Test-Path -LiteralPath "$root/shims/broken.exe") -and
-    -not (Test-Path -LiteralPath "$root/.coop/packages/broken.json")) 'failed hook install published state'
+    -not (Test-Path -LiteralPath "$root/.burrow/packages/broken.json")) 'failed hook install published state'
 $brokenJournal = Last-Journal 'broken'
 Check ($brokenJournal.state -eq 'rolled-back') 'failed hook did not roll back'
 Check (@($brokenJournal.scripts).Count -eq 1 -and $brokenJournal.scripts[0].status -eq 'failed' -and $brokenJournal.scripts[0].exit_code -eq 1) 'failed hook journal is inaccurate or was retried'
 Check ($brokenJournal.scripts[0].stderr_bytes -gt 0 -and (Get-Content -LiteralPath $brokenJournal.scripts[0].stderr_log -Raw).Length -gt 0) 'hook stderr was not captured'
 Write-Manifest 'main' 'exitcode' @{version='1';url=([Uri]$brokenZip).AbsoluteUri;hash=(File-Hash $brokenZip);bin='broken.exe';
     pre_install=@('Write-Output "before exit"; exit 9')}
-$exitRun = Invoke-Coop 'install-exitcode' @('--root',$root,'install','main/exitcode','--json')
+$exitRun = Invoke-Burrow 'install-exitcode' @('--root',$root,'install','main/exitcode','--json')
 Check ($exitRun.exit -ne 0 -and $exitRun.error -match 'pre_install hook failed with exit code 9') "an explicit script exit code was not propagated: $($exitRun.error)"
 $exitJournal = Last-Journal 'exitcode'
 Check ($exitJournal.state -eq 'rolled-back' -and $exitJournal.scripts[0].exit_code -eq 9) 'explicit exit code was not recorded'
 Check ((Get-Content -LiteralPath $exitJournal.scripts[0].stdout_log -Raw) -match 'before exit') 'output before the exit code was lost'
 Write-Manifest 'main' 'thrower' @{version='1';url=([Uri]$brokenZip).AbsoluteUri;hash=(File-Hash $brokenZip);bin='broken.exe';
     pre_install=@('throw ''boom from the hook''')}
-$throwRun = Invoke-Coop 'install-thrower' @('--root',$root,'install','main/thrower','--json')
+$throwRun = Invoke-Burrow 'install-thrower' @('--root',$root,'install','main/thrower','--json')
 Check ($throwRun.exit -ne 0 -and $throwRun.error -match 'pre_install hook failed with exit code 1') 'a terminating hook error was not propagated'
 $throwJournal = Last-Journal 'thrower'
 Check ((Get-Content -LiteralPath $throwJournal.scripts[0].stderr_log -Raw) -match 'boom from the hook') 'terminating error text was not captured on stderr'
@@ -514,7 +514,7 @@ Remove-Item -LiteralPath $noisyZip -Force
 [IO.Compression.ZipFile]::CreateFromDirectory("$root/build/noisy",$noisyZip)
 Write-Manifest 'main' 'noisy' @{version='1';url=([Uri]$noisyZip).AbsoluteUri;hash=(File-Hash $noisyZip);bin='noisy.exe';
     post_install=$noisy}
-$noisyRun = Invoke-Coop 'install-noisy' @('--root',$root,'install','main/noisy','--json')
+$noisyRun = Invoke-Burrow 'install-noisy' @('--root',$root,'install','main/noisy','--json')
 Check ($noisyRun.exit -eq 0) "chatty hook install failed: $($noisyRun.error)"
 $noisyResult = Parse-Json 'install-noisy' $noisyRun
 $noisyScript = @($noisyResult.scripts)[0]
@@ -525,19 +525,19 @@ Check ($noisyScript.stdout_tail.Contains('stdout-0599-')) 'stdout tail lost the 
 Check ($noisyScript.stderr_tail.Contains('stderr-0399-')) 'stderr tail lost the last line'
 
 # --- 13. Missing interpreter or compatibility library is disclosed. ---------
-$missingPowerShell = @{COOP_POWERSHELL="$root/missing-pwsh.exe"}
-$missingRun = Invoke-Coop 'preview-missing-powershell' @('--root',$root,'install','extras/notes','--dry-run','--json') $missingPowerShell
+$missingPowerShell = @{BURROW_POWERSHELL="$root/missing-pwsh.exe"}
+$missingRun = Invoke-Burrow 'preview-missing-powershell' @('--root',$root,'install','extras/notes','--dry-run','--json') $missingPowerShell
 Check ($missingRun.exit -eq 0) "missing PowerShell runtime preview failed: $($missingRun.error)"
 $missing = Parse-Json 'preview-missing-powershell' $missingRun
 Check ($missing.execution_available -eq $false) 'missing PowerShell runtime stayed executable'
 Check (@($missing.diagnostics | Where-Object { $_.code -eq 'execution-blocked' -and $_.message -match 'PowerShell' }).Count -eq 1) 'missing PowerShell diagnostic is absent'
-$transactionsBeforeMissing = @(Get-ChildItem "$root/.coop/transactions" -Directory | Select-Object -ExpandProperty Name)
-$missingInstall = Invoke-Coop 'install-missing-powershell' @('--root',$root,'install','extras/notes','--json') $missingPowerShell
-$transactionsAfterMissing = @(Get-ChildItem "$root/.coop/transactions" -Directory | Select-Object -ExpandProperty Name)
+$transactionsBeforeMissing = @(Get-ChildItem "$root/.burrow/transactions" -Directory | Select-Object -ExpandProperty Name)
+$missingInstall = Invoke-Burrow 'install-missing-powershell' @('--root',$root,'install','extras/notes','--json') $missingPowerShell
+$transactionsAfterMissing = @(Get-ChildItem "$root/.burrow/transactions" -Directory | Select-Object -ExpandProperty Name)
 Check ($missingInstall.exit -ne 0 -and ($transactionsAfterMissing -join ',') -eq ($transactionsBeforeMissing -join ',')) 'missing PowerShell still started a transaction'
 $emptyLibrary = "$root/empty-scoop-lib"
 New-Item -ItemType Directory -Path $emptyLibrary -Force | Out-Null
-$missingLibraryRun = Invoke-Coop 'preview-missing-library' @('--root',$root,'install','extras/notes','--dry-run','--json') @{COOP_SCOOP_LIB=$emptyLibrary}
+$missingLibraryRun = Invoke-Burrow 'preview-missing-library' @('--root',$root,'install','extras/notes','--dry-run','--json') @{BURROW_SCOOP_LIB=$emptyLibrary}
 Check ($missingLibraryRun.exit -eq 0) "missing compatibility library preview failed: $($missingLibraryRun.error)"
 $missingLibrary = Parse-Json 'preview-missing-library' $missingLibraryRun
 Check ($missingLibrary.execution_available -eq $false) 'missing Scoop compatibility library stayed executable'
@@ -552,17 +552,17 @@ $legacyManifest = @{version='1';url=([Uri]$fixture1).AbsoluteUri+'#/legacy.exe';
 $legacyManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "$legacyDirectory/scoop-manifest.json" -Encoding utf8
 @{architecture='64bit';bucket='main'} | ConvertTo-Json | Set-Content -LiteralPath "$legacyDirectory/scoop-install.json" -Encoding utf8
 New-Item -ItemType Junction -Path "$root/apps/legacyhook/current" -Target $legacyDirectory | Out-Null
-$sharedPreview = Invoke-Coop 'shared-hook-preview' @('--root',$root,'uninstall','legacyhook','--dry-run','--json')
+$sharedPreview = Invoke-Burrow 'shared-hook-preview' @('--root',$root,'uninstall','legacyhook','--dry-run','--json')
 $shared = Parse-Json 'shared-hook-preview' $sharedPreview
 Check ($sharedPreview.exit -eq 0 -and @($shared.ir_operations).Count -gt 0) "shared hook package preview produced no IR plan: $($sharedPreview.error)"
-Check (-not (Test-Path -LiteralPath "$root/.coop/packages/legacyhook.json")) 'a read-only preview wrote a private management record'
+Check (-not (Test-Path -LiteralPath "$root/.burrow/packages/legacyhook.json")) 'a read-only preview wrote a private management record'
 
 @{
     timestamp=[DateTime]::UtcNow.ToString('o')
     root=$root
     checks=$script:checks
     runs=$script:runs
-    coop_sha256=(File-Hash $CoopExe)
+    burrow_sha256=(File-Hash $BurrowExe)
     powershell=$pwshPath
     scoop_library=@{path=$scoopLibrary;version=$preview.package.script_support.library_version}
     real_hook_sources=@('Extras/notepadplusplus pre_install+post_install','Main/git pre_install+post_install+pre_uninstall',
