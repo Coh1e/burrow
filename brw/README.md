@@ -42,3 +42,19 @@ Uninstall checks the dependency records saved with active versions, including wh
 Use package names, versions, local filenames, and entry names made up of ASCII letters, digits, dots, hyphens, or underscores. A catalog should provide one row per package name. Archive payloads support TAR, gzip-compressed TAR, and ZIP with ordinary files and directories. Use forward slashes between path components. The extractor rejects links, absolute paths, and traversal components. Install uses the existing brw package and command-entry layout. `brw list` shows active packages from source and local installs. All commands shown above accept `--json`. Source add and remove also accept `--dry-run`.
 
 Dry-run reads the local catalog and shows the Digby plan. Install reads the catalog again, downloads to a temporary file, verifies SHA-256, stages the payload, and publishes the package and entry through the local install path. A catalog supplies the expected digest and serves as the trust boundary. HTTP redirects are disabled. Ctrl+C or Ctrl+Break requests cancellation up to the start of publication. An in-flight HTTP read may take until the receive timeout to return. A rejected digest or cancelled download reports the failed step in JSON and leaves no installed version or command entry.
+
+## Directories and user PATH
+
+| Purpose | Default under `%USERPROFILE%` | Override |
+| --- | --- | --- |
+| Source configuration | `.config/burrow` | `XDG_CONFIG_HOME` |
+| Download staging | `.cache/burrow` | `XDG_CACHE_HOME` |
+| Package payloads and persistent data | `.local/share/burrow` | `XDG_DATA_HOME` |
+| Installation records | `.local/state/burrow` | `XDG_STATE_HOME` |
+| Command entries | `.local/bin` | `BRW_BIN_DIR` |
+
+Each absolute XDG override is a base directory. brw appends `burrow` to it. `BRW_BIN_DIR` selects the entry directory directly. Empty and relative values use the defaults. Unusable absolute paths produce directory-specific errors. Changes apply to subsequent commands and leave existing files where they were.
+
+`brw init --dry-run --json` shows the selected paths and whether the entry directory would be appended to the user PATH. Run `brw init` to create the entry directory and add it to the current user's persistent PATH. Running it again keeps the existing entry. brw preserves existing PATH text and the registry value type, then notifies Windows when it changes the value. Existing shells keep their current environment.
+
+New versions have installation records in the state directory. The files used for version ownership, dependency protection, and shim launch stay with their existing version and command entry. Installations created with an earlier brw remain usable. Recovery of interrupted publication is tracked separately.

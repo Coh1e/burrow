@@ -5,6 +5,7 @@
 #include "install_windows.h"
 #include "shim_windows.h"
 #include "source_windows.h"
+#include "paths_windows.h"
 
 enum { PATH_CAP = BRW_PATH_CAP, LINE_CAP = PATH_CAP + 512 };
 
@@ -60,20 +61,14 @@ static bool ensure_directory(const wchar_t *path)
     return CreateDirectoryW(path, NULL) || directory(path);
 }
 
-static bool source_root(wchar_t root[PATH_CAP], bool create)
+static const char *source_root(wchar_t root[PATH_CAP], bool create)
 {
-    wchar_t profile[PATH_CAP], config[PATH_CAP], base[PATH_CAP];
-    DWORD size = GetEnvironmentVariableW(L"XDG_CONFIG_HOME", config, PATH_CAP);
-    if (!size || (size < PATH_CAP && !absolute_path(config))) {
-        size = GetEnvironmentVariableW(L"USERPROFILE", profile, PATH_CAP);
-        if (!size || size >= PATH_CAP || !absolute_path(profile) ||
-            !path_join(config, profile, L".config"))
-            return false;
-    } else if (size >= PATH_CAP) {
-        return false;
-    }
-    return path_join(base, config, L"burrow") && path_join(root, base, L"sources") &&
-           (!create || (ensure_directory(config) && ensure_directory(base) && ensure_directory(root)));
+    wchar_t config[PATH_CAP];
+    const char *error = brw_path(BRW_CONFIG, config, create);
+    if (error)
+        return error;
+    return path_join(root, config, L"sources") && (!create || ensure_directory(root))
+        ? NULL : "source-directory";
 }
 
 /* A line is bounded and decoded strictly. CRLF and LF are both accepted. */
@@ -190,7 +185,10 @@ static const char *add_source(const wchar_t *name, const wchar_t *input, bool pr
     const char *error = read_catalog(catalog, name, NULL, NULL);
     if (error || preview)
         return error;
-    if (!source_root(root, true) || !path_join(record, root, name))
+    error = source_root(root, true);
+    if (error)
+        return error;
+    if (!path_join(record, root, name))
         return "source-directory";
     /* Stage beside the registry so a concurrent scan cannot see a partial record. */
     wchar_t *separator = wcsrchr(root, L'\\');
@@ -588,8 +586,9 @@ int brw_source_command(const wchar_t *verb, size_t count, const wchar_t **args,
     if (!wcscmp(verb, L"list") && !count && !preview)
         return brw_list_installed(json);
     wchar_t root[PATH_CAP];
-    if (!source_root(root, false))
-        return report(json, "source-directory", NULL);
+    const char *error = source_root(root, false);
+    if (error)
+        return report(json, error, NULL);
     if (!wcscmp(verb, L"source")) {
         if (count == 1 && !wcscmp(args[0], L"list") && !preview) {
             const char *error = scan_sources(root, NULL, json);

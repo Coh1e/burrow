@@ -9,6 +9,8 @@
 #include <string.h>
 #include "install_windows.h"
 #include "source_windows.h"
+#include "paths_windows.h"
+#include "init_windows.h"
 #include "shim_image.h"
 #include "shim_windows.h"
 
@@ -24,6 +26,7 @@ struct installation {
     wchar_t download_stage[PATH_CAP];
     HANDLE lock;
     wchar_t packages[PATH_CAP];
+    wchar_t state[PATH_CAP];
     wchar_t package_dir[PATH_CAP];
     wchar_t version[PATH_CAP];
     wchar_t bin[PATH_CAP];
@@ -211,20 +214,18 @@ static bool directory(const wchar_t *path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-static bool package_roots(struct installation *install, bool create)
+static const char *package_roots(struct installation *install, bool create)
 {
-    wchar_t profile[PATH_CAP];
-    DWORD count = GetEnvironmentVariableW(L"USERPROFILE", profile, PATH_CAP);
-    if (count < 3 || count >= PATH_CAP || profile[1] != L':' ||
-        (profile[2] != L'\\' && profile[2] != L'/'))
-        return false;
-    wchar_t local[PATH_CAP], share[PATH_CAP], data[PATH_CAP];
-    if (!join(local, profile, L".local") || !join(share, local, L"share") ||
-        !join(data, share, L"burrow") || !join(install->packages, data, L"packages") ||
-        !join(install->bin, local, L"bin"))
-        return false;
-    return !create || (directory(local) && directory(share) && directory(data) &&
-                       directory(install->packages));
+    wchar_t data[PATH_CAP];
+    const char *error = brw_path(BRW_BIN, install->bin, false);
+    if (!error)
+        error = brw_path(BRW_DATA, data, create);
+    if (error)
+        return error;
+    if (!join(install->packages, data, L"packages") ||
+        (create && !directory(install->packages)))
+        return "data-directory";
+    return NULL;
 }
 
 static bool package_paths(struct installation *install)
@@ -274,19 +275,20 @@ static HANDLE package_changes;
 
 const char *brw_begin_package_changes(void)
 {
-    wchar_t profile[PATH_CAP], path[PATH_CAP];
-    DWORD length = GetEnvironmentVariableW(L"USERPROFILE", profile, PATH_CAP);
-    if (length < 3 || length >= PATH_CAP || profile[1] != L':' ||
-        (profile[2] != L'\\' && profile[2] != L'/') ||
-        !join(path, profile, L".brw-package-mutation.lock"))
-        return "install-directory";
-    package_changes = CreateFileW(path, GENERIC_WRITE | DELETE, 0, NULL, CREATE_NEW,
-                                  FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
-    return package_changes == INVALID_HANDLE_VALUE ? "package-busy" : NULL;
+    package_changes = brw_user_mutex(L"PackageMutation");
+    if (!package_changes)
+        return "package-busy";
+    DWORD result = WaitForSingleObject(package_changes, 0);
+    if (result == WAIT_OBJECT_0 || result == WAIT_ABANDONED)
+        return NULL;
+    CloseHandle(package_changes);
+    package_changes = NULL;
+    return "package-busy";
 }
 
 void brw_end_package_changes(void)
 {
+    ReleaseMutex(package_changes);
     CloseHandle(package_changes);
     package_changes = NULL;
 }
@@ -310,10 +312,11 @@ static bool stage_directory(const wchar_t *base, wchar_t stage[PATH_CAP])
 
 static const char *download(struct installation *install)
 {
-    wchar_t temp[PATH_CAP], destination[PATH_CAP];
-    DWORD length = GetTempPathW(PATH_CAP, temp);
-    if (!length || length >= PATH_CAP ||
-        !stage_directory(temp, install->download_stage) ||
+    wchar_t cache[PATH_CAP], destination[PATH_CAP];
+    const char *error = brw_path(BRW_CACHE, cache, true);
+    if (error)
+        return error;
+    if (!stage_directory(cache, install->download_stage) ||
         !join(destination, install->download_stage, L"download"))
         return "download-stage";
     install->archive = _wfsopen(destination, L"w+b", _SH_DENYWR);
@@ -388,11 +391,20 @@ static const char *read_active(struct installation *install);
 
 static const char *prepare(struct installation *install)
 {
-    if (!package_roots(install, false) || !package_paths(install) ||
-        (install->action == DIGBY_INSTALL && !package_roots(install, true)))
+    const char *error = package_roots(install, false);
+    if (!error)
+        error = brw_writable_path(BRW_STATE, install->state);
+    if (error)
+        return error;
+    if (!package_paths(install))
         return "install-directory";
+    if (install->action == DIGBY_INSTALL && (error = package_roots(install, true)))
+        return error;
     if (!ordinary_path(install->packages, true))
         return install->action == DIGBY_INSTALL ? "install-directory" : "not-installed";
+    error = brw_path(BRW_STATE, install->state, true);
+    if (error)
+        return error;
     wchar_t name[NAME_CAP + 8], lock[PATH_CAP];
     swprintf(name, NAME_CAP + 8, L".lock-%ls", install->package->name);
     if (!join(lock, install->packages, name))
@@ -448,7 +460,7 @@ bool brw_is_installed(const wchar_t *name)
     struct installation install = {0};
     package.name = name;
     install.package = &package;
-    return package_roots(&install, false) && package_paths(&install) &&
+    return !package_roots(&install, false) && package_paths(&install) &&
            ordinary_path(install.package_dir, true) && !read_active(&install);
 }
 
@@ -471,7 +483,10 @@ const char *brw_check_uninstall(const wchar_t *name, wchar_t dependent[BRW_PACKA
     install.package = &package;
     dependent[0] = 0;
     wchar_t pattern[PATH_CAP];
-    if (!package_roots(&install, false) || !join(pattern, install.packages, L"*"))
+    const char *root_error = package_roots(&install, false);
+    if (root_error)
+        return root_error;
+    if (!join(pattern, install.packages, L"*"))
         return "dependency-state";
     WIN32_FIND_DATAW data;
     HANDLE search = FindFirstFileW(pattern, &data);
@@ -766,6 +781,32 @@ static bool write_record(const wchar_t *directory, const wchar_t *path,
     return publish_file(directory, path, value, size, replace);
 }
 
+/* Identify retained versions across different data roots sharing one state root. */
+static bool install_record_path(const struct installation *install, const wchar_t *version,
+                                wchar_t path[PATH_CAP])
+{
+    wchar_t identity[PATH_CAP], digest[65], name[80];
+    if (!join(identity, install->package_dir, version))
+        return false;
+    DWORD chars = (DWORD)wcslen(identity);
+    CharLowerBuffW(identity, chars);
+    if (!hash_contents(NULL, (const unsigned char *)identity, chars * sizeof *identity, digest))
+        return false;
+    swprintf(name, 80, L"install-%ls", digest);
+    return join(path, install->state, name);
+}
+
+static bool remove_install_record(const struct installation *install, const wchar_t *version)
+{
+    wchar_t path[PATH_CAP], recorded[PATH_CAP], expected[PATH_CAP];
+    if (!install_record_path(install, version, path) ||
+        !join(expected, install->package_dir, version))
+        return false;
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES)
+        return GetLastError() == ERROR_FILE_NOT_FOUND;
+    return read_record(path, recorded, PATH_CAP) && !_wcsicmp(recorded, expected) && DeleteFileW(path);
+}
+
 static bool version_entry(const struct installation *install, const wchar_t *version,
                           wchar_t entry[ENTRY_CAP])
 {
@@ -789,7 +830,8 @@ static bool owned_version(const wchar_t *directory, const wchar_t *entry,
 static const char *publish(struct installation *install)
 {
     wchar_t target[PATH_CAP], record[PATH_CAP];
-    if (!join(target, install->version, install->package->entry) || !directory(install->bin))
+    if (!join(target, install->version, install->package->entry) ||
+        brw_path(BRW_BIN, install->bin, true))
         return "entry-directory";
     if (!join(record, install->stage, L".brw-entry") ||
         !write_record(install->stage, record, install->package->entry, false))
@@ -829,8 +871,12 @@ static const char *publish(struct installation *install)
     if (install->source &&
         InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
         return "cancelled";
+    wchar_t receipt[PATH_CAP];
+    if (!install_record_path(install, install->package->version, receipt) ||
+        !write_record(install->state, receipt, install->version, false))
+        return "install-record";
     if (!MoveFileW(install->stage, install->version))
-        return "publish-version";
+        return DeleteFileW(receipt) ? "publish-version" : "install-record-cleanup";
     install->stage[0] = 0;
     if (write_record(install->bin, install->sidecar, target, update)) {
         if (update || publish_file(install->bin, install->shim, shim_image, sizeof shim_image, false))
@@ -838,8 +884,10 @@ static const char *publish(struct installation *install)
         if (!DeleteFileW(install->sidecar))
             return "entry-cleanup";
     }
-    return owned_version(install->version, install->package->entry, install->version) &&
-           remove_stage(install->version) ? "publish-entry" : "version-cleanup";
+    if (!owned_version(install->version, install->package->entry, install->version) ||
+        !remove_stage(install->version))
+        return "version-cleanup";
+    return DeleteFileW(receipt) ? "publish-entry" : "install-record-cleanup";
 }
 
 static const char *activate(struct installation *install)
@@ -968,7 +1016,8 @@ static bool package_versions(struct installation *install, const wchar_t *direct
             !ordinary_path(path, true) ||
             (detached ? (!join(destination, detached, version.cFileName) ||
                          !version_entry(install, version.cFileName, entry) ||
-                         !owned_version(path, entry, destination)) : !remove_stage(path))) {
+                         !owned_version(path, entry, destination)) :
+                        (!remove_install_record(install, version.cFileName) || !remove_stage(path)))) {
             valid = false;
             break;
         }
@@ -1091,7 +1140,8 @@ int brw_list_installed(bool json)
     install.package = &package;
     wchar_t pattern[PATH_CAP];
     const char *error = NULL;
-    if (!package_roots(&install, false) || !join(pattern, install.packages, L"*"))
+    error = package_roots(&install, false);
+    if (!error && !join(pattern, install.packages, L"*"))
         error = "install-directory";
 
     if (json)

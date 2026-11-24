@@ -60,10 +60,11 @@ add_custom_command(OUTPUT "${shim_header}"
   DEPENDS brw_shim "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
   VERBATIM)
 
-add_executable(brw main_windows.c install_windows.c source_windows.c download_windows.c "${shim_header}")
+add_executable(brw main_windows.c install_windows.c source_windows.c download_windows.c
+  paths_windows.c init_windows.c init_command_windows.c "${shim_header}")
 target_include_directories(brw PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
 target_compile_definitions(brw PRIVATE LIBARCHIVE_STATIC)
-target_link_libraries(brw PRIVATE digby archive_static bcrypt winhttp)
+target_link_libraries(brw PRIVATE digby archive_static bcrypt winhttp advapi32 user32)
 target_link_options(brw PRIVATE -municode -static)
 foreach(target brw brw_shim digby)
   set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
@@ -91,4 +92,13 @@ if(BUILD_TESTING)
       -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-dependencies.ps1"
       -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
       -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME brw_paths
+    COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-paths.ps1"
+      -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
+      -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+  add_executable(brw_test_init test_init_windows.c init_windows.c)
+  target_link_libraries(brw_test_init PRIVATE advapi32)
+  target_link_options(brw_test_init PRIVATE -static)
+  add_test(NAME brw_init_path COMMAND brw_test_init)
 endif()

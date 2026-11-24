@@ -1,5 +1,6 @@
 #include "install_windows.h"
 #include "source_windows.h"
+#include "paths_windows.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -61,6 +62,8 @@ int wmain(int argc, wchar_t **argv)
         else
             goto usage;
     }
+    if (!wcscmp(argv[1], L"init") && !count)
+        return brw_init(json, preview);
     if (!wcscmp(argv[1], L"source") || !wcscmp(argv[1], L"search") ||
         !wcscmp(argv[1], L"show") || !wcscmp(argv[1], L"list") ||
         (!wcscmp(argv[1], L"install") && count == 1))
@@ -118,6 +121,7 @@ usage:
           "       brw source add NAME CATALOG | source remove NAME | source list\n"
           "       brw search [QUERY] | show [SOURCE/]NAME | list\n"
           "       brw install [SOURCE/]NAME [--dry-run] [--json]\n"
-          "       brw uninstall NAME [--dry-run] [--json]\n", stderr);
+          "       brw uninstall NAME [--dry-run] [--json]\n"
+          "       brw init [--dry-run] [--json]\n", stderr);
     return 2;
 }

@@ -24,10 +24,12 @@ function Get-Sha256([string] $path) {
 
 $root = Join-Path $Scratch ([guid]::NewGuid().ToString('N'))
 $env:USERPROFILE = $root
+'XDG_DATA_HOME','XDG_STATE_HOME','BRW_BIN_DIR' |
+    ForEach-Object { Remove-Item -LiteralPath "Env:$_" -ErrorAction SilentlyContinue }
 $env:XDG_CONFIG_HOME = Join-Path $root 'config'
-$env:TMP = Join-Path $root 'temporary'
-$env:TEMP = $env:TMP
-New-Item -ItemType Directory -Path $env:TMP -Force | Out-Null
+$env:XDG_CACHE_HOME = Join-Path $root 'cache'
+$cache = Join-Path $env:XDG_CACHE_HOME 'burrow'
+New-Item -ItemType Directory -Path $cache -Force | Out-Null
 Copy-Item -LiteralPath $Fixture -Destination (Join-Path $root 'payload.exe')
 $tar = Join-Path $env:SystemRoot 'System32/tar.exe'
 & $tar -czf (Join-Path $root 'package.tar.gz') --format ustar -C $root payload.exe
@@ -111,7 +113,7 @@ function Invoke-HttpInstall([switch] $Cancel) {
         if ($Cancel) {
             $clock.Restart()
             do {
-                $staged = @(Get-ChildItem -LiteralPath $env:TMP -Recurse -Force |
+                $staged = @(Get-ChildItem -LiteralPath $cache -Recurse -Force |
                     Where-Object { !$_.PSIsContainer } | ForEach-Object {
                         $file = [IO.File]::Open($_.FullName, 'Open', 'Read', 'ReadWrite')
                         try { if ($file.Length -gt 0) { $file.Length } } finally { $file.Dispose() }
@@ -170,7 +172,7 @@ try {
     if ($LASTEXITCODE -ne 0 -or ($textPreview -join ' ') -notmatch 'Pending checks.*SHA-256') {
         throw 'Text preview did not identify pending verification'
     }
-    if ($listener.Pending() -or @(Get-ChildItem -LiteralPath $env:TMP -Force).Count) {
+    if ($listener.Pending() -or @(Get-ChildItem -LiteralPath $cache -Force).Count) {
         throw 'Preview contacted the server or wrote a download'
     }
     Invoke-Brw 0 @('source', 'add', 'other', $catalog) | Out-Null
@@ -185,7 +187,7 @@ try {
         (Test-Path -LiteralPath (Join-Path $root '.local/share/burrow/packages/broken'))) {
         throw 'Failed package was published'
     }
-    if (@(Get-ChildItem -LiteralPath $env:TMP -Force).Count) { throw 'Failed download staging leaked' }
+    if (@(Get-ChildItem -LiteralPath $cache -Force).Count) { throw 'Failed download staging leaked' }
     $unsafe = Invoke-Brw 1 @('install', 'unsafe')
     $packageRoot = Join-Path $root '.local/share/burrow/packages'
     if ($unsafe.error -ne 'archive-path' -or $unsafe.step -ne 3 -or
@@ -199,7 +201,7 @@ try {
         (Test-Path -LiteralPath (Join-Path $root '.local/share/burrow/packages/cancelled'))) {
         throw 'Cancelled package became visible'
     }
-    if (@(Get-ChildItem -LiteralPath $env:TMP -Force).Count) { throw 'Download staging leaked' }
+    if (@(Get-ChildItem -LiteralPath $cache -Force).Count) { throw 'Download staging leaked' }
     Invoke-HttpInstall
     Invoke-Brw 0 @('install', 'tool') | Out-Null
     Invoke-Brw 0 @('install', 'packed') | Out-Null

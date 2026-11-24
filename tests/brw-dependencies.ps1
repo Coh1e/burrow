@@ -14,6 +14,8 @@ function Assert($condition, [string] $message) {
 
 $root = Join-Path $Scratch ([guid]::NewGuid().ToString('N').Substring(0, 12))
 $env:USERPROFILE = $root
+'XDG_CACHE_HOME','XDG_DATA_HOME','XDG_STATE_HOME','BRW_BIN_DIR' |
+    ForEach-Object { Remove-Item -LiteralPath "Env:$_" -ErrorAction SilentlyContinue }
 $env:XDG_CONFIG_HOME = Join-Path $root 'config'
 New-Item -ItemType Directory -Path $root | Out-Null
 try {
