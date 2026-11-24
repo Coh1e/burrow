@@ -14,7 +14,10 @@ struct local_package {
 
 /* Input strings are borrowed for the duration of the call. Errors are static. */
 const char *brw_validate_package(const struct local_package *package);
+const char *brw_validate_lifecycle(enum digby_action action, const struct local_package *package);
 const char *brw_install_package(const struct local_package *package,
                                 const struct digby_plan *plan, size_t *failed_step);
+const char *brw_run_lifecycle(enum digby_action action, const struct local_package *package,
+                             const struct digby_plan *plan, size_t *failed_step);
 
 #endif

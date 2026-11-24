@@ -29,5 +29,15 @@ int main(void)
     if (!error || strcmp(error, "extract-failed") || failed != 1 || result.count != 2)
         return 2;
     ++plan.count;
-    return digby_execute(&plan, observe, &result, NULL) ? 0 : 3;
+    if (!digby_execute(&plan, observe, &result, NULL))
+        return 3;
+    plan = digby_lifecycle_plan(DIGBY_ROLLBACK);
+    result.count = 0;
+    if (digby_execute(&plan, observe, &result, NULL) ||
+        result.count != 1 || result.seen[0] != DIGBY_ACTIVATE)
+        return 4;
+    plan = digby_lifecycle_plan(DIGBY_UNINSTALL);
+    result.count = 0;
+    return digby_execute(&plan, observe, &result, NULL) ||
+           result.count != 1 || result.seen[0] != DIGBY_REMOVE ? 5 : 0;
 }
