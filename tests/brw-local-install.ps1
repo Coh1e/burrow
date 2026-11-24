@@ -249,13 +249,8 @@ exit /b 41
         $previousPolicy = $env:PSExecutionPolicyPreference
         try {
             $env:PSExecutionPolicyPreference = 'Restricted'
-            $policy = & powershell.exe -NoProfile -Command Get-ExecutionPolicy
-            if ($policy -eq 'Restricted') {
-                $denied = Invoke-Probe $alias 'two'
-                Assert ($denied.code -ne 43 -and $denied.code -ne 0 -and $denied.err) 'Entry bypassed Restricted execution policy'
-            } else {
-                Write-Host "SKIP: group policy forces $policy in the policy inheritance probe"
-            }
+            $denied = Invoke-Probe $alias 'two'
+            Assert ($denied.code -ne 43 -and $denied.code -ne 0 -and $denied.err) 'Entry bypassed Restricted execution policy'
         } finally {
             $env:PSExecutionPolicyPreference = $previousPolicy
         }
