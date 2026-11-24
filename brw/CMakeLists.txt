@@ -89,6 +89,13 @@ if(BUILD_TESTING)
     COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
       -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-settings.ps1"
       -Brw "$<TARGET_FILE:brw_test_interrupt>" -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+  option(BRW_TEST_USER_REGISTRY "Test KTM in a disposable current-user registry subtree" OFF)
+  if(BRW_TEST_USER_REGISTRY)
+    add_test(NAME brw_settings_user_registry
+      COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+        -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-settings.ps1" -UserRegistry
+        -Brw "$<TARGET_FILE:brw_test_interrupt>" -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+  endif()
   add_executable(brw_test_payload test_payload.c)
   target_link_options(brw_test_payload PRIVATE -municode -static)
   add_executable(brw_test_gui WIN32 test_gui_windows.c)

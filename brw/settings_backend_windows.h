@@ -19,6 +19,6 @@ struct setting_request {
 };
 #define BRW_SETTINGS_KEY L"HKCU\\Software\\Burrow\\Settings"
 /* Borrows a validated operation for the duration of the call. */
-const char *brw_apply_setting(void *context, enum digby_operation operation);
+const char *brw_apply_setting(void *context, const struct digby_setting *step);
 
 #endif

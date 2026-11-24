@@ -31,3 +31,8 @@ Session scope takes a child executable and arguments after `--`. Only the brw pr
 ## Interrupted writes
 
 Persistent operations write a journal in the selected Burrow state directory. With the same directory settings, run `brw recover --dry-run --json` to preview recovery, then `brw recover --json` to apply it. Recovery restores the exact previous value and type when the current value still matches the interrupted write. It reports `recovered-with-user-changes` and retains a later edit. A subsequent recovery reports `no-pending`.
+
+
+## Windows verification
+
+The default CTest suite runs the settings CLI in a private registry hive. To exercise the Windows Kernel Transaction Manager, configure the build with `-DBRW_TEST_USER_REGISTRY=ON` and run `ctest --test-dir <build> -R "^brw_settings_user_registry$" --output-on-failure` as an ordinary user. This opt-in test creates a randomly named `HKCU\Software\Burrow-Tests-<id>` subtree, puts both the settings key and the fixture's Environment key inside it, and removes the subtree on exit.

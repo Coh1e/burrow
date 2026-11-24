@@ -33,9 +33,17 @@ struct digby_setting {
     const wchar_t *key, *name, *argument, *expected;
     bool expect_missing;
 };
-/* Produces a one-step plan, or an empty plan and a static diagnostic. */
+struct digby_setting_plan {
+    struct digby_setting step;
+    bool ready;
+};
+/* Copies the authorized step. Its borrowed string contents must stay unchanged
+   through execution. Failure clears ready and returns a static diagnostic. */
 const char *digby_plan_setting(const struct digby_setting *setting, unsigned capabilities,
-                               struct digby_plan *out);
+                               struct digby_setting_plan *out);
+typedef const char *(*digby_setting_step)(void *context, const struct digby_setting *step);
+const char *digby_execute_setting(const struct digby_setting_plan *plan, digby_setting_step backend,
+                                  void *context);
 
 /* The backend owns its context and any resources opened by steps. */
 typedef const char *(*digby_step)(void *context, enum digby_operation operation);

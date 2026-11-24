@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <ktmw32.h>
+#include <bcrypt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,9 +72,22 @@ static LONG open_target(HKEY root, enum digby_setting_scope scope, enum key_acce
     return status;
 }
 
+static bool exclusive_hive;
+
 static HKEY registry_root(void)
 {
 #ifdef BRW_TEST_INTERRUPTS
+    static HKEY test_root;
+    wchar_t id[33], key[96];
+    DWORD length = GetEnvironmentVariableW(L"BRW_TEST_REGISTRY_ID", id, 33);
+    if (length) {
+        if (length != 32 || wcsspn(id, L"0123456789abcdef") != 32) return NULL;
+        swprintf(key, 96, L"Software\\Burrow-Tests-%ls", id);
+        if (!test_root && RegOpenKeyExW(HKEY_CURRENT_USER, key, REG_OPTION_OPEN_LINK,
+                                        KEY_QUERY_VALUE, &test_root) != ERROR_SUCCESS)
+            return NULL;
+        return test_root;
+    }
     static HKEY private_root;
     wchar_t path[BRW_PATH_CAP];
     DWORD n = GetEnvironmentVariableW(L"BRW_TEST_HIVE", path, BRW_PATH_CAP);
@@ -81,6 +95,7 @@ static HKEY registry_root(void)
         if (n >= BRW_PATH_CAP || (!private_root &&
             RegLoadAppKeyW(path, &private_root, KEY_ALL_ACCESS, REG_PROCESS_APPKEY, 0) != ERROR_SUCCESS))
             return NULL;
+        exclusive_hive = true;
         return private_root;
     }
 #endif
@@ -179,7 +194,7 @@ static const char *write_value(HKEY root, enum digby_setting_scope scope, const 
     HANDLE transaction = NULL;
     HKEY key;
     /* The private test hive is process-exclusive and has no KTM resource manager. */
-    if (root == HKEY_CURRENT_USER) {
+    if (!exclusive_hive) {
         transaction = CreateTransaction(NULL, NULL, 0, 0, 0, 0, NULL);
         if (transaction == INVALID_HANDLE_VALUE) return "registry-transaction";
     }
@@ -239,13 +254,22 @@ const char *brw_settings_pending(void)
 
 static const char *save(const wchar_t *dir, const wchar_t *path, const struct journal *j)
 {
-    wchar_t tmp[MAX_PATH];
-    if (wcslen(dir) >= MAX_PATH-14 || !GetTempFileNameW(dir, L"brw", 0, tmp)) return "settings-journal";
-    HANDLE file = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    wchar_t tmp[BRW_PATH_CAP];
+    HANDLE file = INVALID_HANDLE_VALUE;
+    for (unsigned attempt = 0; attempt < 8; ++attempt) {
+        DWORD nonce;
+        if (BCryptGenRandom(NULL, (BYTE *)&nonce, sizeof nonce, BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
+            return "settings-journal";
+        /* Shorter than the checked final journal name. */
+        swprintf(tmp, BRW_PATH_CAP, L"%ls\\~%08lx", dir, nonce);
+        file = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file != INVALID_HANDLE_VALUE) break;
+        if (GetLastError() != ERROR_FILE_EXISTS) return "settings-journal";
+    }
+    if (file == INVALID_HANDLE_VALUE) return "settings-journal";
     DWORD bytes = 0;
-    bool ok = file != INVALID_HANDLE_VALUE && WriteFile(file, j, sizeof *j, &bytes, NULL) &&
-              bytes == sizeof *j && FlushFileBuffers(file);
-    if (file != INVALID_HANDLE_VALUE && !CloseHandle(file)) ok = false;
+    bool ok = WriteFile(file, j, sizeof *j, &bytes, NULL) && bytes == sizeof *j && FlushFileBuffers(file);
+    if (!CloseHandle(file)) ok = false;
     if (ok && MoveFileExW(tmp, path, MOVEFILE_WRITE_THROUGH)) return NULL;
     DeleteFileW(tmp);
     return "settings-journal";
@@ -379,22 +403,25 @@ static const char *apply_locked(struct setting_request *r, HKEY root)
         if (open_target(root, r->setting.scope, CHECK_WRITE, NULL, &writable) != ERROR_SUCCESS)
             return "registry-write";
         if (writable) RegCloseKey(writable);
+        wchar_t state[BRW_PATH_CAP];
+        error = brw_writable_path(BRW_STATE, state);
+        if (error) return error;
     }
     if (r->preview) return NULL;
     return r->setting.scope == SETTING_SESSION ?
         write_value(NULL, SETTING_SESSION, r->setting.name, &r->before, &r->after) : persist(root, r);
 }
 
-const char *brw_apply_setting(void *context, enum digby_operation operation)
+const char *brw_apply_setting(void *context, const struct digby_setting *step)
 {
     struct setting_request *r = context;
-    if (operation != r->setting.op) return "unsupported-operation";
+    r->setting = *step;
     if (r->setting.scope == SETTING_REGISTRY && _wcsicmp(r->setting.key, BRW_SETTINGS_KEY)) return "unauthorized-key";
     const char *error = allowed(r->setting.scope, r->setting.name, native_type(r));
     if (error || r->setting.scope == SETTING_SESSION) return error ? error : apply_locked(r, NULL);
     HKEY root = registry_root();
     if (!root) return "registry-unavailable";
-    if (operation == DIGBY_REGISTRY_READ) return apply_locked(r, root);
+    if (step->op == DIGBY_REGISTRY_READ) return apply_locked(r, root);
     error = brw_begin_package_changes();
     if (error) return error;
     HANDLE lock = environment_lock();

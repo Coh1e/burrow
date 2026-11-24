@@ -1,10 +1,10 @@
 #include "digby.h"
 
 const char *digby_plan_setting(const struct digby_setting *s, unsigned capabilities,
-                               struct digby_plan *out)
+                               struct digby_setting_plan *out)
 {
     if (!out) return "invalid-plan";
-    out->count = 0;
+    out->ready = false;
     if (!s || !s->name || !*s->name || (s->expect_missing && s->expected))
         return "invalid-setting";
     unsigned required;
@@ -35,9 +35,16 @@ const char *digby_plan_setting(const struct digby_setting *s, unsigned capabilit
     }
     if (!(capabilities & required)) return "missing-capability";
     if (needs_value != (s->argument != NULL)) return "invalid-value";
-    out->steps[0] = s->op;
-    out->count = 1;
+    out->step = *s;
+    out->ready = true;
     return NULL;
+}
+
+const char *digby_execute_setting(const struct digby_setting_plan *plan, digby_setting_step backend,
+                                  void *context)
+{
+    if (!plan || !plan->ready || !backend) return "invalid-plan";
+    return backend(context, &plan->step);
 }
 
 struct digby_plan digby_install_plan(void)

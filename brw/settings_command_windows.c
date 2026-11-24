@@ -130,10 +130,10 @@ int brw_settings_command(int argc, wchar_t **argv)
             if (!wcscmp(argv[i], L"--json")) r->json = true;
     }
     if (!error) {
-        struct digby_plan plan;
+        struct digby_setting_plan plan;
         error = digby_plan_setting(&r->setting, DIGBY_CAP_REGISTRY | DIGBY_CAP_USER_ENV | DIGBY_CAP_SESSION_ENV,
                                    &plan);
-        if (!error) error = digby_execute(&plan, brw_apply_setting, r, NULL);
+        if (!error) error = digby_execute_setting(&plan, brw_apply_setting, r);
     }
     DWORD child_code = 0;
     if (!error && !r->preview && r->child) error = run_child(r, &child_code);
