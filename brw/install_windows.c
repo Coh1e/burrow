@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
 #include <bcrypt.h>
 #include <archive.h>
 #include <archive_entry.h>
@@ -98,7 +99,9 @@ static const char *validate_package(const struct local_package *package, bool ne
     const wchar_t *filename = wcsrchr(package->entry, L'/');
     filename = filename ? filename + 1 : package->entry;
     size_t length = wcslen(filename);
-    if (length <= 4 || _wcsicmp(filename + length - 4, L".exe"))
+    const wchar_t *ext = wcsrchr(filename, L'.');
+    if (length <= 4 || !ext || (_wcsicmp(ext, L".exe") && _wcsicmp(ext, L".cmd") &&
+                                 _wcsicmp(ext, L".bat") && _wcsicmp(ext, L".ps1")))
         return "invalid-entry";
     if (!*package->archive || wcslen(package->digest) != 64)
         return "invalid-input";
@@ -827,6 +830,43 @@ static bool version_entry(const struct installation *install, const wchar_t *ver
 static bool owned_version(const wchar_t *directory, const wchar_t *entry,
                           const wchar_t *detached);
 
+struct launcher_image {
+    const unsigned char *bytes;
+    DWORD size;
+    wchar_t digest[65];
+};
+
+static bool select_launcher(const wchar_t *directory, const wchar_t *entry,
+                            struct launcher_image *image)
+{
+    wchar_t path[PATH_CAP];
+    if (!join(path, directory, entry))
+        return false;
+    const wchar_t *ext = wcsrchr(entry, L'.');
+    DWORD_PTR type = ext && !_wcsicmp(ext, L".exe") ?
+        SHGetFileInfoW(path, 0, NULL, 0, SHGFI_EXETYPE) : 0;
+    bool gui = LOWORD(type) == IMAGE_NT_SIGNATURE && HIWORD(type) != 0;
+    image->bytes = gui ? gui_shim_image : shim_image;
+    image->size = gui ? sizeof gui_shim_image : sizeof shim_image;
+    return hash_contents(NULL, image->bytes, image->size, image->digest);
+}
+
+static const char *switch_entry(struct installation *install, const wchar_t *target,
+                                const struct launcher_image *image, bool replace)
+{
+    wchar_t previous[PATH_CAP];
+    if (replace && !read_record(install->sidecar, previous, PATH_CAP))
+        return "entry-conflict";
+    if (!write_record(install->bin, install->sidecar, target, replace))
+        return "publish-entry";
+    if ((replace && !wcscmp(install->shim_hash, image->digest)) ||
+        publish_file(install->bin, install->shim, image->bytes, image->size, replace))
+        return NULL;
+    if (replace ? !write_record(install->bin, install->sidecar, previous, true) :
+                  !DeleteFileW(install->sidecar))
+        return "entry-cleanup";
+    return "publish-entry";
+}
 static const char *publish(struct installation *install)
 {
     wchar_t target[PATH_CAP], record[PATH_CAP];
@@ -848,9 +888,10 @@ static const char *publish(struct installation *install)
         (!join(record, install->stage, L".brw-depends") ||
          !write_record(install->stage, record, dependencies, false)))
         return "version-record";
-    if ((!update && !hash_contents(NULL, shim_image, sizeof shim_image, install->shim_hash)) ||
+    struct launcher_image image;
+    if (!select_launcher(install->stage, install->package->entry, &image) ||
         !join(record, install->stage, L".brw-shim") ||
-        !write_record(install->stage, record, install->shim_hash, false))
+        !write_record(install->stage, record, image.digest, false))
         return "version-record";
     if (update) {
         wchar_t directory[PATH_CAP], entry[ENTRY_CAP];
@@ -878,12 +919,9 @@ static const char *publish(struct installation *install)
     if (!MoveFileW(install->stage, install->version))
         return DeleteFileW(receipt) ? "publish-version" : "install-record-cleanup";
     install->stage[0] = 0;
-    if (write_record(install->bin, install->sidecar, target, update)) {
-        if (update || publish_file(install->bin, install->shim, shim_image, sizeof shim_image, false))
-            return NULL;
-        if (!DeleteFileW(install->sidecar))
-            return "entry-cleanup";
-    }
+    const char *error = switch_entry(install, target, &image, update);
+    if (!error || !strcmp(error, "entry-cleanup"))
+        return error;
     if (!owned_version(install->version, install->package->entry, install->version) ||
         !remove_stage(install->version))
         return "version-cleanup";
@@ -907,7 +945,19 @@ static const char *activate(struct installation *install)
         if (!brw_is_installed(dependency))
             return "dependency-not-installed";
     }
-    return write_record(install->bin, install->sidecar, target, true) ? NULL : "publish-entry";
+    struct launcher_image image;
+    wchar_t record[PATH_CAP], recorded[65];
+    if (!select_launcher(install->version, entry, &image) ||
+        !join(record, install->version, L".brw-shim"))
+        return "version-record";
+    /* A retained version may have been published by an older launcher build. */
+    if (!read_record(record, recorded, 65) || wcscmp(recorded, image.digest)) {
+        if (!wcscmp(install->active_version, install->package->version))
+            return NULL;
+        if (!write_record(install->version, record, image.digest, true))
+            return "version-record";
+    }
+    return switch_entry(install, target, &image, true);
 }
 
 static bool listed_path(FILE *files, const wchar_t *name, bool folder)

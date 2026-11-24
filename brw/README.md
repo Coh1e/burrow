@@ -32,8 +32,10 @@ Catalogs are UTF-8 without a BOM. The first line is `brw-catalog-v1` and each fo
 | Kind | `exe` or `archive` |
 | Location | Local file in the catalog directory, or an HTTPS or HTTP URL |
 | SHA-256 | 64 hexadecimal digits |
-| Entry | `.exe` path to publish as the package's command. Archive entries can use a relative path such as `bin/tool.exe` |
+| Entry | Path to a Windows console or GUI `.exe`, `.cmd`, `.bat`, or `.ps1` to publish as the package's command. Archive entries can use a relative path such as `bin/tool.exe` |
 | Depends | Comma-separated package names, such as `runtime,tools`. An omitted or empty field declares no dependencies. |
+
+Batch entries quote each argument and reject shell metacharacters in the target path or arguments with a diagnostic and exit code 126. PowerShell entries use Windows PowerShell with the current execution policy.
 
 Dependency names are case-insensitive. An active installed package satisfies its name. Otherwise the name must resolve to a single catalog row. Dry-run lists the packages that would be installed in dependency order. Missing, ambiguous, or cyclic dependencies stop planning before any payload is installed. Each package is committed separately, so an error in a later package leaves earlier installations available.
 

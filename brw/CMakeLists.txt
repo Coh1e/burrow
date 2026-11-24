@@ -52,21 +52,23 @@ unset(CMAKE_DISABLE_FIND_PACKAGE_ZLIB)
 set_target_properties(archive_static PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES)
 
 add_executable(brw_shim shim_windows.c)
-target_link_options(brw_shim PRIVATE -municode -static)
+target_link_options(brw_shim PRIVATE -municode -static -Wl,--no-insert-timestamp)
+add_executable(brw_gui_shim WIN32 shim_windows.c)
+target_link_options(brw_gui_shim PRIVATE -municode -static -Wl,--no-insert-timestamp)
 set(shim_header "${CMAKE_CURRENT_BINARY_DIR}/shim_image.h")
 add_custom_command(OUTPUT "${shim_header}"
-  COMMAND "${CMAKE_COMMAND}" "-DINPUT=$<TARGET_FILE:brw_shim>" "-DOUTPUT=${shim_header}"
+  COMMAND "${CMAKE_COMMAND}" "-DINPUT=$<TARGET_FILE:brw_shim>" "-DGUI=$<TARGET_FILE:brw_gui_shim>" "-DOUTPUT=${shim_header}"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
-  DEPENDS brw_shim "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
+  DEPENDS brw_shim brw_gui_shim "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
   VERBATIM)
 
 add_executable(brw main_windows.c install_windows.c source_windows.c download_windows.c
   paths_windows.c init_windows.c init_command_windows.c output_windows.c "${shim_header}")
 target_include_directories(brw PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
 target_compile_definitions(brw PRIVATE LIBARCHIVE_STATIC)
-target_link_libraries(brw PRIVATE digby archive_static bcrypt winhttp advapi32 user32)
+target_link_libraries(brw PRIVATE digby archive_static bcrypt winhttp advapi32 user32 shell32)
 target_link_options(brw PRIVATE -municode -static)
-foreach(target brw brw_shim digby)
+foreach(target brw brw_shim brw_gui_shim digby)
   set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endforeach()
@@ -74,10 +76,12 @@ endforeach()
 if(BUILD_TESTING)
   find_program(POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
   add_executable(brw_test_payload test_payload.c)
-  target_link_options(brw_test_payload PRIVATE -static)
+  target_link_options(brw_test_payload PRIVATE -municode -static)
+  add_executable(brw_test_gui WIN32 test_gui_windows.c)
+  target_link_options(brw_test_gui PRIVATE -municode -static)
   add_test(NAME brw_local_install
     COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
-      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-local-install.ps1"
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-local-install.ps1" -Gui "$<TARGET_FILE:brw_test_gui>"
       -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
       -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
   add_executable(brw_test_cancel test_cancel_windows.c)

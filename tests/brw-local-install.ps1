@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory=$true)][string] $Brw,
     [Parameter(Mandatory=$true)][string] $Fixture,
+    [Parameter(Mandatory=$true)][string] $Gui,
     [Parameter(Mandatory=$true)][string] $Scratch
 )
 
@@ -85,6 +86,31 @@ Assert (Test-Path -LiteralPath (Join-Path $packages 'local-tool/1.0/payload.exe'
 $shim = Join-Path $bin 'local-tool.exe'
 $output = & $shim 'two words'
 Assert ($LASTEXITCODE -eq 37 -and $output -eq 'two words') 'Command entry did not preserve argument and exit code'
+
+function Invoke-Probe($alias, $arguments) {
+    $info = New-Object Diagnostics.ProcessStartInfo
+    $info.FileName = $alias
+    $info.Arguments = $arguments
+    $info.WorkingDirectory = $root
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $child = [Diagnostics.Process]::Start($info)
+    try {
+        $child.StandardInput.WriteLine('input')
+        $child.StandardInput.Close()
+        $stdout = $child.StandardOutput.ReadToEnd()
+        $stderr = $child.StandardError.ReadToEnd()
+        $child.WaitForExit()
+        [pscustomobject]@{ Code = $child.ExitCode; Output = $stdout.TrimEnd(); Error = $stderr.TrimEnd() }
+    } finally {
+        $child.Dispose()
+    }
+}
+New-Item -ItemType File -Path (Join-Path $root 'cwd.marker') | Out-Null
+$probe = Invoke-Probe $shim ('--probe "" "' + [char]0x706b + ' star" "a\"b" "ends \\" last')
+Assert ($probe.Code -eq 41 -and $probe.Output -ceq 'output' -and $probe.Error -ceq 'diagnostic') 'Native argv, cwd, or stream forwarding failed'
 
 $again = Invoke-Install 'local-tool' $archive $sha
 Assert ($again.Code -ne 0 -and $again.Result.error -eq 'destination-exists') 'Existing version is not protected'
@@ -180,3 +206,49 @@ $longInstall = Invoke-Lifecycle @('install', 'long-tool', '1.0', $longArchive, (
 Assert ($longInstall.Code -eq 0) "Maximum-length entry did not install: $($longInstall.Result.error)"
 $longRemove = Invoke-Lifecycle @('uninstall', 'long-tool')
 Assert ($longRemove.Code -eq 0) "Maximum-length entry uninstall failed: $($longRemove.Result.error)"
+
+foreach ($extension in 'cmd', 'bat', 'ps1') {
+    $entry = "script.$extension"
+    $body = if ($extension -eq 'ps1') {
+        '[Console]::WriteLine($args[0]); exit 43'
+    } else {
+        "@echo off`r`necho %~1`r`nexit /b 43"
+    }
+    Set-Content -LiteralPath (Join-Path $inputDir $entry) -Value $body -Encoding ASCII
+    $bundle = Join-Path $root "$extension.tar"
+    & $tar -cf $bundle --format ustar -C $inputDir $entry
+    $installed = Invoke-Lifecycle @('install', "test-$extension", '1', $bundle, (Get-Sha256 $bundle), $entry)
+    Assert ($installed.Code -eq 0) "$extension install failed: $($installed.Result.error)"
+    $alias = Join-Path $root ".local/bin/test-$extension.exe"
+    $output = & $alias 'two words'
+    Assert ($LASTEXITCODE -eq 43 -and $output -ceq 'two words') "$extension invocation failed"
+}
+
+# Launch through the Windows shell verb used by Explorer. A console shim could
+# flash its own window even when the GUI child itself has no console.
+Copy-Item -LiteralPath $Gui -Destination (Join-Path $inputDir 'window.exe')
+$guiArchive = Join-Path $root 'window.tar'
+& $tar -cf $guiArchive --format ustar -C $inputDir window.exe
+$updated = Invoke-Lifecycle @('update', 'test-cmd', '2', $guiArchive, (Get-Sha256 $guiArchive), 'window.exe')
+Assert ($updated.Code -eq 0) 'Update from batch to GUI failed'
+$alias = Join-Path $root '.local/bin/test-cmd.exe'
+$pe = [IO.File]::ReadAllBytes($alias)
+$nt = [BitConverter]::ToInt32($pe, 60)
+Assert ([BitConverter]::ToUInt16($pe, $nt + 24 + 68) -eq 2) 'GUI entry would open a console'
+$marker = Join-Path $root 'shell marker.txt'
+$info = New-Object Diagnostics.ProcessStartInfo
+$info.FileName = $alias
+$info.UseShellExecute = $true
+$info.Verb = 'open'
+$info.Arguments = '"' + $marker + '"'
+$process = [Diagnostics.Process]::Start($info)
+Assert ($process.WaitForExit(10000) -and $process.ExitCode -eq 0) 'Shell launch failed'
+Assert ((Get-Content -LiteralPath $marker) -ceq 'gui') 'GUI target had a console'
+$rolledBack = Invoke-Lifecycle @('rollback', 'test-cmd', '1')
+Assert ($rolledBack.Code -eq 0) 'Rollback to batch failed'
+$env:Path = (Split-Path -Parent $alias) + ';' + $env:Path
+$output = & $env:ComSpec /d /c 'test-cmd.exe "two words"'
+Assert ($LASTEXITCODE -eq 43 -and $output -ceq 'two words') 'cmd host launch after rollback failed'
+
+$unsafe = Invoke-Probe $alias '"hello%PATH%"'
+Assert ($unsafe.Code -eq 126 -and $unsafe.Error -match 'cannot safely forward' -and !$unsafe.Output) 'Unsafe batch argument lacked a diagnostic'
