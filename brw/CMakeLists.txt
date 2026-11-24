@@ -1,0 +1,62 @@
+cmake_minimum_required(VERSION 3.25)
+project(brw LANGUAGES C)
+
+include(CTest)
+add_library(digby STATIC digby.c)
+set_target_properties(digby PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+if(BUILD_TESTING)
+  add_executable(digby_plan_test digby_plan_test.c)
+  target_link_libraries(digby_plan_test PRIVATE digby)
+  add_test(NAME digby_plan COMMAND digby_plan_test)
+endif()
+if(NOT WIN32)
+  return()
+endif()
+if(NOT MINGW)
+  message(FATAL_ERROR "This brw configuration requires Windows MinGW-w64")
+endif()
+
+set(archive_source "${CMAKE_CURRENT_SOURCE_DIR}/../.local/deps/sources/libarchive-3.7.7")
+if(NOT EXISTS "${archive_source}/CMakeLists.txt")
+  message(FATAL_ERROR "Run scripts/fetch-deps.ps1 to prepare the pinned libarchive sources")
+endif()
+
+# The first installation path uses uncompressed tar via libarchive.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+foreach(feature OPENSSL LIBB2 LZ4 LZMA ZSTD ZLIB BZip2 LIBXML2 EXPAT
+                PCREPOSIX PCRE2POSIX TAR CPIO CAT UNZIP ACL XATTR TEST INSTALL)
+  set(ENABLE_${feature} OFF CACHE BOOL "" FORCE)
+endforeach()
+add_subdirectory("${archive_source}" archive EXCLUDE_FROM_ALL)
+set_target_properties(archive_static PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES)
+
+add_executable(brw_shim shim_windows.c)
+target_link_options(brw_shim PRIVATE -municode -static)
+set(shim_header "${CMAKE_CURRENT_BINARY_DIR}/shim_image.h")
+add_custom_command(OUTPUT "${shim_header}"
+  COMMAND "${CMAKE_COMMAND}" "-DINPUT=$<TARGET_FILE:brw_shim>" "-DOUTPUT=${shim_header}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
+  DEPENDS brw_shim "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
+  VERBATIM)
+
+add_executable(brw main_windows.c install_windows.c "${shim_header}")
+target_include_directories(brw PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
+target_compile_definitions(brw PRIVATE LIBARCHIVE_STATIC)
+target_link_libraries(brw PRIVATE digby archive_static bcrypt)
+target_link_options(brw PRIVATE -municode -static)
+foreach(target brw brw_shim digby)
+  set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endforeach()
+
+if(BUILD_TESTING)
+  find_program(POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
+  add_executable(brw_test_payload test_payload.c)
+  target_link_options(brw_test_payload PRIVATE -static)
+  add_test(NAME brw_local_install
+    COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-local-install.ps1"
+      -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
+      -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
