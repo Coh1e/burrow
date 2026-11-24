@@ -4,6 +4,7 @@
 #include <archive_entry.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <locale.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -212,6 +213,9 @@ static int unpack(const char *path, const char *destination)
 
 int main(int argc, char **argv)
 {
+    /* libarchive converts POSIX pathnames to and from UTF-8 PAX headers. */
+    if (!setlocale(LC_CTYPE, "C.UTF-8"))
+        setlocale(LC_CTYPE, "");
     int failed;
     if (argc == 4 && !strcmp(argv[1], "search")) {
         failed = text_operation(argv + 2, NULL, NULL, NULL);

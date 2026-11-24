@@ -14,7 +14,8 @@ if command -v g++ || command -v g++-4.8; then exit 1; fi
 cmake --version
 getconf GNU_LIBC_VERSION
 cat /proc/net/dev
-work=$(mktemp -d)
+mkdir -p "$repo/.local/legacy-build"
+work=$(mktemp -d "$repo/.local/legacy-build/run.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/.local/deps/sources" "$work/build"
 cp -R "$repo/brw" "$work/"

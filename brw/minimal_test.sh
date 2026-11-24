@@ -29,7 +29,14 @@ cmp result out/result
 if "$brw" pack missing.tar input missing; then exit 1; fi
 test ! -e missing.tar
 gzip -t files.tar.gz
+cp input '资料'
+"$brw" pack unicode.tar.gz '资料'
+"$brw" unpack unicode.tar.gz out
+cmp input 'out/资料'
+printf 'existing file\n' > sentinel
+cp sentinel out/input
 if "$brw" unpack files.tar.gz out; then exit 1; fi
+cmp sentinel out/input
 mkdir nested
 cp input nested/file
 tar cf files.tar nested
