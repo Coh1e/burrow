@@ -27,7 +27,7 @@ HANDLE brw_user_mutex(const wchar_t *purpose)
     return CreateMutexW(NULL, FALSE, name);
 }
 
-int brw_init(bool json, bool preview)
+int brw_init_with_registry(HKEY root, bool json, bool preview)
 {
     static const char *keys[] = {"config", "cache", "data", "state", "bin"};
     wchar_t paths[BRW_PATH_COUNT][BRW_PATH_CAP];
@@ -49,8 +49,8 @@ int brw_init(bool json, bool preview)
         }
     }
     if (!error) {
-        LSTATUS result = preview ? RegOpenKeyExW(HKEY_CURRENT_USER, L"Environment", 0, KEY_QUERY_VALUE, &key)
-            : RegCreateKeyExW(HKEY_CURRENT_USER, L"Environment", 0, NULL, 0,
+        LSTATUS result = preview ? RegOpenKeyExW(root, L"Environment", 0, KEY_QUERY_VALUE, &key)
+            : RegCreateKeyExW(root, L"Environment", 0, NULL, 0,
                               KEY_QUERY_VALUE | KEY_SET_VALUE, NULL, &key, NULL);
         if (result == ERROR_SUCCESS || (preview && result == ERROR_FILE_NOT_FOUND)) {
             error = brw_initialize_path(key, paths[BRW_BIN], true, &changed);
@@ -68,7 +68,7 @@ int brw_init(bool json, bool preview)
         ReleaseMutex(lock);
         CloseHandle(lock);
     }
-    if (!error && !preview && changed)
+    if (!error && !preview && changed && root == HKEY_CURRENT_USER)
         SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)L"Environment",
                             SMTO_ABORTIFHUNG, 1000, NULL);
 
@@ -93,4 +93,9 @@ int brw_init(bool json, bool preview)
                      : "User PATH already includes the entry directory.");
     }
     return error ? 1 : 0;
+}
+
+int brw_init(bool json, bool preview)
+{
+    return brw_init_with_registry(HKEY_CURRENT_USER, json, preview);
 }

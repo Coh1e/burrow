@@ -21,21 +21,6 @@ struct catalog_row {
 
 typedef bool (*visit_package)(const wchar_t *source, const struct catalog_row *row, void *context);
 
-void brw_json_string(const wchar_t *value)
-{
-    putchar('"');
-    for (; *value; ++value) {
-        unsigned ch = *value;
-        if (ch == '"' || ch == '\\')
-            printf("\\%c", ch);
-        else if (ch < 32 || ch > 126)
-            printf("\\u%04x", ch);
-        else
-            putchar(ch);
-    }
-    putchar('"');
-}
-
 static bool path_join(wchar_t out[PATH_CAP], const wchar_t *base, const wchar_t *name)
 {
     if (wcslen(base) + wcslen(name) + 2 > PATH_CAP)

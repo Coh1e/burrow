@@ -14,5 +14,7 @@ const char *brw_initialize_path(HKEY key, const wchar_t *bin, bool preview, bool
 /* Returns an unowned mutex for a short application-controlled purpose string.
    The caller owns the handle. */
 HANDLE brw_user_mutex(const wchar_t *purpose);
+/* Run initialization against a borrowed registry root. */
+int brw_init_with_registry(HKEY root, bool json, bool preview);
 
 #endif

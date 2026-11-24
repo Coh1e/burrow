@@ -61,7 +61,7 @@ add_custom_command(OUTPUT "${shim_header}"
   VERBATIM)
 
 add_executable(brw main_windows.c install_windows.c source_windows.c download_windows.c
-  paths_windows.c init_windows.c init_command_windows.c "${shim_header}")
+  paths_windows.c init_windows.c init_command_windows.c output_windows.c "${shim_header}")
 target_include_directories(brw PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
 target_compile_definitions(brw PRIVATE LIBARCHIVE_STATIC)
 target_link_libraries(brw PRIVATE digby archive_static bcrypt winhttp advapi32 user32)
@@ -101,4 +101,12 @@ if(BUILD_TESTING)
   target_link_libraries(brw_test_init PRIVATE advapi32)
   target_link_options(brw_test_init PRIVATE -static)
   add_test(NAME brw_init_path COMMAND brw_test_init)
+  add_executable(brw_test_init_registry test_init_registry_windows.c
+    init_windows.c init_command_windows.c paths_windows.c output_windows.c)
+  target_link_libraries(brw_test_init_registry PRIVATE advapi32 user32)
+  target_link_options(brw_test_init_registry PRIVATE -municode -static)
+  add_test(NAME brw_init_registry
+    COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-init-registry.ps1"
+      -Runner "$<TARGET_FILE:brw_test_init_registry>" -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
