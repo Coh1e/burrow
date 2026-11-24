@@ -6,6 +6,12 @@ struct digby_plan digby_install_plan(void)
     return plan;
 }
 
+struct digby_plan digby_source_install_plan(void)
+{
+    const struct digby_plan plan = {{DIGBY_DOWNLOAD, DIGBY_VERIFY, DIGBY_EXTRACT, DIGBY_PUBLISH}, 4};
+    return plan;
+}
+
 struct digby_plan digby_lifecycle_plan(enum digby_action action)
 {
     switch (action) {
@@ -28,6 +34,7 @@ struct digby_plan digby_lifecycle_plan(enum digby_action action)
 const char *digby_operation_name(enum digby_operation operation)
 {
     switch (operation) {
+    case DIGBY_DOWNLOAD: return "download";
     case DIGBY_VERIFY: return "verify";
     case DIGBY_EXTRACT: return "extract";
     case DIGBY_PUBLISH: return "publish";

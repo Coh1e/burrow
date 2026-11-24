@@ -2,7 +2,7 @@
 #include <string.h>
 
 struct observation {
-    enum digby_operation seen[3];
+    enum digby_operation seen[4];
     size_t count;
     int fail_extraction;
 };
@@ -28,16 +28,27 @@ int main(void)
     const char *error = digby_execute(&plan, observe, &result, &failed);
     if (!error || strcmp(error, "extract-failed") || failed != 1 || result.count != 2)
         return 2;
-    ++plan.count;
-    if (!digby_execute(&plan, observe, &result, NULL))
+    plan.count = sizeof plan.steps / sizeof *plan.steps + 1;
+    result.count = 0;
+    if (!digby_execute(&plan, observe, &result, NULL) || result.count)
         return 3;
+    plan = digby_source_install_plan();
+    error = digby_execute(&plan, observe, &result, &failed);
+    if (!error || strcmp(error, "extract-failed") || failed != 2 || result.count != 3 ||
+        result.seen[0] != DIGBY_DOWNLOAD || result.seen[1] != DIGBY_VERIFY)
+        return 4;
+    result.count = 0;
+    result.fail_extraction = 0;
+    if (digby_execute(&plan, observe, &result, NULL) || result.count != 4 ||
+        result.seen[3] != DIGBY_PUBLISH)
+        return 5;
     plan = digby_lifecycle_plan(DIGBY_ROLLBACK);
     result.count = 0;
     if (digby_execute(&plan, observe, &result, NULL) ||
         result.count != 1 || result.seen[0] != DIGBY_ACTIVATE)
-        return 4;
+        return 6;
     plan = digby_lifecycle_plan(DIGBY_UNINSTALL);
     result.count = 0;
     return digby_execute(&plan, observe, &result, NULL) ||
-           result.count != 1 || result.seen[0] != DIGBY_REMOVE ? 5 : 0;
+           result.count != 1 || result.seen[0] != DIGBY_REMOVE ? 7 : 0;
 }

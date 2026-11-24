@@ -1,6 +1,31 @@
 #include "install_windows.h"
-#include <stdbool.h>
+#include "source_windows.h"
 #include <stdio.h>
+
+int brw_report_plan(bool json, bool preview, const char *status,
+                    const struct digby_plan *plan, const char *error, size_t step)
+{
+    if (json) {
+        printf("{\"status\":\"%s\",\"operations\":[",
+               error ? "failed" : preview ? "planned" : status);
+        for (size_t i = 0; i < plan->count; ++i)
+            printf("%s\"%s\"", i ? "," : "", digby_operation_name(plan->steps[i]));
+        putchar(']');
+        if (preview && plan->steps[0] == DIGBY_DOWNLOAD)
+            fputs(",\"pending\":[\"payload-availability\",\"sha256-verification\"]", stdout);
+        if (error)
+            printf(",\"error\":\"%s\",\"step\":%zu", error, step);
+        puts("}");
+    } else if (error) {
+        fprintf(stderr, "brw: %s\n", error);
+    } else {
+        for (size_t i = 0; i < plan->count; ++i)
+            puts(digby_operation_name(plan->steps[i]));
+        if (preview && plan->steps[0] == DIGBY_DOWNLOAD)
+            puts("Pending checks include payload availability and SHA-256 verification.");
+    }
+    return error ? 1 : 0;
+}
 
 int wmain(int argc, wchar_t **argv)
 {
@@ -25,8 +50,6 @@ int wmain(int argc, wchar_t **argv)
     while (command < sizeof commands / sizeof *commands &&
            wcscmp(argv[1], commands[command].verb))
         ++command;
-    if (command == sizeof commands / sizeof *commands)
-        goto usage;
     for (int i = 2; i < argc; ++i) {
         if (!wcscmp(argv[i], L"--json"))
             json = true;
@@ -37,7 +60,11 @@ int wmain(int argc, wchar_t **argv)
         else
             goto usage;
     }
-    if (count != commands[command].operands)
+    if (!wcscmp(argv[1], L"source") || !wcscmp(argv[1], L"search") ||
+        !wcscmp(argv[1], L"show") || !wcscmp(argv[1], L"list") ||
+        (!wcscmp(argv[1], L"install") && count == 1))
+        return brw_source_command(argv[1], count, args, json, preview);
+    if (command == sizeof commands / sizeof *commands || count != commands[command].operands)
         goto usage;
 
     const enum digby_action action = commands[command].action;
@@ -57,26 +84,16 @@ int wmain(int argc, wchar_t **argv)
     if (!error && !preview)
         error = brw_run_lifecycle(action, &package, &plan, &failed_step);
 
-    if (json) {
-        printf("{\"status\":\"%s\",\"operations\":[",
-               error ? "failed" : preview ? "planned" : commands[command].status);
-        for (size_t i = 0; i < plan.count; ++i)
-            printf("%s\"%s\"", i ? "," : "", digby_operation_name(plan.steps[i]));
-        printf("]");
-        if (error)
-            printf(",\"error\":\"%s\",\"step\":%zu", error, invalid ? 0 : failed_step + 1);
-        puts("}");
-    } else if (error) {
-        fprintf(stderr, "brw: %s\n", error);
-    } else {
-        for (size_t i = 0; i < plan.count; ++i)
-            puts(digby_operation_name(plan.steps[i]));
-    }
-    return invalid ? 2 : error ? 1 : 0;
+    int result = brw_report_plan(json, preview, commands[command].status,
+                                 &plan, error, invalid ? 0 : failed_step + 1);
+    return invalid ? 2 : result;
 
 usage:
     fputs("usage: brw install|update NAME VERSION ARCHIVE SHA256 ENTRY [--dry-run] [--json]\n"
           "       brw rollback NAME VERSION [--dry-run] [--json]\n"
+          "       brw source add NAME CATALOG | source remove NAME | source list\n"
+          "       brw search [QUERY] | show [SOURCE/]NAME | list\n"
+          "       brw install [SOURCE/]NAME [--dry-run] [--json]\n"
           "       brw uninstall NAME [--dry-run] [--json]\n", stderr);
     return 2;
 }

@@ -36,6 +36,8 @@ scoop install coh1e/burrow
 
 依赖、构建产物、测试数据和临时文件都在项目内的 `.local/`。测试通过 `scripts/build.ps1` 或 `ctest` 运行，不要直接调用 `tests/*.ps1`。
 
+新的 brw CLI 通过 Digby 执行原生包操作。构建、包源格式与用法见 [brw 原生包源](brw/README.md)。
+
 ## 常用命令
 
 ```powershell

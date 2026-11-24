@@ -8,15 +8,19 @@
 #include <share.h>
 #include <string.h>
 #include "install_windows.h"
+#include "source_windows.h"
 #include "shim_image.h"
 #include "shim_windows.h"
 
-enum { PATH_CAP = BRW_PATH_CAP, NAME_CAP = 128 };
+enum { PATH_CAP = BRW_PATH_CAP, NAME_CAP = 128, ENTRY_CAP = MAX_PATH, ARCHIVE_DEPTH = 16 };
 
 struct installation {
     const struct local_package *package;
     enum digby_action action;
     FILE *archive;
+    bool source;
+    bool executable;
+    wchar_t download_stage[PATH_CAP];
     HANDLE lock;
     wchar_t packages[PATH_CAP];
     wchar_t package_dir[PATH_CAP];
@@ -26,7 +30,7 @@ struct installation {
     wchar_t sidecar[PATH_CAP];
     wchar_t stage[PATH_CAP];
     wchar_t active_version[NAME_CAP];
-    wchar_t active_entry[NAME_CAP];
+    wchar_t active_entry[ENTRY_CAP];
     wchar_t shim_hash[65];
 };
 
@@ -40,8 +44,8 @@ static bool join(wchar_t path[PATH_CAP], const wchar_t *base, const wchar_t *nam
     return true;
 }
 
-/* This slice accepts flat ASCII package filenames and Windows executables. */
-static bool component(const wchar_t *name)
+/* Package path components use ASCII names and exclude Windows device names. */
+bool brw_package_component(const wchar_t *name)
 {
     size_t length = wcslen(name);
     if (!length || length >= NAME_CAP || *name == L'.' || name[length - 1] == L'.')
@@ -60,12 +64,37 @@ static bool component(const wchar_t *name)
              (!_wcsnicmp(name, L"com", 3) || !_wcsnicmp(name, L"lpt", 3)));
 }
 
-const char *brw_validate_package(const struct local_package *package)
+/* Canonical paths use forward slashes and have no empty or special components. */
+static bool relative_path(const wchar_t *path)
 {
-    if (!component(package->name) || !component(package->version) || !component(package->entry))
+    if (!*path || wcslen(path) >= ENTRY_CAP)
+        return false;
+    unsigned depth = 0;
+    for (const wchar_t *part = path; *part;) {
+        wchar_t component[NAME_CAP];
+        size_t length = wcscspn(part, L"/");
+        if (!length || length >= NAME_CAP || ++depth > ARCHIVE_DEPTH)
+            return false;
+        wmemcpy(component, part, length);
+        component[length] = 0;
+        if (!brw_package_component(component))
+            return false;
+        if (!part[length])
+            return true;
+        part += length + 1;
+    }
+    return false;
+}
+
+static const char *validate_package(const struct local_package *package, bool nested)
+{
+    if (!brw_package_component(package->name) || !brw_package_component(package->version) ||
+        !(nested ? relative_path(package->entry) : brw_package_component(package->entry)))
         return "invalid-package";
-    size_t length = wcslen(package->entry);
-    if (length <= 4 || _wcsicmp(package->entry + length - 4, L".exe"))
+    const wchar_t *filename = wcsrchr(package->entry, L'/');
+    filename = filename ? filename + 1 : package->entry;
+    size_t length = wcslen(filename);
+    if (length <= 4 || _wcsicmp(filename + length - 4, L".exe"))
         return "invalid-entry";
     if (!*package->archive || wcslen(package->digest) != 64)
         return "invalid-input";
@@ -76,13 +105,39 @@ const char *brw_validate_package(const struct local_package *package)
     return NULL;
 }
 
+const char *brw_validate_package(const struct local_package *package)
+{
+    return validate_package(package, false);
+}
+
+const char *brw_validate_source_package(const struct local_package *package, bool executable)
+{
+    return validate_package(package, !executable);
+}
+
 const char *brw_validate_lifecycle(enum digby_action action, const struct local_package *package)
 {
     if (action == DIGBY_INSTALL || action == DIGBY_UPDATE)
         return brw_validate_package(package);
-    if (!component(package->name) || (action == DIGBY_ROLLBACK && !component(package->version)))
+    if (!brw_package_component(package->name) || (action == DIGBY_ROLLBACK && !brw_package_component(package->version)))
         return "invalid-package";
     return NULL;
+}
+
+enum { RUNNING, CANCELLED, PUBLISHING };
+static volatile LONG publish_state;
+
+bool brw_cancelled(void)
+{
+    return InterlockedCompareExchange(&publish_state, RUNNING, RUNNING) == CANCELLED;
+}
+
+static BOOL WINAPI cancel_install(DWORD event)
+{
+    if (event != CTRL_C_EVENT && event != CTRL_BREAK_EVENT)
+        return FALSE;
+    InterlockedCompareExchange(&publish_state, CANCELLED, RUNNING);
+    return TRUE;
 }
 
 static bool hash_contents(FILE *file, const unsigned char *image, DWORD length, wchar_t hex[65])
@@ -98,7 +153,7 @@ static bool hash_contents(FILE *file, const unsigned char *image, DWORD length, 
     if (file) {
         size_t count;
         while ((count = fread(bytes, 1, sizeof bytes, file)) != 0) {
-            if (BCryptHashData(hash, bytes, (ULONG)count, 0) < 0)
+            if (brw_cancelled() || BCryptHashData(hash, bytes, (ULONG)count, 0) < 0)
                 goto done;
         }
         if (ferror(file))
@@ -125,13 +180,14 @@ done:
 
 static const char *verify(struct installation *install)
 {
-    install->archive = _wfsopen(install->package->archive, L"rb", _SH_DENYWR);
+    if (!install->archive)
+        install->archive = _wfsopen(install->package->archive, L"rb", _SH_DENYWR);
     if (!install->archive)
         return "archive-open";
     wchar_t digest[65];
     if (!hash_contents(install->archive, NULL, 0, digest) ||
         fseek(install->archive, 0, SEEK_SET) != 0)
-        return "digest-read";
+        return brw_cancelled() ? "cancelled" : "digest-read";
     return _wcsicmp(install->package->digest, digest) ? "digest-mismatch" : NULL;
 }
 
@@ -143,7 +199,7 @@ static bool directory(const wchar_t *path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-static bool roots(struct installation *install)
+static bool package_roots(struct installation *install, bool create)
 {
     wchar_t profile[PATH_CAP];
     DWORD count = GetEnvironmentVariableW(L"USERPROFILE", profile, PATH_CAP);
@@ -151,21 +207,25 @@ static bool roots(struct installation *install)
         (profile[2] != L'\\' && profile[2] != L'/'))
         return false;
     wchar_t local[PATH_CAP], share[PATH_CAP], data[PATH_CAP];
-    wchar_t alias[NAME_CAP + 12];
-    swprintf(alias, NAME_CAP + 12, L"%ls.exe", install->package->name);
     if (!join(local, profile, L".local") || !join(share, local, L"share") ||
         !join(data, share, L"burrow") || !join(install->packages, data, L"packages") ||
-        !join(install->package_dir, install->packages, install->package->name) ||
+        !join(install->bin, local, L"bin"))
+        return false;
+    return !create || (directory(local) && directory(share) && directory(data) &&
+                       directory(install->packages));
+}
+
+static bool package_paths(struct installation *install)
+{
+    wchar_t alias[NAME_CAP + 12];
+    swprintf(alias, NAME_CAP + 12, L"%ls.exe", install->package->name);
+    if (!join(install->package_dir, install->packages, install->package->name) ||
         (install->package->version &&
          !join(install->version, install->package_dir, install->package->version)) ||
-        !join(install->bin, local, L"bin") || !join(install->shim, install->bin, alias))
+        !join(install->shim, install->bin, alias))
         return false;
     wcscpy(install->sidecar, install->shim);
-    if (!brw_append_shim_suffix(install->sidecar, wcslen(install->shim)))
-        return false;
-    return install->action != DIGBY_INSTALL ||
-           (directory(local) && directory(share) && directory(data) &&
-            directory(install->packages));
+    return brw_append_shim_suffix(install->sidecar, wcslen(install->shim));
 }
 
 static bool stage_directory(const wchar_t *base, wchar_t stage[PATH_CAP])
@@ -185,12 +245,44 @@ static bool stage_directory(const wchar_t *base, wchar_t stage[PATH_CAP])
     return false;
 }
 
+static const char *download(struct installation *install)
+{
+    wchar_t temp[PATH_CAP], destination[PATH_CAP];
+    DWORD length = GetTempPathW(PATH_CAP, temp);
+    if (!length || length >= PATH_CAP ||
+        !stage_directory(temp, install->download_stage) ||
+        !join(destination, install->download_stage, L"download"))
+        return "download-stage";
+    install->archive = _wfsopen(destination, L"w+b", _SH_DENYWR);
+    if (!install->archive)
+        return "download-stage";
+    if (setvbuf(install->archive, NULL, _IONBF, 0))
+        return "download-stage";
+    return brw_download(install->package->archive, install->archive);
+}
+
 static bool ordinary_path(const wchar_t *path, bool expect_directory)
 {
     DWORD attributes = GetFileAttributesW(path);
     return attributes != INVALID_FILE_ATTRIBUTES &&
            !(attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
            !!(attributes & FILE_ATTRIBUTE_DIRECTORY) == expect_directory;
+}
+
+static bool ordinary_payload(const wchar_t *version, const wchar_t *entry)
+{
+    wchar_t path[PATH_CAP];
+    if (!relative_path(entry) || !join(path, version, entry))
+        return false;
+    for (wchar_t *slash = wcschr(path + wcslen(version) + 1, L'/'); slash;
+         slash = wcschr(slash + 1, L'/')) {
+        *slash = 0;
+        bool ordinary = ordinary_path(path, true);
+        *slash = L'/';
+        if (!ordinary)
+            return false;
+    }
+    return ordinary_path(path, false);
 }
 
 static bool read_record(const wchar_t *path, wchar_t *value, size_t capacity)
@@ -229,9 +321,12 @@ static bool owned_shim(struct installation *install, const wchar_t *version)
     return !wcscmp(install->shim_hash, expected);
 }
 
+static const char *read_active(struct installation *install);
+
 static const char *prepare(struct installation *install)
 {
-    if (!roots(install))
+    if (!package_roots(install, false) || !package_paths(install) ||
+        (install->action == DIGBY_INSTALL && !package_roots(install, true)))
         return "install-directory";
     if (!ordinary_path(install->packages, true))
         return install->action == DIGBY_INSTALL ? "install-directory" : "not-installed";
@@ -249,6 +344,11 @@ static const char *prepare(struct installation *install)
     if (install->action == DIGBY_INSTALL)
         return NULL;
 
+    return read_active(install);
+}
+
+static const char *read_active(struct installation *install)
+{
     wchar_t target[PATH_CAP];
     if (!ordinary_path(install->bin, true) || !read_record(install->sidecar, target, PATH_CAP))
         return "entry-conflict";
@@ -257,39 +357,76 @@ static const char *prepare(struct installation *install)
         return "entry-conflict";
     const wchar_t *relative = target + prefix + 1;
     const wchar_t *separator = wcschr(relative, L'\\');
-    if (!separator || (size_t)(separator - relative) >= NAME_CAP || !component(separator + 1))
+    if (!separator || (size_t)(separator - relative) >= NAME_CAP || !relative_path(separator + 1))
         return "entry-conflict";
     size_t length = (size_t)(separator - relative);
     wmemcpy(install->active_version, relative, length);
     install->active_version[length] = 0;
     wchar_t version[PATH_CAP];
-    if (!component(install->active_version) ||
+    if (!brw_package_component(install->active_version) ||
         !join(version, install->package_dir, install->active_version) ||
-        !ordinary_path(version, true) || !ordinary_path(target, false) || !owned_shim(install, version))
+        !ordinary_path(version, true) || !ordinary_payload(version, separator + 1) ||
+        !owned_shim(install, version))
         return "entry-conflict";
     wcscpy(install->active_entry, separator + 1);
-    wchar_t record[PATH_CAP], recorded_entry[NAME_CAP];
+    wchar_t record[PATH_CAP], recorded_entry[ENTRY_CAP];
     if (!join(record, version, L".brw-entry"))
         return "entry-conflict";
     if (GetFileAttributesW(record) != INVALID_FILE_ATTRIBUTES &&
-        (!read_record(record, recorded_entry, NAME_CAP) ||
+        (!read_record(record, recorded_entry, ENTRY_CAP) ||
          wcscmp(install->active_entry, recorded_entry)))
         return "entry-conflict";
     return NULL;
 }
 
-static bool archive_name(const char *input, wchar_t name[NAME_CAP])
+/* Allow the conventional ./ prefix in source archives. Use canonical names in the inventory. */
+static bool archive_path(const char *input, bool folder, bool source, wchar_t path[ENTRY_CAP])
 {
     if (!input)
         return false;
-    size_t i = 0;
-    for (; input[i]; ++i) {
-        if (i == NAME_CAP - 1 || (unsigned char)input[i] > 127)
-            return false;
-        name[i] = (unsigned char)input[i];
+    if (source) {
+        while (input[0] == '.' && input[1] == '/')
+            input += 2;
+        if (folder && (!*input || !strcmp(input, "."))) {
+            path[0] = 0;
+            return true;
+        }
     }
-    name[i] = 0;
-    return component(name);
+    size_t length = strlen(input);
+    if (folder && length && input[length - 1] == '/')
+        --length;
+    if (!length || length >= ENTRY_CAP)
+        return false;
+    for (size_t i = 0; i < length; ++i) {
+        if ((unsigned char)input[i] > 127)
+            return false;
+        path[i] = (unsigned char)input[i];
+    }
+    path[length] = 0;
+    return source ? relative_path(path) : brw_package_component(path);
+}
+
+static const char *stage_folder(const wchar_t *stage, const wchar_t *relative, FILE *inventory)
+{
+    wchar_t path[PATH_CAP];
+    if (!join(path, stage, relative))
+        return "archive-path";
+    if (!CreateDirectoryW(path, NULL))
+        return ordinary_path(path, true) ? NULL : "archive-output";
+    return fprintf(inventory, "%ls/\n", relative) < 0 ? "version-record" : NULL;
+}
+
+/* Only newly created directories go into the inventory, including implicit parents. */
+static const char *stage_parents(const wchar_t *stage, wchar_t *relative, FILE *inventory)
+{
+    for (wchar_t *slash = wcschr(relative, L'/'); slash; slash = wcschr(slash + 1, L'/')) {
+        *slash = 0;
+        const char *error = stage_folder(stage, relative, inventory);
+        *slash = L'/';
+        if (error)
+            return error;
+    }
+    return NULL;
 }
 
 static const char *extract_file(struct archive *reader, const wchar_t *path)
@@ -302,14 +439,40 @@ static const char *extract_file(struct archive *reader, const wchar_t *path)
     bool written = true;
     while ((count = archive_read_data(reader, buffer, sizeof buffer)) > 0) {
         DWORD size;
-        if (!WriteFile(file, buffer, (DWORD)count, &size, NULL) || size != (DWORD)count) {
+        if (brw_cancelled() || !WriteFile(file, buffer, (DWORD)count, &size, NULL) || size != (DWORD)count) {
             written = false;
             break;
         }
     }
     if (!CloseHandle(file))
         written = false;
-    return written && count == 0 ? NULL : "archive-data";
+    return brw_cancelled() ? "cancelled" : written && count == 0 ? NULL : "archive-data";
+}
+
+static const char *stage_executable(struct installation *install, FILE *inventory)
+{
+    wchar_t path[PATH_CAP];
+    if (!join(path, install->stage, install->package->entry))
+        return "archive-path";
+    FILE *output = _wfsopen(path, L"wb", _SH_DENYWR);
+    if (!output)
+        return "archive-output";
+    char bytes[8192];
+    size_t count;
+    bool written = true;
+    while (!brw_cancelled() && (count = fread(bytes, 1, sizeof bytes, install->archive)) != 0) {
+        if (fwrite(bytes, 1, count, output) != count) {
+            written = false;
+            break;
+        }
+    }
+    if (fclose(output))
+        written = false;
+    if (brw_cancelled())
+        return "cancelled";
+    if (!written || ferror(install->archive))
+        return "archive-data";
+    return fprintf(inventory, "%ls\n", install->package->entry) < 0 ? "version-record" : NULL;
 }
 
 static const char *extract(struct installation *install)
@@ -330,6 +493,10 @@ static const char *extract(struct installation *install)
     FILE *files = _wfopen(inventory, L"wb");
     if (!files)
         return "version-record";
+    if (install->executable) {
+        const char *error = stage_executable(install, files);
+        return fclose(files) && !error ? "version-record" : error;
+    }
     struct archive *reader = archive_read_new();
     if (!reader) {
         fclose(files);
@@ -338,22 +505,42 @@ static const char *extract(struct installation *install)
     const char *error = "archive-open";
     bool found_entry = false;
     if (archive_read_support_format_tar(reader) == ARCHIVE_OK &&
+        (!install->source || (archive_read_support_format_zip(reader) == ARCHIVE_OK &&
+                              archive_read_support_filter_gzip(reader) == ARCHIVE_OK)) &&
         archive_read_open_FILE(reader, install->archive) == ARCHIVE_OK) {
         struct archive_entry *entry;
         int status;
         error = NULL;
         while ((status = archive_read_next_header(reader, &entry)) == ARCHIVE_OK) {
-            wchar_t name[NAME_CAP], path[PATH_CAP];
-            if (!archive_name(archive_entry_pathname(entry), name) ||
-                archive_entry_filetype(entry) != AE_IFREG || archive_entry_hardlink(entry) ||
-                archive_entry_symlink(entry) || !join(path, install->stage, name)) {
+            wchar_t name[ENTRY_CAP], path[PATH_CAP];
+            bool folder = archive_entry_filetype(entry) == AE_IFDIR;
+            if (brw_cancelled()) {
+                error = "cancelled";
+                break;
+            }
+            if ((!install->source && folder) ||
+                (!folder && archive_entry_filetype(entry) != AE_IFREG) ||
+                archive_entry_hardlink(entry) || archive_entry_symlink(entry) ||
+                !archive_path(archive_entry_pathname(entry), folder, install->source, name) ||
+                !join(path, install->stage, name)) {
                 error = "archive-path";
                 break;
+            }
+            if (!*name)
+                continue;
+            error = stage_parents(install->stage, name, files);
+            if (error)
+                break;
+            if (folder) {
+                error = stage_folder(install->stage, name, files);
+                if (error)
+                    break;
+                continue;
             }
             error = extract_file(reader, path);
             if (error)
                 break;
-            if (fprintf(files, "%s\n", archive_entry_pathname(entry)) < 0) {
+            if (fprintf(files, "%ls\n", name) < 0) {
                 error = "version-record";
                 break;
             }
@@ -371,22 +558,49 @@ static const char *extract(struct installation *install)
     return error;
 }
 
-static bool remove_stage(const wchar_t *stage)
+static bool dots(const wchar_t *name)
+{
+    return !wcscmp(name, L".") || !wcscmp(name, L"..");
+}
+
+static bool remove_tree(const wchar_t *stage, unsigned depth)
 {
     wchar_t path[PATH_CAP];
-    if (!join(path, stage, L"*"))
+    if (depth > ARCHIVE_DEPTH || !ordinary_path(stage, true) || !join(path, stage, L"*"))
         return false;
+    bool removed = true;
     WIN32_FIND_DATAW entry;
     HANDLE search = FindFirstFileW(path, &entry);
     if (search != INVALID_HANDLE_VALUE) {
         do {
-            if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                join(path, stage, entry.cFileName))
-                DeleteFileW(path);
+            if (dots(entry.cFileName))
+                continue;
+            if (!join(path, stage, entry.cFileName)) {
+                removed = false;
+                continue;
+            }
+            if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                if (!DeleteFileW(path))
+                    removed = false;
+            } else if (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                if (!RemoveDirectoryW(path))
+                    removed = false;
+            } else if (!remove_tree(path, depth + 1)) {
+                removed = false;
+            }
         } while (FindNextFileW(search, &entry));
+        if (GetLastError() != ERROR_NO_MORE_FILES)
+            removed = false;
         FindClose(search);
+    } else if (GetLastError() != ERROR_FILE_NOT_FOUND) {
+        removed = false;
     }
-    return RemoveDirectoryW(stage) != 0;
+    return removed && RemoveDirectoryW(stage);
+}
+
+static bool remove_stage(const wchar_t *stage)
+{
+    return remove_tree(stage, 0);
 }
 
 /* Create a complete file under a staging name before making it visible. */
@@ -419,21 +633,24 @@ static bool write_record(const wchar_t *directory, const wchar_t *path,
 }
 
 static bool version_entry(const struct installation *install, const wchar_t *version,
-                          wchar_t entry[NAME_CAP])
+                          wchar_t entry[ENTRY_CAP])
 {
-    wchar_t directory[PATH_CAP], record[PATH_CAP], target[PATH_CAP];
+    wchar_t directory[PATH_CAP], record[PATH_CAP];
     if (!join(directory, install->package_dir, version) || !ordinary_path(directory, true) ||
         !join(record, directory, L".brw-entry"))
         return false;
-    if (!read_record(record, entry, NAME_CAP)) {
+    if (!read_record(record, entry, ENTRY_CAP)) {
         if (GetFileAttributesW(record) != INVALID_FILE_ATTRIBUTES ||
             wcscmp(version, install->active_version))
             return false;
         /* The original installer recorded its entry only in the active sidecar. */
         wcscpy(entry, install->active_entry);
     }
-    return component(entry) && join(target, directory, entry) && ordinary_path(target, false);
+    return ordinary_payload(directory, entry);
 }
+
+static bool owned_version(const wchar_t *directory, const wchar_t *entry,
+                          const wchar_t *detached);
 
 static const char *publish(struct installation *install)
 {
@@ -449,7 +666,7 @@ static const char *publish(struct installation *install)
         !write_record(install->stage, record, install->shim_hash, false))
         return "version-record";
     if (update) {
-        wchar_t directory[PATH_CAP], entry[NAME_CAP];
+        wchar_t directory[PATH_CAP], entry[ENTRY_CAP];
         if (!version_entry(install, install->active_version, entry) ||
             wcscmp(entry, install->active_entry) ||
             !join(directory, install->package_dir, install->active_version) ||
@@ -463,6 +680,10 @@ static const char *publish(struct installation *install)
              !write_record(directory, record, install->shim_hash, false)))
             return "version-record";
     }
+    /* Cancellation and publication compete for the same transition. */
+    if (install->source &&
+        InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
+        return "cancelled";
     if (!MoveFileW(install->stage, install->version))
         return "publish-version";
     install->stage[0] = 0;
@@ -472,7 +693,8 @@ static const char *publish(struct installation *install)
         if (!DeleteFileW(install->sidecar))
             return "entry-cleanup";
     }
-    return remove_stage(install->version) ? "publish-entry" : "version-cleanup";
+    return owned_version(install->version, install->package->entry, install->version) &&
+           remove_stage(install->version) ? "publish-entry" : "version-cleanup";
 }
 
 static const char *activate(struct installation *install)
@@ -480,91 +702,96 @@ static const char *activate(struct installation *install)
     const char *error = prepare(install);
     if (error)
         return error;
-    wchar_t entry[NAME_CAP], target[PATH_CAP];
+    wchar_t entry[ENTRY_CAP], target[PATH_CAP];
     if (!version_entry(install, install->package->version, entry) ||
         !join(target, install->version, entry))
         return "version-not-installed";
     return write_record(install->bin, install->sidecar, target, true) ? NULL : "publish-entry";
 }
 
-static bool dots(const wchar_t *name)
+static bool listed_path(FILE *files, const wchar_t *name, bool folder)
 {
-    return !wcscmp(name, L".") || !wcscmp(name, L"..");
-}
-
-static bool listed_file(FILE *files, const wchar_t *name)
-{
-    char line[NAME_CAP + 1];
+    char line[ENTRY_CAP + 2];
     rewind(files);
     while (fgets(line, sizeof line, files)) {
         char *end = strchr(line, '\n');
-        wchar_t listed[NAME_CAP];
-        if (!end)
+        wchar_t listed[ENTRY_CAP];
+        if (!end || end == line)
             return false;
-        *end = '\0';
-        if (!archive_name(line, listed))
+        *end = 0;
+        bool listed_folder = end[-1] == '/';
+        if (!archive_path(line, listed_folder, true, listed) || !*listed)
             return false;
-        if (!wcscmp(name, listed))
+        if (folder == listed_folder && !_wcsicmp(name, listed))
             return true;
     }
     return false;
 }
 
-static bool removable_file(const wchar_t *directory, const wchar_t *name)
+static bool removable(const wchar_t *path, bool folder)
 {
-    wchar_t path[PATH_CAP];
-    if (!join(path, directory, name))
-        return false;
+    DWORD flags = FILE_FLAG_OPEN_REPARSE_POINT | (folder ? FILE_FLAG_BACKUP_SEMANTICS : 0);
     HANDLE file = CreateFileW(path, DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                              NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-    if (file == INVALID_HANDLE_VALUE)
-        return false;
-    return CloseHandle(file) != 0;
+                              NULL, OPEN_EXISTING, flags, NULL);
+    return file != INVALID_HANDLE_VALUE && CloseHandle(file);
 }
 
-static bool flat_version(const wchar_t *directory, const wchar_t *entry,
-                         const wchar_t *detached)
+static bool owned_tree(const wchar_t *directory, const wchar_t *relative, const wchar_t *entry,
+                       const wchar_t *detached, FILE *files, unsigned depth)
 {
-    wchar_t pattern[PATH_CAP], inventory[PATH_CAP];
-    if (!join(pattern, directory, L"*") || !join(inventory, directory, L".brw-files"))
+    wchar_t pattern[PATH_CAP];
+    if (depth > ARCHIVE_DEPTH || !join(pattern, directory, L"*"))
         return false;
-    DWORD attributes = GetFileAttributesW(inventory);
-    FILE *files = NULL;
-    if (attributes != INVALID_FILE_ATTRIBUTES) {
-        if (!ordinary_path(inventory, false) || !(files = _wfsopen(inventory, L"rb", _SH_DENYNO)))
-            return false;
-    }
     WIN32_FIND_DATAW file;
     HANDLE search = FindFirstFileW(pattern, &file);
-    if (search == INVALID_HANDLE_VALUE) {
-        if (files)
-            fclose(files);
-        return false;
-    }
-    bool flat = true;
+    if (search == INVALID_HANDLE_VALUE)
+        return GetLastError() == ERROR_FILE_NOT_FOUND;
+    bool owned = true;
     do {
         if (dots(file.cFileName))
             continue;
-        bool metadata = !wcscmp(file.cFileName, L".brw-entry") ||
-                        !wcscmp(file.cFileName, L".brw-shim") ||
-                        !wcscmp(file.cFileName, L".brw-files");
-        if (wcslen(detached) + wcslen(file.cFileName) + 1 >= MAX_PATH ||
-            (file.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT |
-                                     FILE_ATTRIBUTE_READONLY)) ||
-            (!metadata && (files ? !listed_file(files, file.cFileName)
-                                 : wcscmp(file.cFileName, entry) != 0)) ||
-            (wcscmp(file.cFileName, L".brw-files") &&
-             !removable_file(directory, file.cFileName))) {
-            flat = false;
+        bool folder = (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        bool root = !*relative;
+        bool inventory = root && !wcscmp(file.cFileName, L".brw-files");
+        bool metadata = !folder && (inventory || (root && (!wcscmp(file.cFileName, L".brw-entry") ||
+                                                         !wcscmp(file.cFileName, L".brw-shim"))));
+        wchar_t name[ENTRY_CAP], path[PATH_CAP];
+        if (wcslen(relative) + wcslen(file.cFileName) + 2 > ENTRY_CAP) {
+            owned = false;
+            break;
+        }
+        swprintf(name, ENTRY_CAP, L"%ls%ls%ls", relative, root ? L"" : L"/", file.cFileName);
+        if (wcslen(detached) + wcslen(name) + 1 >= MAX_PATH ||
+            (file.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_READONLY)) ||
+            (!metadata && (files ? !listed_path(files, name, folder)
+                                 : folder || wcscmp(name, entry) != 0)) ||
+            !join(path, directory, file.cFileName) ||
+            (!inventory && !removable(path, folder)) ||
+            (folder && !owned_tree(path, name, entry, detached, files, depth + 1))) {
+            owned = false;
             break;
         }
     } while (FindNextFileW(search, &file));
-    flat = flat && GetLastError() == ERROR_NO_MORE_FILES;
+    owned = owned && GetLastError() == ERROR_NO_MORE_FILES;
     FindClose(search);
+    return owned;
+}
+
+static bool owned_version(const wchar_t *directory, const wchar_t *entry,
+                          const wchar_t *detached)
+{
+    wchar_t inventory[PATH_CAP];
+    if (!join(inventory, directory, L".brw-files"))
+        return false;
+    DWORD attributes = GetFileAttributesW(inventory);
+    FILE *files = NULL;
+    if (attributes != INVALID_FILE_ATTRIBUTES &&
+        (!ordinary_path(inventory, false) || !(files = _wfsopen(inventory, L"rb", _SH_DENYNO))))
+        return false;
+    bool owned = owned_tree(directory, L"", entry, detached, files, 0);
     if (files)
         fclose(files);
-    return flat && (attributes == INVALID_FILE_ATTRIBUTES ||
-                    removable_file(directory, L".brw-files"));
+    return owned && (attributes == INVALID_FILE_ATTRIBUTES || removable(inventory, false));
 }
 
 /* Check every version before changing the entry. Cleanup only touches detached payloads. */
@@ -582,12 +809,12 @@ static bool package_versions(struct installation *install, const wchar_t *direct
     do {
         if (dots(version.cFileName))
             continue;
-        wchar_t path[PATH_CAP], entry[NAME_CAP], destination[PATH_CAP];
-        if (!component(version.cFileName) || !join(path, directory, version.cFileName) ||
+        wchar_t path[PATH_CAP], entry[ENTRY_CAP], destination[PATH_CAP];
+        if (!brw_package_component(version.cFileName) || !join(path, directory, version.cFileName) ||
             !ordinary_path(path, true) ||
             (detached ? (!join(destination, detached, version.cFileName) ||
                          !version_entry(install, version.cFileName, entry) ||
-                         !flat_version(path, entry, destination)) : !remove_stage(path))) {
+                         !owned_version(path, entry, destination)) : !remove_stage(path))) {
             valid = false;
             break;
         }
@@ -645,7 +872,10 @@ done:
 static const char *run_step(void *context, enum digby_operation operation)
 {
     struct installation *install = context;
+    if (brw_cancelled())
+        return "cancelled";
     switch (operation) {
+    case DIGBY_DOWNLOAD: return download(install);
     case DIGBY_VERIFY: return verify(install);
     case DIGBY_EXTRACT: return extract(install);
     case DIGBY_PUBLISH: return publish(install);
@@ -661,18 +891,101 @@ const char *brw_install_package(const struct local_package *package,
     return brw_run_lifecycle(DIGBY_INSTALL, package, plan, failed_step);
 }
 
-const char *brw_run_lifecycle(enum digby_action action, const struct local_package *package,
-                             const struct digby_plan *plan, size_t *failed_step)
+static const char *run_lifecycle(enum digby_action action, const struct local_package *package,
+                                 const struct digby_plan *plan, size_t *failed_step,
+                                 bool source, bool executable)
 {
     struct installation install = {0};
     install.package = package;
     install.action = action;
+    install.source = source;
+    install.executable = executable;
+    if (failed_step)
+        *failed_step = 0;
+    if (source) {
+        InterlockedExchange(&publish_state, RUNNING);
+        if (!SetConsoleCtrlHandler(cancel_install, TRUE))
+            return "cancel-handler";
+    }
     const char *error = digby_execute(plan, run_step, &install, failed_step);
     if (install.archive)
         fclose(install.archive);
+    if (install.download_stage[0])
+        remove_stage(install.download_stage);
     if (install.stage[0])
         remove_stage(install.stage);
     if (install.lock && install.lock != INVALID_HANDLE_VALUE)
         CloseHandle(install.lock);
+    if (source)
+        SetConsoleCtrlHandler(cancel_install, FALSE);
     return error;
+}
+
+const char *brw_run_lifecycle(enum digby_action action, const struct local_package *package,
+                             const struct digby_plan *plan, size_t *failed_step)
+{
+    return run_lifecycle(action, package, plan, failed_step, false, false);
+}
+
+const char *brw_install_source_package(const struct local_package *package, bool executable,
+                                       const struct digby_plan *plan, size_t *failed_step)
+{
+    return run_lifecycle(DIGBY_INSTALL, package, plan, failed_step, true, executable);
+}
+
+int brw_list_installed(bool json)
+{
+    struct local_package package = {0};
+    struct installation install = {0};
+    install.package = &package;
+    wchar_t pattern[PATH_CAP];
+    const char *error = NULL;
+    if (!package_roots(&install, false) || !join(pattern, install.packages, L"*"))
+        error = "install-directory";
+
+    if (json)
+        fputs("{\"packages\":[", stdout);
+    bool comma = false;
+    if (!error) {
+        WIN32_FIND_DATAW data;
+        HANDLE search = FindFirstFileW(pattern, &data);
+        if (search != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                    (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+                    !brw_package_component(data.cFileName))
+                    continue;
+                package.name = data.cFileName;
+                if (!package_paths(&install) || read_active(&install))
+                    continue;
+                if (json) {
+                    printf("%s{\"name\":", comma ? "," : "");
+                    brw_json_string(package.name);
+                    fputs(",\"version\":", stdout);
+                    brw_json_string(install.active_version);
+                    putchar('}');
+                    comma = true;
+                } else {
+                    printf("%ls %ls\
+", package.name, install.active_version);
+                }
+            } while (FindNextFileW(search, &data));
+            if (GetLastError() != ERROR_NO_MORE_FILES)
+                error = "install-directory";
+            FindClose(search);
+        } else if (GetLastError() != ERROR_PATH_NOT_FOUND && GetLastError() != ERROR_FILE_NOT_FOUND) {
+            error = "install-directory";
+        }
+    }
+    if (json) {
+        if (error)
+            printf("],\"status\":\"failed\",\"error\":\"%s\",\"step\":0}\
+", error);
+        else
+            puts("],\"status\":\"ok\"}");
+    } else if (error) {
+        fprintf(stderr, "brw: %s\
+", error);
+    }
+    return error ? 1 : 0;
 }
