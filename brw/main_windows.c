@@ -62,6 +62,8 @@ int wmain(int argc, wchar_t **argv)
         else
             goto usage;
     }
+    if (!wcscmp(argv[1], L"recover") && !count)
+        return brw_recover(json, preview);
     if (!wcscmp(argv[1], L"init") && !count)
         return brw_init(json, preview);
     if (!wcscmp(argv[1], L"source") || !wcscmp(argv[1], L"search") ||
@@ -122,6 +124,7 @@ usage:
           "       brw search [QUERY] | show [SOURCE/]NAME | list\n"
           "       brw install [SOURCE/]NAME [--dry-run] [--json]\n"
           "       brw uninstall NAME [--dry-run] [--json]\n"
+          "       brw recover [--dry-run] [--json]\n"
           "       brw init [--dry-run] [--json]\n", stderr);
     return 2;
 }

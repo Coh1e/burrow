@@ -24,6 +24,7 @@ const char *brw_run_lifecycle(enum digby_action action, const struct local_packa
 bool brw_package_component(const wchar_t *name);
 const char *brw_validate_source_package(const struct local_package *package, bool executable);
 int brw_list_installed(bool json);
+int brw_recover(bool json, bool preview);
 enum { BRW_DEPENDENCIES_CAP = 1024, BRW_PACKAGE_NAME_CAP = 128 };
 /* Comma-separated package names. NULL and empty represent no dependencies. */
 bool brw_dependency_names(const wchar_t *names);

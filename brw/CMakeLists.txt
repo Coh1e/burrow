@@ -62,7 +62,7 @@ add_custom_command(OUTPUT "${shim_header}"
   DEPENDS brw_shim brw_gui_shim "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
   VERBATIM)
 
-add_executable(brw main_windows.c install_windows.c source_windows.c download_windows.c
+add_executable(brw main_windows.c install_windows.c evidence_windows.c source_windows.c download_windows.c
   paths_windows.c init_windows.c init_command_windows.c output_windows.c "${shim_header}")
 target_include_directories(brw PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
 target_compile_definitions(brw PRIVATE LIBARCHIVE_STATIC)
@@ -74,6 +74,7 @@ foreach(target brw brw_shim brw_gui_shim digby)
 endforeach()
 
 if(BUILD_TESTING)
+  target_compile_definitions(brw PRIVATE BRW_TEST_INTERRUPTS)
   find_program(POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
   add_executable(brw_test_payload test_payload.c)
   target_link_options(brw_test_payload PRIVATE -municode -static)
@@ -82,6 +83,11 @@ if(BUILD_TESTING)
   add_test(NAME brw_local_install
     COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
       -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-local-install.ps1" -Gui "$<TARGET_FILE:brw_test_gui>"
+      -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
+      -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME brw_recovery
+    COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-recovery.ps1"
       -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
       -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
   add_executable(brw_test_cancel test_cancel_windows.c)

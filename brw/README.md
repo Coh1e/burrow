@@ -59,4 +59,6 @@ Each absolute XDG override is a base directory. brw appends `burrow` to it. `BRW
 
 `brw init --dry-run --json` shows the selected paths and whether the entry directory would be appended to the user PATH. Run `brw init` to create the entry directory and add it to the current user's persistent PATH. Running it again keeps the existing entry. brw preserves existing PATH text and the registry value type, then notifies Windows when it changes the value. Existing shells keep their current environment.
 
-New versions have installation records in the state directory. The files used for version ownership, dependency protection, and shim launch stay with their existing version and command entry. Installations created with an earlier brw remain usable. Recovery of interrupted publication is tracked separately.
+New versions have installation records in the state directory. The files used for version ownership, dependency protection, and shim launch stay with their existing version and command entry. Installations created with an earlier brw remain usable.
+
+If installation, update or rollback stops during publication, run `brw recover --dry-run --json` with the original data, state and entry directories. Run `brw recover` to undo the interrupted publication. A first install returns to the uninstalled state. An update or rollback restores the previous command. Recovery can itself be interrupted and run again. A pending journal blocks package changes in that state directory. An ownership conflict leaves the transaction pending and preserves the changed object.

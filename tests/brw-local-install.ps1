@@ -302,3 +302,17 @@ Assert ($LASTEXITCODE -eq 43 -and $output -ceq 'two words') 'cmd host launch aft
 
 $unsafe = Invoke-Probe $alias '"hello%PATH%"'
 Assert ($unsafe.Code -eq 126 -and $unsafe.err -match 'cannot safely forward' -and !$unsafe.out) 'Unsafe batch argument lacked a diagnostic'
+
+# Simulate an abrupt exit after publishing the new version, before changing its entry.
+$env:BRW_TEST_INTERRUPT = 'version'
+try {
+    $null = & $Brw update test-cmd 3 $archive $sha payload.exe --json
+    Assert ($LASTEXITCODE -eq 86) 'Publication did not stop at the version boundary'
+} finally { Remove-Item Env:BRW_TEST_INTERRUPT }
+foreach ($pass in 1..2) {
+    $result = & $Brw recover --json | ConvertFrom-Json
+    Assert ($LASTEXITCODE -eq 0) 'Version recovery failed'
+    Assert (!(Test-Path -LiteralPath (Join-Path $root '.local/share/burrow/packages/test-cmd/3'))) 'Interrupted version still installed'
+    $output = & $alias 'two words'
+    Assert ($LASTEXITCODE -eq 43 -and $output -ceq 'two words') 'Recovery lost the previous command'
+}
