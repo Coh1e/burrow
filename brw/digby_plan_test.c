@@ -49,6 +49,24 @@ int main(void)
         return 6;
     plan = digby_lifecycle_plan(DIGBY_UNINSTALL);
     result.count = 0;
-    return digby_execute(&plan, observe, &result, NULL) ||
-           result.count != 1 || result.seen[0] != DIGBY_REMOVE ? 7 : 0;
+    if (digby_execute(&plan, observe, &result, NULL) ||
+        result.count != 1 || result.seen[0] != DIGBY_REMOVE) return 7;
+
+    struct digby_setting setting = {SETTING_REGISTRY, DIGBY_REGISTRY_WRITE, SETTING_STRING,
+                                    L"key", L"name", L"new", NULL, true};
+    error = digby_plan_setting(&setting, DIGBY_CAP_SESSION_ENV, &plan);
+    if (!error || strcmp(error, "missing-capability") || plan.count) return 8;
+    if (digby_plan_setting(&setting, DIGBY_CAP_REGISTRY, &plan) ||
+        plan.count != 1 || plan.steps[0] != DIGBY_REGISTRY_WRITE) return 9;
+    setting.expect_missing = false;
+    error = digby_plan_setting(&setting, DIGBY_CAP_REGISTRY, &plan);
+    if (!error || strcmp(error, "invalid-precondition") || plan.count) return 10;
+    setting.scope = SETTING_SESSION;
+    setting.key = NULL;
+    setting.op = DIGBY_ENV_SET;
+    if (digby_plan_setting(&setting, DIGBY_CAP_SESSION_ENV, &plan) ||
+        plan.count != 1 || plan.steps[0] != DIGBY_ENV_SET) return 11;
+    setting.scope = SETTING_USER;
+    error = digby_plan_setting(&setting, DIGBY_CAP_SESSION_ENV, &plan);
+    return !error || strcmp(error, "missing-capability") || plan.count ? 12 : 0;
 }

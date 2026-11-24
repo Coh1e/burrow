@@ -63,13 +63,14 @@ add_custom_command(OUTPUT "${shim_header}"
   VERBATIM)
 
 add_library(brw_common OBJECT main_windows.c cleanup_windows.c evidence_windows.c source_windows.c
-  download_windows.c paths_windows.c init_windows.c init_command_windows.c output_windows.c "${shim_header}")
+  download_windows.c paths_windows.c init_windows.c init_command_windows.c settings_command_windows.c
+  output_windows.c "${shim_header}")
 function(add_brw_cli target)
-  add_executable(${target} install_windows.c $<TARGET_OBJECTS:brw_common>)
+  add_executable(${target} install_windows.c settings_windows.c $<TARGET_OBJECTS:brw_common>)
   add_dependencies(${target} brw_common)
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
   target_compile_definitions(${target} PRIVATE LIBARCHIVE_STATIC)
-  target_link_libraries(${target} PRIVATE digby archive_static bcrypt winhttp advapi32 user32 shell32)
+  target_link_libraries(${target} PRIVATE digby archive_static bcrypt winhttp advapi32 user32 shell32 ktmw32)
   target_link_options(${target} PRIVATE -municode -static)
   set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -84,6 +85,10 @@ if(BUILD_TESTING)
   add_brw_cli(brw_test_interrupt)
   target_compile_definitions(brw_test_interrupt PRIVATE BRW_TEST_INTERRUPTS)
   find_program(POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
+  add_test(NAME brw_settings
+    COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-settings.ps1"
+      -Brw "$<TARGET_FILE:brw_test_interrupt>" -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
   add_executable(brw_test_payload test_payload.c)
   target_link_options(brw_test_payload PRIVATE -municode -static)
   add_executable(brw_test_gui WIN32 test_gui_windows.c)

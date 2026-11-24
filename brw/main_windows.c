@@ -1,6 +1,7 @@
 #include "install_windows.h"
 #include "source_windows.h"
 #include "paths_windows.h"
+#include "settings_windows.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -48,6 +49,8 @@ int wmain(int argc, wchar_t **argv)
     };
     if (argc < 2)
         goto usage;
+    if (!wcscmp(argv[1], L"env") || !wcscmp(argv[1], L"registry"))
+        return brw_settings_command(argc, argv);
     size_t command = 0;
     while (command < sizeof commands / sizeof *commands &&
            wcscmp(argv[1], commands[command].verb))
@@ -124,6 +127,10 @@ usage:
           "       brw search [QUERY] | show [SOURCE/]NAME | list\n"
           "       brw install [SOURCE/]NAME [--dry-run] [--json]\n"
           "       brw uninstall NAME [--dry-run] [--json]\n"
+          "       brw registry get|remove KEY NAME TYPE | set KEY NAME TYPE VALUE\n"
+          "         registry writes require --expect OLD or --expect-missing\n"
+          "       brw env user|session set NAME VALUE | remove NAME | path-add DIR | path-remove DIR\n"
+          "         session operations end with -- EXE [ARG ...]\n"
           "       brw recover [--dry-run] [--json]\n"
           "       brw init [--dry-run] [--json]\n", stderr);
     return 2;

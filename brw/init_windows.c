@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <string.h>
 #include "init_windows.h"
 #include "paths_windows.h"
 
@@ -40,17 +41,17 @@ static bool same_path(const wchar_t *start, size_t length, const wchar_t *bin, b
     return !_wcsicmp(full, bin);
 }
 
-const char *brw_append_user_path(wchar_t *value, size_t capacity, DWORD type,
-                                 const wchar_t *bin, bool apply, bool *changed)
+const char *brw_edit_user_path(wchar_t *value, size_t capacity, DWORD type,
+                               const wchar_t *bin, bool remove, bool apply, bool *changed)
 {
     *changed = false;
     if (wcspbrk(bin, L";\""))
         return "invalid-path-entry";
     if (type != REG_SZ && type != REG_EXPAND_SZ)
         return "user-path-read";
-    const wchar_t *entry = value;
+    wchar_t *entry = value;
     while (*entry) {
-        const wchar_t *end = entry;
+        wchar_t *end = entry;
         bool quoted = false;
         while (*end && (*end != L';' || quoted)) {
             if (*end == L'"')
@@ -59,10 +60,19 @@ const char *brw_append_user_path(wchar_t *value, size_t capacity, DWORD type,
         }
         if (quoted)
             return "user-path-read";
-        if (same_path(entry, (size_t)(end - entry), bin, type == REG_EXPAND_SZ))
-            return NULL;
+        if (same_path(entry, (size_t)(end - entry), bin, type == REG_EXPAND_SZ)) {
+            if (!remove) return NULL;
+            *changed = true;
+            if (apply) {
+                if (!*end && entry > value) { entry[-1] = 0; break; }
+                wchar_t *next = *end ? end + 1 : end;
+                memmove(entry, next, (wcslen(next) + 1) * sizeof *entry);
+                continue;
+            }
+        }
         entry = *end ? end + 1 : end;
     }
+    if (remove) return NULL;
     if (type == REG_EXPAND_SZ && wcschr(bin, L'%'))
         return "invalid-path-entry";
     size_t length = wcslen(value);
@@ -76,6 +86,12 @@ const char *brw_append_user_path(wchar_t *value, size_t capacity, DWORD type,
     }
     *changed = true;
     return NULL;
+}
+
+const char *brw_append_user_path(wchar_t *value, size_t capacity, DWORD type,
+                                 const wchar_t *bin, bool apply, bool *changed)
+{
+    return brw_edit_user_path(value, capacity, type, bin, false, apply, changed);
 }
 
 const char *brw_initialize_path(HKEY key, const wchar_t *bin, bool preview, bool *changed)

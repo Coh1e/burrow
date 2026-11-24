@@ -8,6 +8,8 @@
    apply controls whether the caller-owned buffer is updated. */
 const char *brw_append_user_path(wchar_t *value, size_t capacity, DWORD type,
                                  const wchar_t *bin, bool apply, bool *changed);
+const char *brw_edit_user_path(wchar_t *value, size_t capacity, DWORD type,
+                               const wchar_t *bin, bool remove, bool apply, bool *changed);
 /* Borrows an open environment key. Returns a static error or NULL. When
    successful, changed indicates whether the value needs an append. */
 const char *brw_initialize_path(HKEY key, const wchar_t *bin, bool preview, bool *changed);

@@ -1,5 +1,45 @@
 #include "digby.h"
 
+const char *digby_plan_setting(const struct digby_setting *s, unsigned capabilities,
+                               struct digby_plan *out)
+{
+    if (!out) return "invalid-plan";
+    out->count = 0;
+    if (!s || !s->name || !*s->name || (s->expect_missing && s->expected))
+        return "invalid-setting";
+    unsigned required;
+    bool needs_value;
+    if (s->scope == SETTING_REGISTRY) {
+        if (!s->key || !*s->key || (s->type != SETTING_STRING && s->type != SETTING_DWORD))
+            return "invalid-setting";
+        required = DIGBY_CAP_REGISTRY;
+        switch (s->op) {
+        case DIGBY_REGISTRY_WRITE: needs_value = true; break;
+        case DIGBY_REGISTRY_READ:
+        case DIGBY_REGISTRY_DELETE: needs_value = false; break;
+        default: return "invalid-action";
+        }
+        if ((s->op != DIGBY_REGISTRY_READ) != (s->expected != NULL || s->expect_missing))
+            return "invalid-precondition";
+    } else {
+        if ((s->scope != SETTING_USER && s->scope != SETTING_SESSION) || s->key || s->type != SETTING_STRING)
+            return "invalid-scope";
+        required = s->scope == SETTING_USER ? DIGBY_CAP_USER_ENV : DIGBY_CAP_SESSION_ENV;
+        switch (s->op) {
+        case DIGBY_ENV_SET:
+        case DIGBY_PATH_ADD:
+        case DIGBY_PATH_REMOVE: needs_value = true; break;
+        case DIGBY_ENV_REMOVE: needs_value = false; break;
+        default: return "invalid-action";
+        }
+    }
+    if (!(capabilities & required)) return "missing-capability";
+    if (needs_value != (s->argument != NULL)) return "invalid-value";
+    out->steps[0] = s->op;
+    out->count = 1;
+    return NULL;
+}
+
 struct digby_plan digby_install_plan(void)
 {
     const struct digby_plan plan = {{DIGBY_VERIFY, DIGBY_EXTRACT, DIGBY_PUBLISH}, 3};
@@ -40,6 +80,13 @@ const char *digby_operation_name(enum digby_operation operation)
     case DIGBY_PUBLISH: return "publish";
     case DIGBY_ACTIVATE: return "activate";
     case DIGBY_REMOVE: return "remove";
+    case DIGBY_ENV_SET: return "env-set";
+    case DIGBY_ENV_REMOVE: return "env-remove";
+    case DIGBY_PATH_ADD: return "path-add";
+    case DIGBY_PATH_REMOVE: return "path-remove";
+    case DIGBY_REGISTRY_READ: return "registry-read";
+    case DIGBY_REGISTRY_WRITE: return "registry-write";
+    case DIGBY_REGISTRY_DELETE: return "registry-delete";
     }
     return "unknown";
 }

@@ -15,6 +15,7 @@
 #include "shim_image.h"
 #include "evidence_windows.h"
 #include "cleanup_windows.h"
+#include "settings_windows.h"
 #include <io.h>
 #include "shim_windows.h"
 
@@ -319,7 +320,7 @@ const char *brw_begin_package_changes(void)
     wchar_t state[PATH_CAP], journal[PATH_CAP];
     bool pending;
     error = pending_publication(state, journal, &pending);
-    if (!error && pending) error = "recovery-required";
+    if (!error) error = pending ? "recovery-required" : brw_settings_pending();
     if (error) brw_end_package_changes();
     return error;
 }
@@ -1192,13 +1193,17 @@ static const char *recover_locked(bool preview, bool *pending)
 
 int brw_recover(bool json, bool preview)
 {
-    bool pending = false;
+    bool pending = false, preserved = false;
     const char *error = lock_package_changes();
     if (!error) {
         error = recover_locked(preview, &pending);
+        if (!error && !pending)
+            error = brw_settings_recover(preview, &pending, &preserved);
         brw_end_package_changes();
     }
-    const char *status = !pending ? "no-pending" : preview ? "recoverable" : "recovered";
+    const char *status = !pending ? "no-pending" : preserved ?
+        (preview ? "would-preserve-user-change" : "recovered-with-user-changes") :
+        preview ? "recoverable" : "recovered";
     if (json) {
         if (error) printf("{\"status\":\"failed\",\"error\":\"%s\",\"step\":1}\n", error);
         else printf("{\"status\":\"%s\"}\n", status);
@@ -1461,8 +1466,8 @@ static const char *run_step(void *context, enum digby_operation operation)
     case DIGBY_PUBLISH: return publish(install);
     case DIGBY_ACTIVATE: return activate(install);
     case DIGBY_REMOVE: return uninstall(install);
+    default: return "unsupported-operation";
     }
-    return "unsupported-operation";
 }
 
 const char *brw_install_package(const struct local_package *package,
