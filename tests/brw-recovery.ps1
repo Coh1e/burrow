@@ -64,6 +64,21 @@ Assert ((Run 0 @('recover')).status -eq 'recovered') 'First install could not fi
 Assert (!(Test-Path $temporary)) 'Retry left the staged target'
 Assert (@((Run 0 @('list')).packages).Count -eq 0) 'Undone first install was still listed'
 
+Interrupt version $install
+Interrupt cleanup @('recover')
+$packages = Join-Path $env:XDG_DATA_HOME 'burrow/packages'
+$staged = [IO.Directory]::GetDirectories($packages, '.stage-*')
+Assert ($staged.Count -eq 1) 'Expected one detached version'
+$note = Join-Path $staged[0] 'user-note'
+[IO.File]::WriteAllText($note, 'keep me')
+foreach ($argsForRecovery in @(@('recover','--dry-run'),@('recover'))) {
+    Assert ((Run 1 $argsForRecovery).error -eq 'publication-conflict') 'Cleanup missed an added child'
+    Assert (Test-Path (Join-Path $staged[0] $entry)) 'Conflicting cleanup removed another file'
+}
+Assert ([IO.File]::ReadAllText($note) -ceq 'keep me') 'Cleanup changed the added file'
+[IO.File]::Delete($note)
+Assert ((Run 0 @('recover')).status -eq 'recovered') 'Cleanup could not resume after conflict resolution'
+
 Interrupt entry $install
 $bytes = [IO.File]::ReadAllBytes($alias)
 [IO.File]::AppendAllText($alias, 'user edit')

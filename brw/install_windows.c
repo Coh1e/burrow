@@ -1071,6 +1071,7 @@ static const char *finish_publication(struct publication *tx, bool committed)
         DeleteFileW(temporary);
         return "publication-journal";
     }
+    interrupt_publication(L"cleanup");
     return resume_cleanup(tx, roots, count, false);
 }
 

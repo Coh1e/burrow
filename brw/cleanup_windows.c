@@ -86,9 +86,29 @@ bool brw_record_cleanup(FILE *file, const wchar_t *roots[], unsigned count)
     return fwrite(&item, sizeof item, 1, file) == 1;
 }
 
+static bool child_count_matches(const wchar_t *path, unsigned expected)
+{
+    wchar_t pattern[BRW_PATH_CAP];
+    if (wcslen(path) + 3 > BRW_PATH_CAP) return false;
+    swprintf(pattern, BRW_PATH_CAP, L"%ls\\*", path);
+    WIN32_FIND_DATAW entry;
+    HANDLE search = FindFirstFileW(pattern, &entry);
+    if (search == INVALID_HANDLE_VALUE) return !expected && GetLastError() == ERROR_FILE_NOT_FOUND;
+    unsigned count = 0;
+    do {
+        if (wcscmp(entry.cFileName, L".") && wcscmp(entry.cFileName, L"..")) ++count;
+    } while (FindNextFileW(search, &entry));
+    bool matches = count == expected && GetLastError() == ERROR_NO_MORE_FILES;
+    FindClose(search);
+    return matches;
+}
+
 static const char *check_items(FILE *file, const wchar_t *roots[], unsigned count, bool remove)
 {
     struct item item;
+    /* The manifest visits children before their parent. Count surviving,
+       verified names at each depth so unrecorded additions block cleanup. */
+    unsigned children[19] = {0};
     static const struct brw_evidence missing = {{0}};
     while (fread(&item, sizeof item, 1, file) == 1) {
         if (item.root == count)
@@ -97,10 +117,19 @@ static const char *check_items(FILE *file, const wchar_t *roots[], unsigned coun
         if (item.root > count || item.relative[MAX_PATH-1] || item.directory > 1 ||
             !item_path(roots[item.root], item.relative, path))
             return "publication-journal";
+        unsigned depth = item.relative[0] ? 1 : 0;
+        for (const wchar_t *p = item.relative; *p; ++p)
+            if (*p == L'\\') ++depth;
+        if (depth > 17) return "publication-journal";
+        unsigned known_children = children[depth + 1];
+        children[depth + 1] = 0;
         struct brw_evidence current;
         if (!brw_node_evidence(path, &current)) return "publication-conflict";
         if (!memcmp(&current, &missing, sizeof current)) continue;
         if (memcmp(&current, &item.evidence, sizeof current)) return "publication-conflict";
+        if (item.directory && !child_count_matches(path, remove ? 0 : known_children))
+            return "publication-conflict";
+        ++children[depth];
         if (remove && !(item.directory ? RemoveDirectoryW(path) : DeleteFileW(path)))
             return "publication-cleanup";
     }
