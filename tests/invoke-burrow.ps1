@@ -83,12 +83,24 @@ function Invoke-BurrowNativeRaw {
     # Keep the caller's current directory: tests exercise relative roots against it.
     $start.WorkingDirectory = (Get-Location).ProviderPath
     $start.Arguments = ConvertTo-ArgumentString @($Arguments)
+    Invoke-ProcessCapture $start
+}
+
+# Drain both output pipes while the child runs, including probes that need stdin.
+function Invoke-ProcessCapture {
+    param([Diagnostics.ProcessStartInfo]$Start, [string]$InputLine)
+    $withInput = $PSBoundParameters.ContainsKey('InputLine')
+    $Start.RedirectStandardInput = $withInput
     $process = [Diagnostics.Process]::Start($start)
     try {
         # Both streams asynchronously, then wait: reading one to the end first deadlocks when the
         # child fills the other pipe's buffer (this hung update_bare in a full-suite run).
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
+        if ($withInput) {
+            $process.StandardInput.WriteLine($InputLine)
+            $process.StandardInput.Close()
+        }
         $process.WaitForExit()
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()

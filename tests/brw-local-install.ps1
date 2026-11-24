@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
 function Assert($condition, [string] $message) {
     if (!$condition) { throw $message }
 }
@@ -93,24 +94,13 @@ function Invoke-Probe($alias, $arguments) {
     $info.Arguments = $arguments
     $info.WorkingDirectory = $root
     $info.UseShellExecute = $false
-    $info.RedirectStandardInput = $true
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
-    $child = [Diagnostics.Process]::Start($info)
-    try {
-        $child.StandardInput.WriteLine('input')
-        $child.StandardInput.Close()
-        $stdout = $child.StandardOutput.ReadToEnd()
-        $stderr = $child.StandardError.ReadToEnd()
-        $child.WaitForExit()
-        [pscustomobject]@{ Code = $child.ExitCode; Output = $stdout.TrimEnd(); Error = $stderr.TrimEnd() }
-    } finally {
-        $child.Dispose()
-    }
+    Invoke-ProcessCapture $info -InputLine 'input'
 }
 New-Item -ItemType File -Path (Join-Path $root 'cwd.marker') | Out-Null
 $probe = Invoke-Probe $shim ('--probe "" "' + [char]0x706b + ' star" "a\"b" "ends \\" last')
-Assert ($probe.Code -eq 41 -and $probe.Output -ceq 'output' -and $probe.Error -ceq 'diagnostic') 'Native argv, cwd, or stream forwarding failed'
+Assert ($probe.Code -eq 41 -and $probe.out.TrimEnd() -ceq 'output' -and $probe.err.TrimEnd() -ceq 'diagnostic') 'Native argv, cwd, or stream forwarding failed'
 
 $again = Invoke-Install 'local-tool' $archive $sha
 Assert ($again.Code -ne 0 -and $again.Result.error -eq 'destination-exists') 'Existing version is not protected'
@@ -210,9 +200,36 @@ Assert ($longRemove.Code -eq 0) "Maximum-length entry uninstall failed: $($longR
 foreach ($extension in 'cmd', 'bat', 'ps1') {
     $entry = "script.$extension"
     $body = if ($extension -eq 'ps1') {
-        '[Console]::WriteLine($args[0]); exit 43'
+        @'
+if ($args[0] -eq '--probe') {
+    if ($args.Count -ne 6 -or $args[1] -cne '' -or $args[2] -cne $env:BRW_TEST_WORD -or
+        $args[3] -cne 'a"b' -or $args[4] -cne 'ends \' -or $args[5] -cne 'last') { exit 8 }
+    if (!(Test-Path -LiteralPath 'cwd.marker') -or [Console]::ReadLine() -cne 'input') { exit 9 }
+    [Console]::Error.WriteLine('diagnostic')
+    [Console]::WriteLine('output')
+    exit 41
+}
+[Console]::WriteLine($args[0])
+exit 43
+'@
     } else {
-        "@echo off`r`necho %~1`r`nexit /b 43"
+        @'
+@echo off
+if "%~1"=="--probe" goto probe
+echo %~1
+exit /b 43
+:probe
+if not [%2]==[""] exit /b 8
+if not "%~3"=="%BRW_TEST_WORD%" exit /b 8
+if not "%~4"=="ends \" exit /b 8
+if not "%~5"=="last" exit /b 8
+if not exist cwd.marker exit /b 9
+set /p line=
+if not "%line%"=="input" exit /b 9
+echo diagnostic 1>&2
+echo output
+exit /b 41
+'@
     }
     Set-Content -LiteralPath (Join-Path $inputDir $entry) -Value $body -Encoding ASCII
     $bundle = Join-Path $root "$extension.tar"
@@ -222,6 +239,30 @@ foreach ($extension in 'cmd', 'bat', 'ps1') {
     $alias = Join-Path $root ".local/bin/test-$extension.exe"
     $output = & $alias 'two words'
     Assert ($LASTEXITCODE -eq 43 -and $output -ceq 'two words') "$extension invocation failed"
+    $env:BRW_TEST_WORD = [string][char]0x706b + ' star'
+    $argsText = if ($extension -eq 'ps1') {
+        '--probe "" "' + $env:BRW_TEST_WORD + '" "a\"b" "ends \\" last'
+    } else {
+        '--probe "" "' + $env:BRW_TEST_WORD + '" "ends \\" last'
+    }
+    if ($extension -eq 'ps1') {
+        $previousPolicy = $env:PSExecutionPolicyPreference
+        try {
+            $env:PSExecutionPolicyPreference = 'Restricted'
+            $policy = & powershell.exe -NoProfile -Command Get-ExecutionPolicy
+            if ($policy -eq 'Restricted') {
+                $denied = Invoke-Probe $alias 'two'
+                Assert ($denied.code -ne 43 -and $denied.code -ne 0 -and $denied.err) 'Entry bypassed Restricted execution policy'
+            } else {
+                Write-Host "SKIP: group policy forces $policy in the policy inheritance probe"
+            }
+        } finally {
+            $env:PSExecutionPolicyPreference = $previousPolicy
+        }
+    }
+    $scriptProbe = Invoke-Probe $alias $argsText
+    Assert ($scriptProbe.code -eq 41 -and $scriptProbe.out.TrimEnd() -ceq 'output' -and
+        $scriptProbe.err.TrimEnd() -ceq 'diagnostic') "$extension argv, cwd, or stream forwarding failed (exit $($scriptProbe.code))"
 }
 
 # Launch through the Windows shell verb used by Explorer. A console shim could
@@ -229,9 +270,20 @@ foreach ($extension in 'cmd', 'bat', 'ps1') {
 Copy-Item -LiteralPath $Gui -Destination (Join-Path $inputDir 'window.exe')
 $guiArchive = Join-Path $root 'window.tar'
 & $tar -cf $guiArchive --format ustar -C $inputDir window.exe
-$updated = Invoke-Lifecycle @('update', 'test-cmd', '2', $guiArchive, (Get-Sha256 $guiArchive), 'window.exe')
-Assert ($updated.Code -eq 0) 'Update from batch to GUI failed'
+$guiUpdate = @('update', 'test-cmd', '2', $guiArchive, (Get-Sha256 $guiArchive), 'window.exe')
 $alias = Join-Path $root '.local/bin/test-cmd.exe'
+$aliasLock = [IO.File]::Open($alias, 'Open', 'Read', 'Read')
+try {
+    $blocked = Invoke-Lifecycle $guiUpdate
+    Assert ($blocked.Result.error -eq 'publish-entry') 'Locked launcher replacement was not rejected'
+    $output = & $alias 'still active'
+    Assert ($LASTEXITCODE -eq 43 -and $output -eq 'still active') 'Failed GUI update switched the target'
+    Assert (!(Test-Path (Join-Path $root '.local/share/burrow/packages/test-cmd/2'))) 'Failed GUI update left a version'
+} finally {
+    $aliasLock.Dispose()
+}
+$updated = Invoke-Lifecycle $guiUpdate
+Assert ($updated.Code -eq 0) 'Update from batch to GUI failed'
 $pe = [IO.File]::ReadAllBytes($alias)
 $nt = [BitConverter]::ToInt32($pe, 60)
 Assert ([BitConverter]::ToUInt16($pe, $nt + 24 + 68) -eq 2) 'GUI entry would open a console'
@@ -246,9 +298,12 @@ Assert ($process.WaitForExit(10000) -and $process.ExitCode -eq 0) 'Shell launch 
 Assert ((Get-Content -LiteralPath $marker) -ceq 'gui') 'GUI target had a console'
 $rolledBack = Invoke-Lifecycle @('rollback', 'test-cmd', '1')
 Assert ($rolledBack.Code -eq 0) 'Rollback to batch failed'
+$pe = [IO.File]::ReadAllBytes($alias)
+$nt = [BitConverter]::ToInt32($pe, 60)
+Assert ([BitConverter]::ToUInt16($pe, $nt + 24 + 68) -eq 3) 'Rollback left a GUI launcher'
 $env:Path = (Split-Path -Parent $alias) + ';' + $env:Path
 $output = & $env:ComSpec /d /c 'test-cmd.exe "two words"'
 Assert ($LASTEXITCODE -eq 43 -and $output -ceq 'two words') 'cmd host launch after rollback failed'
 
 $unsafe = Invoke-Probe $alias '"hello%PATH%"'
-Assert ($unsafe.Code -eq 126 -and $unsafe.Error -match 'cannot safely forward' -and !$unsafe.Output) 'Unsafe batch argument lacked a diagnostic'
+Assert ($unsafe.Code -eq 126 -and $unsafe.err -match 'cannot safely forward' -and !$unsafe.out) 'Unsafe batch argument lacked a diagnostic'

@@ -382,7 +382,11 @@ static bool owned_shim(struct installation *install, const wchar_t *version)
     if (!hashed)
         return false;
     if (!read_record(record, expected, 65)) {
-        /* Legacy installs have no shim digest. Compare against the shipped launcher. */
+        /* #120 installations predate digest records. Accept the exact launcher
+           shipped in that Windows build, or the current console image. */
+        if (GetFileAttributesW(record) == INVALID_FILE_ATTRIBUTES &&
+            !wcscmp(install->shim_hash, L"5ab9111d4d47ddda94b7eab84e216d67027d25b14bd66378e1b11e480de76c38"))
+            return true;
         if (GetFileAttributesW(record) != INVALID_FILE_ATTRIBUTES ||
             !hash_contents(NULL, shim_image, sizeof shim_image, expected))
             return false;

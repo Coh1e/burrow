@@ -49,6 +49,12 @@ int wmain(int argc, wchar_t **argv)
         application = host;
     }
     if (batch) {
+        wchar_t cwd[32768];
+        DWORD n = GetCurrentDirectoryW(32768, cwd);
+        if (!n || n >= 32768 || !wcsncmp(cwd, L"\\\\", 2)) {
+            fputs("brw: cannot safely forward batch working directory to cmd.exe\n", stderr);
+            return 126;
+        }
         /* cmd expands percent expressions even inside quotes. Reject shell syntax
            in the target and arguments before constructing its /s /c command. */
         const wchar_t *syntax = L"\"%!^&|<>()\r\n";
