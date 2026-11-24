@@ -1,6 +1,7 @@
 #include "install_windows.h"
 #include "source_windows.h"
 #include <stdio.h>
+#include <string.h>
 
 int brw_report_plan(bool json, bool preview, const char *status,
                     const struct digby_plan *plan, const char *error, size_t step)
@@ -81,8 +82,31 @@ int wmain(int argc, wchar_t **argv)
     const char *error = brw_validate_lifecycle(action, &package);
     bool invalid = error != NULL;
     size_t failed_step = 0;
+    bool locked = false;
+    if (!error && !preview) {
+        error = brw_begin_package_changes();
+        locked = !error;
+    }
+    wchar_t dependent[BRW_PACKAGE_NAME_CAP];
+    if (!error && action == DIGBY_UNINSTALL)
+        error = brw_check_uninstall(package.name, dependent);
+    if (error && action == DIGBY_UNINSTALL && !strcmp(error, "package-required")) {
+        if (json) {
+            fputs("{\"status\":\"failed\",\"operations\":[\"remove\"],"
+                  "\"error\":\"package-required\",\"step\":0,\"dependent\":", stdout);
+            brw_json_string(dependent);
+            puts("}");
+        } else {
+            fprintf(stderr, "brw: package-required (%ls)\n", dependent);
+        }
+        if (locked)
+            brw_end_package_changes();
+        return 1;
+    }
     if (!error && !preview)
         error = brw_run_lifecycle(action, &package, &plan, &failed_step);
+    if (locked)
+        brw_end_package_changes();
 
     int result = brw_report_plan(json, preview, commands[command].status,
                                  &plan, error, invalid ? 0 : failed_step + 1);

@@ -23,7 +23,7 @@ brw list
 
 A source registers an absolute reference to a local catalog. brw reads the catalog again on each query and install. The registration lives under the user's `XDG_CONFIG_HOME/burrow/sources`, or `%USERPROFILE%/.config/burrow/sources` by default. Removing a registration leaves the catalog, its payloads, and installed packages in place. Search matches a substring of the package name case-insensitively. Qualify the package name with its source if more than one source provides it.
 
-Catalogs are UTF-8 without a BOM. The first line is `brw-catalog-v1` and each following line contains six tab-separated fields, in this order.
+Catalogs are UTF-8 without a BOM. The first line is `brw-catalog-v1` and each following line contains six required tab-separated fields, followed by an optional seventh field.
 
 | Field | Value |
 | --- | --- |
@@ -33,6 +33,11 @@ Catalogs are UTF-8 without a BOM. The first line is `brw-catalog-v1` and each fo
 | Location | Local file in the catalog directory, or an HTTPS or HTTP URL |
 | SHA-256 | 64 hexadecimal digits |
 | Entry | `.exe` path to publish as the package's command. Archive entries can use a relative path such as `bin/tool.exe` |
+| Depends | Comma-separated package names, such as `runtime,tools`. An omitted or empty field declares no dependencies. |
+
+Dependency names are case-insensitive. An active installed package satisfies its name. Otherwise the name must resolve to a single catalog row. Dry-run lists the packages that would be installed in dependency order. Missing, ambiguous, or cyclic dependencies stop planning before any payload is installed. Each package is committed separately, so an error in a later package leaves earlier installations available.
+
+Uninstall checks the dependency records saved with active versions, including when their source has been removed. A local update retains the active version's declarations. Rollback checks that the selected version's dependencies are installed.
 
 Use package names, versions, local filenames, and entry names made up of ASCII letters, digits, dots, hyphens, or underscores. A catalog should provide one row per package name. Archive payloads support TAR, gzip-compressed TAR, and ZIP with ordinary files and directories. Use forward slashes between path components. The extractor rejects links, absolute paths, and traversal components. Install uses the existing brw package and command-entry layout. `brw list` shows active packages from source and local installs. All commands shown above accept `--json`. Source add and remove also accept `--dry-run`.
 

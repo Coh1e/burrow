@@ -86,4 +86,9 @@ if(BUILD_TESTING)
       -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-source.ps1" -CancelRunner "$<TARGET_FILE:brw_test_cancel>"
       -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
       -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME brw_dependencies
+    COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-dependencies.ps1"
+      -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
+      -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

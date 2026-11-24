@@ -16,6 +16,7 @@ enum { PATH_CAP = BRW_PATH_CAP, NAME_CAP = 128, ENTRY_CAP = MAX_PATH, ARCHIVE_DE
 
 struct installation {
     const struct local_package *package;
+    const wchar_t *dependencies;
     enum digby_action action;
     FILE *archive;
     bool source;
@@ -129,15 +130,26 @@ static volatile LONG publish_state;
 
 bool brw_cancelled(void)
 {
-    return InterlockedCompareExchange(&publish_state, RUNNING, RUNNING) == CANCELLED;
+    return (InterlockedCompareExchange(&publish_state, RUNNING, RUNNING) & CANCELLED) != 0;
 }
 
 static BOOL WINAPI cancel_install(DWORD event)
 {
     if (event != CTRL_C_EVENT && event != CTRL_BREAK_EVENT)
         return FALSE;
-    InterlockedCompareExchange(&publish_state, CANCELLED, RUNNING);
+    InterlockedOr(&publish_state, CANCELLED);
     return TRUE;
+}
+
+bool brw_begin_source_install(void)
+{
+    InterlockedExchange(&publish_state, RUNNING);
+    return SetConsoleCtrlHandler(cancel_install, TRUE) != 0;
+}
+
+void brw_end_source_install(void)
+{
+    SetConsoleCtrlHandler(cancel_install, FALSE);
 }
 
 static bool hash_contents(FILE *file, const unsigned char *image, DWORD length, wchar_t hex[65])
@@ -226,6 +238,57 @@ static bool package_paths(struct installation *install)
         return false;
     wcscpy(install->sidecar, install->shim);
     return brw_append_shim_suffix(install->sidecar, wcslen(install->shim));
+}
+
+bool brw_next_dependency(const wchar_t **names, wchar_t name[BRW_PACKAGE_NAME_CAP])
+{
+    size_t length = wcscspn(*names, L",");
+    if (!length || length >= BRW_PACKAGE_NAME_CAP)
+        return false;
+    wmemcpy(name, *names, length);
+    name[length] = 0;
+    *names += length;
+    if (**names == L',') {
+        ++*names;
+        if (!**names)
+            return false;
+    }
+    return brw_package_component(name);
+}
+
+bool brw_dependency_names(const wchar_t *names)
+{
+    if (!names)
+        return true;
+    if (wcslen(names) >= BRW_DEPENDENCIES_CAP)
+        return false;
+    while (*names) {
+        wchar_t name[BRW_PACKAGE_NAME_CAP];
+        if (!brw_next_dependency(&names, name))
+            return false;
+    }
+    return true;
+}
+
+static HANDLE package_changes;
+
+const char *brw_begin_package_changes(void)
+{
+    wchar_t profile[PATH_CAP], path[PATH_CAP];
+    DWORD length = GetEnvironmentVariableW(L"USERPROFILE", profile, PATH_CAP);
+    if (length < 3 || length >= PATH_CAP || profile[1] != L':' ||
+        (profile[2] != L'\\' && profile[2] != L'/') ||
+        !join(path, profile, L".brw-package-mutation.lock"))
+        return "install-directory";
+    package_changes = CreateFileW(path, GENERIC_WRITE | DELETE, 0, NULL, CREATE_NEW,
+                                  FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    return package_changes == INVALID_HANDLE_VALUE ? "package-busy" : NULL;
+}
+
+void brw_end_package_changes(void)
+{
+    CloseHandle(package_changes);
+    package_changes = NULL;
 }
 
 static bool stage_directory(const wchar_t *base, wchar_t stage[PATH_CAP])
@@ -377,6 +440,77 @@ static const char *read_active(struct installation *install)
          wcscmp(install->active_entry, recorded_entry)))
         return "entry-conflict";
     return NULL;
+}
+
+bool brw_is_installed(const wchar_t *name)
+{
+    struct local_package package = {0};
+    struct installation install = {0};
+    package.name = name;
+    install.package = &package;
+    return package_roots(&install, false) && package_paths(&install) &&
+           ordinary_path(install.package_dir, true) && !read_active(&install);
+}
+
+static bool read_dependencies(const struct installation *install, const wchar_t *version,
+                              wchar_t names[BRW_DEPENDENCIES_CAP])
+{
+    wchar_t directory[PATH_CAP], path[PATH_CAP];
+    if (!join(directory, install->package_dir, version) || !join(path, directory, L".brw-depends"))
+        return false;
+    names[0] = 0;
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES)
+        return GetLastError() == ERROR_FILE_NOT_FOUND;
+    return read_record(path, names, BRW_DEPENDENCIES_CAP) && brw_dependency_names(names);
+}
+
+const char *brw_check_uninstall(const wchar_t *name, wchar_t dependent[BRW_PACKAGE_NAME_CAP])
+{
+    struct local_package package = {0};
+    struct installation install = {0};
+    install.package = &package;
+    dependent[0] = 0;
+    wchar_t pattern[PATH_CAP];
+    if (!package_roots(&install, false) || !join(pattern, install.packages, L"*"))
+        return "dependency-state";
+    WIN32_FIND_DATAW data;
+    HANDLE search = FindFirstFileW(pattern, &data);
+    if (search == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        return error == ERROR_PATH_NOT_FOUND || error == ERROR_FILE_NOT_FOUND ? NULL : "dependency-state";
+    }
+    const char *error = NULL;
+    do {
+        if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+            (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+            !brw_package_component(data.cFileName) || !_wcsicmp(data.cFileName, name))
+            continue;
+        package.name = data.cFileName;
+        if (!package_paths(&install)) {
+            error = "dependency-state";
+            break;
+        }
+        if (GetFileAttributesW(install.sidecar) == INVALID_FILE_ATTRIBUTES &&
+            (GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND))
+            continue;
+        wchar_t names[BRW_DEPENDENCIES_CAP], dependency[BRW_PACKAGE_NAME_CAP];
+        if (read_active(&install) || !read_dependencies(&install, install.active_version, names)) {
+            error = "dependency-state";
+            break;
+        }
+        const wchar_t *cursor = names;
+        while (brw_next_dependency(&cursor, dependency)) {
+            if (!_wcsicmp(dependency, name)) {
+                wcscpy(dependent, data.cFileName);
+                error = "package-required";
+                break;
+            }
+        }
+    } while (!error && FindNextFileW(search, &data));
+    if (!error && GetLastError() != ERROR_NO_MORE_FILES)
+        error = "dependency-state";
+    FindClose(search);
+    return error;
 }
 
 /* Allow the conventional ./ prefix in source archives. Use canonical names in the inventory. */
@@ -661,6 +795,17 @@ static const char *publish(struct installation *install)
         !write_record(install->stage, record, install->package->entry, false))
         return "version-record";
     bool update = install->action == DIGBY_UPDATE;
+    wchar_t inherited[BRW_DEPENDENCIES_CAP];
+    const wchar_t *dependencies = install->dependencies;
+    if (update) {
+        if (!read_dependencies(install, install->active_version, inherited))
+            return "dependency-state";
+        dependencies = inherited;
+    }
+    if (dependencies && *dependencies &&
+        (!join(record, install->stage, L".brw-depends") ||
+         !write_record(install->stage, record, dependencies, false)))
+        return "version-record";
     if ((!update && !hash_contents(NULL, shim_image, sizeof shim_image, install->shim_hash)) ||
         !join(record, install->stage, L".brw-shim") ||
         !write_record(install->stage, record, install->shim_hash, false))
@@ -706,6 +851,14 @@ static const char *activate(struct installation *install)
     if (!version_entry(install, install->package->version, entry) ||
         !join(target, install->version, entry))
         return "version-not-installed";
+    wchar_t names[BRW_DEPENDENCIES_CAP], dependency[BRW_PACKAGE_NAME_CAP];
+    if (!read_dependencies(install, install->package->version, names))
+        return "dependency-state";
+    const wchar_t *cursor = names;
+    while (brw_next_dependency(&cursor, dependency)) {
+        if (!brw_is_installed(dependency))
+            return "dependency-not-installed";
+    }
     return write_record(install->bin, install->sidecar, target, true) ? NULL : "publish-entry";
 }
 
@@ -753,7 +906,8 @@ static bool owned_tree(const wchar_t *directory, const wchar_t *relative, const 
         bool folder = (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         bool root = !*relative;
         bool inventory = root && !wcscmp(file.cFileName, L".brw-files");
-        bool metadata = !folder && (inventory || (root && (!wcscmp(file.cFileName, L".brw-entry") ||
+        bool metadata = !folder && (inventory || (root && (!wcscmp(file.cFileName, L".brw-depends") ||
+                                                         !wcscmp(file.cFileName, L".brw-entry") ||
                                                          !wcscmp(file.cFileName, L".brw-shim"))));
         wchar_t name[ENTRY_CAP], path[PATH_CAP];
         if (wcslen(relative) + wcslen(file.cFileName) + 2 > ENTRY_CAP) {
@@ -893,20 +1047,16 @@ const char *brw_install_package(const struct local_package *package,
 
 static const char *run_lifecycle(enum digby_action action, const struct local_package *package,
                                  const struct digby_plan *plan, size_t *failed_step,
-                                 bool source, bool executable)
+                                 bool source, bool executable, const wchar_t *dependencies)
 {
     struct installation install = {0};
     install.package = package;
+    install.dependencies = dependencies;
     install.action = action;
     install.source = source;
     install.executable = executable;
     if (failed_step)
         *failed_step = 0;
-    if (source) {
-        InterlockedExchange(&publish_state, RUNNING);
-        if (!SetConsoleCtrlHandler(cancel_install, TRUE))
-            return "cancel-handler";
-    }
     const char *error = digby_execute(plan, run_step, &install, failed_step);
     if (install.archive)
         fclose(install.archive);
@@ -917,20 +1067,21 @@ static const char *run_lifecycle(enum digby_action action, const struct local_pa
     if (install.lock && install.lock != INVALID_HANDLE_VALUE)
         CloseHandle(install.lock);
     if (source)
-        SetConsoleCtrlHandler(cancel_install, FALSE);
+        InterlockedAnd(&publish_state, ~PUBLISHING);
     return error;
 }
 
 const char *brw_run_lifecycle(enum digby_action action, const struct local_package *package,
                              const struct digby_plan *plan, size_t *failed_step)
 {
-    return run_lifecycle(action, package, plan, failed_step, false, false);
+    return run_lifecycle(action, package, plan, failed_step, false, false, NULL);
 }
 
-const char *brw_install_source_package(const struct local_package *package, bool executable,
-                                       const struct digby_plan *plan, size_t *failed_step)
+const char *brw_install_with_dependencies(const struct local_package *package, bool executable,
+                                          const wchar_t *dependencies,
+                                          const struct digby_plan *plan, size_t *failed_step)
 {
-    return run_lifecycle(DIGBY_INSTALL, package, plan, failed_step, true, executable);
+    return run_lifecycle(DIGBY_INSTALL, package, plan, failed_step, true, executable, dependencies);
 }
 
 int brw_list_installed(bool json)
