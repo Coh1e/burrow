@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory=$true)][string] $Brw,
     [Parameter(Mandatory=$true)][string] $Fixture,
     [Parameter(Mandatory=$true)][string] $Gui,
+    [string] $InterruptBrw,
     [Parameter(Mandatory=$true)][string] $Scratch
 )
 
@@ -306,7 +307,7 @@ Assert ($unsafe.Code -eq 126 -and $unsafe.err -match 'cannot safely forward' -an
 # Simulate an abrupt exit after publishing the new version, before changing its entry.
 $env:BRW_TEST_INTERRUPT = 'version'
 try {
-    $null = & $Brw update test-cmd 3 $archive $sha payload.exe --json
+    $null = & $InterruptBrw update test-cmd 3 $archive $sha payload.exe --json
     Assert ($LASTEXITCODE -eq 86) 'Publication did not stop at the version boundary'
 } finally { Remove-Item Env:BRW_TEST_INTERRUPT }
 foreach ($pass in 1..2) {

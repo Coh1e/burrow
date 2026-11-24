@@ -2,12 +2,12 @@
 #include <windows.h>
 #include <bcrypt.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <string.h>
 #include "evidence_windows.h"
 #include "shim_windows.h"
 
 static bool snapshot(BCRYPT_ALG_HANDLE algorithm, const wchar_t *path,
-                     struct brw_evidence *result, unsigned depth);
+                     struct brw_evidence *result, unsigned depth, bool recursive);
 
 static bool children(BCRYPT_ALG_HANDLE algorithm, BCRYPT_HASH_HANDLE hash,
                      const wchar_t *base, unsigned depth)
@@ -34,7 +34,7 @@ static bool children(BCRYPT_ALG_HANDLE algorithm, BCRYPT_HASH_HANDLE hash,
         wcscpy(path + length + 1, entry.cFileName);
         struct brw_evidence child, named;
         BCRYPT_HASH_HANDLE pair = NULL;
-        ok = snapshot(algorithm, path, &child, depth + 1) &&
+        ok = snapshot(algorithm, path, &child, depth + 1, true) &&
              BCryptCreateHash(algorithm, &pair, NULL, 0, NULL, 0, 0) >= 0 &&
              BCryptHashData(pair, (PUCHAR)entry.cFileName, chars * sizeof(wchar_t), 0) >= 0 &&
              BCryptHashData(pair, child.bytes, sizeof child.bytes, 0) >= 0 &&
@@ -50,8 +50,26 @@ static bool children(BCRYPT_ALG_HANDLE algorithm, BCRYPT_HASH_HANDLE hash,
            BCryptHashData(hash, sum.bytes, sizeof sum.bytes, 0) >= 0;
 }
 
+static bool ordinary_streams(const wchar_t *path)
+{
+    WIN32_FIND_STREAM_DATA stream;
+    HANDLE search = FindFirstStreamW(path, FindStreamInfoStandard, &stream, 0);
+    if (search == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        return error == ERROR_HANDLE_EOF || error == ERROR_INVALID_FUNCTION ||
+               error == ERROR_NOT_SUPPORTED || error == ERROR_INVALID_PARAMETER;
+    }
+    bool ok = true;
+    do {
+        if (wcscmp(stream.cStreamName, L"::$DATA")) { ok = false; break; }
+    } while (FindNextStreamW(search, &stream));
+    ok = ok && GetLastError() == ERROR_HANDLE_EOF;
+    FindClose(search);
+    return ok;
+}
+
 static bool snapshot(BCRYPT_ALG_HANDLE algorithm, const wchar_t *path,
-                     struct brw_evidence *result, unsigned depth)
+                     struct brw_evidence *result, unsigned depth, bool recursive)
 {
     HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                               NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS |
@@ -64,7 +82,7 @@ static bool snapshot(BCRYPT_ALG_HANDLE algorithm, const wchar_t *path,
     BY_HANDLE_FILE_INFORMATION info;
     BCRYPT_HASH_HANDLE hash = NULL;
     bool ok = GetFileInformationByHandle(file, &info) &&
-              !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+              !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && ordinary_streams(path) &&
               BCryptCreateHash(algorithm, &hash, NULL, 0, NULL, 0, 0) >= 0;
     if (ok) {
         DWORD identity[] = {info.dwVolumeSerialNumber, info.nFileIndexHigh,
@@ -72,7 +90,7 @@ static bool snapshot(BCRYPT_ALG_HANDLE algorithm, const wchar_t *path,
         ok = BCryptHashData(hash, (PUCHAR)identity, sizeof identity, 0) >= 0;
     }
     if (ok && (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-        ok = children(algorithm, hash, path, depth);
+        ok = !recursive || children(algorithm, hash, path, depth);
     } else if (ok) {
         BYTE buffer[8192];
         DWORD size;
@@ -87,12 +105,22 @@ static bool snapshot(BCRYPT_ALG_HANDLE algorithm, const wchar_t *path,
     return ok;
 }
 
-bool brw_evidence(const wchar_t *path, struct brw_evidence *result)
+static bool evidence(const wchar_t *path, struct brw_evidence *result, bool recursive)
 {
     BCRYPT_ALG_HANDLE algorithm = NULL;
     if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, NULL, 0) < 0)
         return false;
-    bool ok = snapshot(algorithm, path, result, 0);
+    bool ok = snapshot(algorithm, path, result, 0, recursive);
     BCryptCloseAlgorithmProvider(algorithm, 0);
     return ok;
+}
+
+bool brw_evidence(const wchar_t *path, struct brw_evidence *result)
+{
+    return evidence(path, result, true);
+}
+
+bool brw_node_evidence(const wchar_t *path, struct brw_evidence *result)
+{
+    return evidence(path, result, false);
 }

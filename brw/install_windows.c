@@ -14,6 +14,8 @@
 #include "init_windows.h"
 #include "shim_image.h"
 #include "evidence_windows.h"
+#include "cleanup_windows.h"
+#include <io.h>
 #include "shim_windows.h"
 
 enum { PATH_CAP = BRW_PATH_CAP, NAME_CAP = 128, ENTRY_CAP = MAX_PATH, ARCHIVE_DEPTH = 16 };
@@ -890,7 +892,7 @@ enum endpoint {
 };
 
 struct publication_log {
-    DWORD format;
+    DWORD format, cleanup;
     wchar_t package[NAME_CAP], version[NAME_CAP], stage[64];
     wchar_t packages[PATH_CAP], bin[PATH_CAP];
     struct brw_evidence before[ENDPOINT_COUNT];
@@ -954,19 +956,19 @@ static void plan_moves(struct publication *tx)
     }
 }
 
-static bool snapshot_endpoints(const struct publication *tx, struct brw_evidence *values)
+static const char *snapshot_endpoints(const struct publication *tx, struct brw_evidence *values)
 {
     for (unsigned i = 0; i < ENDPOINT_COUNT; ++i)
         if (!brw_evidence(tx->paths[i], &values[i]))
-            return false;
-    return true;
+            return (i == SHIM || i == TARGET) ? "entry-conflict" : "publication-conflict";
+    return NULL;
 }
 
 static const char *publication_position(const struct publication *tx, unsigned *position)
 {
     struct brw_evidence actual[ENDPOINT_COUNT], expected[ENDPOINT_COUNT];
-    if (!snapshot_endpoints(tx, actual))
-        return "publication-conflict";
+    const char *error = snapshot_endpoints(tx, actual);
+    if (error) return error;
     memcpy(expected, tx->log.before, sizeof expected);
     bool entry_matched = false;
     for (unsigned i = 0;; ++i) {
@@ -1009,24 +1011,67 @@ static const char *undo_publication(struct publication *tx, unsigned position)
     return NULL;
 }
 
-/* Once the journal is retired, only private staging names remain to discard. */
-static const char *finish_publication(struct publication *tx, bool committed)
+enum cleanup_phase { PUBLISH_PENDING, DISCARD_NEW, DISCARD_BACKUPS };
+
+static unsigned cleanup_roots(const struct publication *tx, const wchar_t *roots[6],
+                              struct brw_evidence expected[6])
 {
-    if (!DeleteFileW(tx->journal))
-        return "publication-journal";
+    unsigned count = 0;
     for (unsigned i = 0; i < tx->count; ++i) {
         struct move move = tx->moves[i];
-        if (committed) {
-            if ((move.to == SAVED_SHIM || move.to == SAVED_TARGET) && !DeleteFileW(tx->paths[move.to]))
-                return "publication-cleanup";
-        } else if (move.from == STAGED_VERSION) {
-            if (!remove_stage(tx->paths[STAGED_VERSION]))
-                return "publication-cleanup";
-        } else if ((move.from == STAGED_SHIM || move.from == STAGED_TARGET || move.from == STAGED_RECEIPT) &&
-                   !DeleteFileW(tx->paths[move.from]))
-            return "publication-cleanup";
+        bool backup = move.to == SAVED_SHIM || move.to == SAVED_TARGET;
+        if (backup != (tx->log.cleanup == DISCARD_BACKUPS)) continue;
+        roots[count] = tx->paths[backup ? move.to : move.from];
+        expected[count++] = tx->log.before[move.from];
     }
-    return NULL;
+    return count;
+}
+
+static bool cleanup_still_owned(const wchar_t *roots[], struct brw_evidence expected[], unsigned count)
+{
+    for (unsigned i = 0; i < count; ++i) {
+        struct brw_evidence observed;
+        if (!brw_evidence(roots[i], &observed) || memcmp(&observed, &expected[i], sizeof observed))
+            return false;
+    }
+    return true;
+}
+
+static const char *resume_cleanup(const struct publication *tx, const wchar_t *roots[],
+                                  unsigned count, bool preview)
+{
+    FILE *file = _wfsopen(tx->journal, L"rb", _SH_DENYWR);
+    if (!file) return "publication-journal";
+    const char *error = fseek(file, sizeof tx->log, SEEK_SET) ? "publication-journal" :
+                        brw_run_cleanup(file, roots, count, preview);
+    fclose(file);
+    if (!error && !preview && !DeleteFileW(tx->journal)) return "publication-journal";
+    return error;
+}
+
+static const char *finish_publication(struct publication *tx, bool committed)
+{
+    tx->log.cleanup = committed ? DISCARD_BACKUPS : DISCARD_NEW;
+    const wchar_t *roots[6];
+    struct brw_evidence expected[6];
+    unsigned count = cleanup_roots(tx, roots, expected);
+    if (!count) return DeleteFileW(tx->journal) ? NULL : "publication-journal";
+    if (!cleanup_still_owned(roots, expected, count)) return "publication-conflict";
+    wchar_t directory[PATH_CAP], temporary[MAX_PATH];
+    wcscpy(directory, tx->journal);
+    *wcsrchr(directory, L'\\') = 0;
+    if (wcslen(directory) >= MAX_PATH - 14 || !GetTempFileNameW(directory, L"brw", 0, temporary))
+        return "publication-journal";
+    FILE *file = _wfsopen(temporary, L"wb", _SH_DENYRW);
+    bool ready = file && fwrite(&tx->log, sizeof tx->log, 1, file) == 1 &&
+                 brw_record_cleanup(file, roots, count) && !fflush(file) && !_commit(_fileno(file));
+    if (file && fclose(file)) ready = false;
+    if (!ready || !cleanup_still_owned(roots, expected, count) ||
+        !MoveFileExW(temporary, tx->journal, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(temporary);
+        return "publication-journal";
+    }
+    return resume_cleanup(tx, roots, count, false);
 }
 
 static const char *publish_transaction(struct installation *install, const wchar_t *target,
@@ -1057,8 +1102,9 @@ static const char *publish_transaction(struct installation *install, const wchar
         shim = publish_file(install->bin, tx.paths[STAGED_SHIM], image->bytes, image->size, false);
         if (!shim) goto cleanup;
     }
-    if (!snapshot_endpoints(&tx, log->before) ||
-        absent(&log->before[TARGET]) == replace || absent(&log->before[SHIM]) == replace ||
+    error = snapshot_endpoints(&tx, log->before);
+    if (error) goto cleanup;
+    if (absent(&log->before[TARGET]) == replace || absent(&log->before[SHIM]) == replace ||
         !absent(&log->before[SAVED_TARGET]) || !absent(&log->before[SAVED_SHIM]) ||
         absent(&log->before[STAGED_SHIM]) == shim ||
         absent(&log->before[STAGED_RECEIPT]) == receipt ||
@@ -1068,6 +1114,11 @@ static const char *publish_transaction(struct installation *install, const wchar
         goto cleanup;
     }
     if (replace && read_active(install)) { error = "entry-conflict"; goto cleanup; }
+    if (replace && ((GetFileAttributesW(install->sidecar) & FILE_ATTRIBUTE_READONLY) ||
+                    (shim && (GetFileAttributesW(install->shim) & FILE_ATTRIBUTE_READONLY)))) {
+        error = "publish-entry";
+        goto cleanup;
+    }
     plan_moves(&tx);
     if (!publish_file(install->state, tx.journal, log, sizeof *log, false)) {
         error = "publication-journal";
@@ -1077,7 +1128,9 @@ static const char *publish_transaction(struct installation *install, const wchar
     for (unsigned i = 0; i < tx.count; ++i) {
         struct move move = tx.moves[i];
         if (!MoveFileExW(tx.paths[move.from], tx.paths[move.to], MOVEFILE_WRITE_THROUGH)) {
-            error = undo_publication(&tx, i);
+            unsigned position;
+            error = publication_position(&tx, &position);
+            if (!error) error = undo_publication(&tx, position);
             if (!error) error = finish_publication(&tx, false);
             return error ? error : "publish-entry";
         }
@@ -1104,7 +1157,9 @@ static const char *recover_locked(bool preview, bool *pending)
     struct publication_log *log = &tx.log;
     FILE *file = ordinary_path(tx.journal, false) ? _wfsopen(tx.journal, L"rb", _SH_DENYWR) : NULL;
     if (!file) return "publication-journal";
-    bool valid = fread(log, 1, sizeof *log, file) == sizeof *log && fgetc(file) == EOF && !ferror(file);
+    bool valid = fread(log, 1, sizeof *log, file) == sizeof *log &&
+                 log->cleanup <= DISCARD_BACKUPS &&
+                 (log->cleanup || (fgetc(file) == EOF && !ferror(file)));
     fclose(file);
     if (!valid || log->format != 1 || log->stage[63] || log->package[NAME_CAP-1] ||
         log->version[NAME_CAP-1] || log->packages[PATH_CAP-1] || log->bin[PATH_CAP-1] ||
@@ -1120,6 +1175,12 @@ static const char *recover_locked(bool preview, bool *pending)
     if (!package_paths(&install) || !publication_paths(&tx, &install))
         return "publication-path";
     plan_moves(&tx);
+    if (log->cleanup) {
+        const wchar_t *roots[6];
+        struct brw_evidence expected[6];
+        unsigned count = cleanup_roots(&tx, roots, expected);
+        return resume_cleanup(&tx, roots, count, preview);
+    }
     unsigned position;
     error = publication_position(&tx, &position);
     if (error || preview)

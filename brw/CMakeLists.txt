@@ -62,19 +62,27 @@ add_custom_command(OUTPUT "${shim_header}"
   DEPENDS brw_shim brw_gui_shim "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
   VERBATIM)
 
-add_executable(brw main_windows.c install_windows.c evidence_windows.c source_windows.c download_windows.c
-  paths_windows.c init_windows.c init_command_windows.c output_windows.c "${shim_header}")
-target_include_directories(brw PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
-target_compile_definitions(brw PRIVATE LIBARCHIVE_STATIC)
-target_link_libraries(brw PRIVATE digby archive_static bcrypt winhttp advapi32 user32 shell32)
-target_link_options(brw PRIVATE -municode -static)
-foreach(target brw brw_shim brw_gui_shim digby)
+add_library(brw_common OBJECT main_windows.c cleanup_windows.c evidence_windows.c source_windows.c
+  download_windows.c paths_windows.c init_windows.c init_command_windows.c output_windows.c "${shim_header}")
+function(add_brw_cli target)
+  add_executable(${target} install_windows.c $<TARGET_OBJECTS:brw_common>)
+  add_dependencies(${target} brw_common)
+  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
+  target_compile_definitions(${target} PRIVATE LIBARCHIVE_STATIC)
+  target_link_libraries(${target} PRIVATE digby archive_static bcrypt winhttp advapi32 user32 shell32)
+  target_link_options(${target} PRIVATE -municode -static)
+  set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endfunction()
+add_brw_cli(brw)
+foreach(target brw_common brw_shim brw_gui_shim digby)
   set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endforeach()
 
 if(BUILD_TESTING)
-  target_compile_definitions(brw PRIVATE BRW_TEST_INTERRUPTS)
+  add_brw_cli(brw_test_interrupt)
+  target_compile_definitions(brw_test_interrupt PRIVATE BRW_TEST_INTERRUPTS)
   find_program(POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
   add_executable(brw_test_payload test_payload.c)
   target_link_options(brw_test_payload PRIVATE -municode -static)
@@ -83,13 +91,18 @@ if(BUILD_TESTING)
   add_test(NAME brw_local_install
     COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
       -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-local-install.ps1" -Gui "$<TARGET_FILE:brw_test_gui>"
+      -InterruptBrw "$<TARGET_FILE:brw_test_interrupt>"
       -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
       -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
-  add_test(NAME brw_recovery
-    COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
-      -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-recovery.ps1"
-      -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
-      -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+  foreach(layout same_volume cross_volume)
+    add_test(NAME brw_recovery_${layout}
+      COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+        -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-recovery.ps1" -Layout "${layout}"
+        -InterruptBrw "$<TARGET_FILE:brw_test_interrupt>"
+        -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
+        -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
+  endforeach()
+  set_tests_properties(brw_recovery_cross_volume PROPERTIES SKIP_RETURN_CODE 77)
   add_executable(brw_test_cancel test_cancel_windows.c)
   target_link_options(brw_test_cancel PRIVATE -municode -static)
   add_test(NAME brw_source
