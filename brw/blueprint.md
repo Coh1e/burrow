@@ -56,7 +56,16 @@ Both modules export a synchronous function returning steps. Relative ES imports 
 | `copy` | `payload`, `path` | Creates a new regular file from verified payload bytes. An existing destination fails. |
 | `replace` | `path`, `from`, `to`, `count` | Publishes the literal replacement after the non-overlapping match count equals the expected count. |
 | `env` | `name`, `value` | Sets the environment of the current brw process for subsequent actions. The calling shell keeps its own environment. |
+| `run` | `program`, `args` | Runs the program in the caller’s `--workspace` and waits for it to exit. Preview lists its arguments. |
 | `install` | `payload`, `name`, `version`, `entry` | On Windows, installs a verified native executable or supported archive through the package transaction and publishes its command entry. |
+
+For example, declare `requires\trun` (with a tab) and list `build.cmake` as a payload beside the child module. This step runs CMake with the verified script and a single argument containing a space.
+
+```js
+{ op: "run", program: "cmake", args: ["-P", { payload: "build.cmake" }, "Release build"] }
+```
+
+The argument list accepts up to 128 entries, including at most one script reference. Digby resolves the reference from the declaring module and stages the verified bytes in a temporary file for this invocation. Scripts can use the working directory for project files. The temporary location contains only the standalone script. String arguments pass directly to the program, including empty strings and literal `|`. To execute a pipeline, select an interpreter such as `sh` with `["-c", scriptText]` or `powershell.exe` with `["-NoProfile", "-Command", scriptText]`. Child output goes to stderr so the CLI report remains readable on stdout. A failed launch or nonzero exit stops the plan.
 
 The planning runtime has no filesystem, process or network bindings. A bundle may declare up to 128 files. The reader limits the manifest to 128 KiB, each module to 1 MiB, each payload to 64 MiB and loaded member data to 128 MiB. Nested calls, plan size, JavaScript heap, stack and execution time are also bounded. An unavailable capability, invalid import or exceeded planning limit fails before application.
 

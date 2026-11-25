@@ -5,6 +5,7 @@
 #include "settings_windows.h"
 #include "settings_backend_windows.h"
 #include "source_windows.h"
+#include "command_line_windows.h"
 
 static const char *parse(int argc, wchar_t **argv, struct setting_request *r)
 {
@@ -70,32 +71,8 @@ static const char *parse(int argc, wchar_t **argv, struct setting_request *r)
 static const char *run_child(const struct setting_request *r, DWORD *exit_code)
 {
     wchar_t command[32768];
-    size_t used = 0;
-    for (int i = 0; i < r->child_count; ++i) {
-        const wchar_t *p = r->child[i];
-        if (used + 4 >= 32768) return "child-command-too-long";
-        if (i) command[used++] = L' ';
-        if (*p && !wcspbrk(p, L" \t\"")) {
-            size_t length = wcslen(p);
-            if (used + length >= 32768) return "child-command-too-long";
-            wmemcpy(command + used, p, length);
-            used += length;
-            continue;
-        }
-        command[used++] = L'"';
-        for (;;) {
-            size_t slashes = wcsspn(p, L"\\");
-            p += slashes;
-            if (!*p || *p == L'"') slashes = 2 * slashes + (*p == L'"');
-            if (used + slashes + 3 > 32768) return "child-command-too-long";
-            wmemset(command + used, L'\\', slashes);
-            used += slashes;
-            if (!*p) break;
-            command[used++] = *p++;
-        }
-        command[used++] = L'"';
-    }
-    command[used] = 0;
+    const char *error = encode_command_line(command, (size_t)r->child_count, (const wchar_t *const *)r->child);
+    if (error) return error;
     STARTUPINFOW start = {0};
     start.cb = sizeof start;
     if (r->json) {

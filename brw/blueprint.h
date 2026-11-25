@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_OP_COUNT };
-enum { BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_OP_COUNT };
+enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
 
 struct bp_file {
     char *path;
@@ -26,6 +26,8 @@ struct bp_step {
     enum bp_op op;
     char *source; /* Call path including the position within this module. */
     char *path, *from, *to, *name, *version, *entry, *value;
+    char *program, **args; /* Owned strings. The staged payload occupies script_arg. */
+    size_t argc, script_arg;
     size_t count;
     const struct bp_file *payload; /* Borrowed from the verified bundle. */
 };

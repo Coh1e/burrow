@@ -26,6 +26,8 @@ jobs:
           cmake -S brw -B .local/brw-blueprint -DBRW_BLUEPRINT=ON -DBUILD_TESTING=ON
           cmake --build .local/brw-blueprint --target brw --parallel
           shasum -a 256 .local/brw-blueprint/brw
+      - name: Test the Blueprint CLI on macOS
+        run: ctest --test-dir .local/brw-blueprint -R '^blueprint_cli$' --output-on-failure
       - name: Verify Blueprint on case-insensitive APFS
         run: sh brw/blueprint_apfs_test.sh APFS "$GITHUB_WORKSPACE/.local/brw-blueprint/brw"
       - name: Verify Blueprint on case-sensitive APFS
