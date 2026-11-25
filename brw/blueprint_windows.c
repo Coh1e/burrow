@@ -9,6 +9,8 @@
 #include <stdlib.h>
 
 #include "blueprint_files_windows.h"
+#include "command_line_windows.h"
+#include <bcrypt.h>
 
 static HANDLE open_parent(const char *workspace, wchar_t *path, wchar_t **leaf)
 {
@@ -244,6 +246,91 @@ static const char *install(const struct bp_step *s, bool apply)
     return error;
 }
 
+static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, wchar_t *script, bool apply)
+{
+    wchar_t *args[BP_MAX_ARGS + 1] = {wide(s->program)};
+    if (args[0] && wcspbrk(args[0], L"/\\") && args[0][0] != L'/' &&
+        args[0][0] != L'\\' && args[0][1] != L':') {
+        size_t length = wcslen(cwd) + 1 + wcslen(args[0]) + 1;
+        wchar_t *joined = malloc(length * sizeof *joined);
+        if (joined) swprintf(joined, length, L"%ls\\%ls", cwd, args[0]);
+        free(args[0]);
+        args[0] = joined;
+    }
+    const char *error = args[0] ? NULL : "invalid-command";
+    for (size_t i = 0; !error && i < s->argc; ++i) {
+        args[i + 1] = s->payload && i == s->script_arg ? script : wide(s->args[i]);
+        if (!args[i + 1]) error = "invalid-command";
+    }
+    wchar_t command[32768];
+    if (!error) error = encode_command_line(command, s->argc + 1, (const wchar_t *const *)args);
+    for (size_t i = 0; i <= s->argc; ++i)
+        if (args[i] != script) free(args[i]);
+    if (error || !apply) return error;
+    STARTUPINFOW start = {0};
+    start.cb = sizeof start;
+    start.dwFlags = STARTF_USESTDHANDLES;
+    start.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    start.hStdOutput = start.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION child;
+    if (!CreateProcessW(NULL, command, NULL, NULL, TRUE, 0, NULL, cwd, &start, &child))
+        return "child-launch";
+    CloseHandle(child.hThread);
+    DWORD code = 0;
+    bool ok = WaitForSingleObject(child.hProcess, INFINITE) == WAIT_OBJECT_0 &&
+              GetExitCodeProcess(child.hProcess, &code);
+    CloseHandle(child.hProcess);
+    if (!ok) return "child-wait";
+    return code ? "child-failed" : NULL;
+}
+
+static const char *run_script(const struct bp_step *s, const wchar_t *cwd, bool apply)
+{
+    wchar_t path[32768];
+    DWORD prefix = GetTempPathW(32768, path);
+    ULONGLONG id = 0;
+    if (!prefix || prefix >= 32768 ||
+        (apply && BCryptGenRandom(NULL, (PUCHAR)&id, sizeof id, BCRYPT_USE_SYSTEM_PREFERRED_RNG)) ||
+        swprintf(path + prefix, 32768 - prefix, L"brw-%016llx", id) < 0) return "payload-stage";
+    size_t dir_length = wcslen(path);
+    const char *base = strrchr(s->payload->path, '/');
+    wchar_t *name = wide(base ? base + 1 : s->payload->path);
+    if (!name || dir_length + 2 + wcslen(name) > 32768 ||
+        (apply && !CreateDirectoryW(path, NULL))) {
+        free(name);
+        return "payload-stage";
+    }
+    path[dir_length] = L'\\';
+    wcscpy(path + dir_length + 1, name);
+    free(name);
+    if (!apply) return launch_command(s, cwd, path, false);
+    const char *error = "payload-stage";
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        DWORD written;
+        bool ok = WriteFile(file, s->payload->data, (DWORD)s->payload->size, &written, NULL) &&
+                  written == s->payload->size;
+        if (CloseHandle(file) && ok) error = launch_command(s, cwd, path, true);
+        if (!DeleteFileW(path) && !error) error = "cleanup-stage";
+    }
+    path[dir_length] = 0;
+    if (!RemoveDirectoryW(path) && !error) error = "cleanup-stage";
+    return error;
+}
+
+static const char *run_command(const char *workspace, const struct bp_step *s, bool apply)
+{
+    wchar_t *cwd = wide(workspace);
+    DWORD attrs = cwd ? GetFileAttributesW(cwd) : INVALID_FILE_ATTRIBUTES;
+    const char *error = NULL;
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+        error = "invalid-workspace";
+    else
+        error = s->payload ? run_script(s, cwd, apply) : launch_command(s, cwd, NULL, apply);
+    free(cwd);
+    return error;
+}
+
 static const char *operation(const char *workspace, const struct bp_step *s, bool apply)
 {
     if (!workspace || !*workspace || !s) return "invalid-step";
@@ -251,6 +338,7 @@ static const char *operation(const char *workspace, const struct bp_step *s, boo
     case BP_COPY:
     case BP_REPLACE: return file_op(workspace, s, apply);
     case BP_INSTALL: return install(s, apply);
+    case BP_RUN: return run_command(workspace, s, apply);
     case BP_ENV: {
         if (!bp_env_name(s->name) || !s->value) return "invalid-environment";
         wchar_t *name = wide(s->name), *value = wide(s->value);

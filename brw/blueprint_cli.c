@@ -31,6 +31,19 @@ static void print_step(const struct bp_step *s)
     field("value", s->value);
     field("version", s->version);
     field("entry", s->entry);
+    if (s->op == BP_RUN) {
+        field("program", s->program);
+        printf(",\"args\":[");
+        for (size_t i = 0; i < s->argc; ++i) {
+            if (i) putchar(',');
+            if (s->payload && i == s->script_arg) {
+                printf("{\"payload\":");
+                quoted(s->payload->path);
+                putchar('}');
+            } else quoted(s->args[i]);
+        }
+        putchar(']');
+    }
     if (s->payload) {
         field("payload", s->payload->path);
         field("sha256", s->payload->digest);
@@ -85,7 +98,7 @@ int brw_blueprint_command(int argc, const char *const *argv)
     struct bp_plan plan = {0};
     char detail[BP_DETAIL_CAP] = "";
     const char *location = detail;
-    unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV);
+    unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) | (1u << BP_RUN);
 #ifdef BRW_BP_NATIVE_INSTALL
     capabilities |= 1u << BP_INSTALL;
 #endif

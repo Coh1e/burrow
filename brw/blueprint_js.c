@@ -176,10 +176,53 @@ void bp_plan_free(struct bp_plan *plan)
     if (!plan) return;
     for (size_t i = 0; i < plan->count; ++i) {
         struct bp_step *s = &plan->steps[i];
+        for (size_t j = 0; j < s->argc; ++j) free(s->args[j]);
+        free(s->args);
+        free(s->program);
         free(s->source); free(s->path); free(s->from); free(s->to);
         free(s->name); free(s->version); free(s->entry); free(s->value);
     }
     plan->count = 0;
+}
+
+static const struct bp_file *payload_field(JSContext *ctx, JSValueConst obj,
+                                          const struct bp_bundle *bundle, const char *module)
+{
+    char *ref = field(ctx, obj, "payload"), path[BP_DETAIL_CAP];
+    const struct bp_file *file = ref && relative_path(module, ref, path) ? bp_find(bundle, path) : NULL;
+    free(ref);
+    return file && !file->module ? file : NULL;
+}
+
+static const char *parse_command(JSContext *ctx, JSValueConst obj, const struct bp_bundle *bundle,
+                                 const char *module, struct bp_step *s)
+{
+    s->program = field(ctx, obj, "program");
+    JSValue args = JS_GetPropertyStr(ctx, obj, "args");
+    const char *error = "invalid-command";
+    size_t length;
+    if (!s->program || !*s->program || strchr(s->program, '"') || JS_IsArray(ctx, args) != 1 ||
+        !integer_field(ctx, args, "length", &length) || length > BP_MAX_ARGS) goto done;
+    s->args = calloc(length + 1, sizeof *s->args);
+    if (!s->args) { error = "out-of-memory"; goto done; }
+    for (size_t i = 0; i < length; ++i) {
+        JSValue arg = JS_GetPropertyUint32(ctx, args, (uint32_t)i);
+        if (JS_IsObject(arg) && !s->payload) {
+            s->payload = payload_field(ctx, arg, bundle, module);
+            JS_FreeValue(ctx, arg);
+            if (!s->payload) { error = "invalid-payload"; goto done; }
+            s->script_arg = i;
+        } else {
+            s->args[i] = copy_string(ctx, arg);
+            JS_FreeValue(ctx, arg);
+            if (!s->args[i]) goto done;
+        }
+        ++s->argc;
+    }
+    error = NULL;
+done:
+    JS_FreeValue(ctx, args);
+    return error;
 }
 
 static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const char *op,
@@ -198,16 +241,19 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         return;
     }
     if (s->op == BP_COPY || s->op == BP_INSTALL) {
-        char *ref = field(ctx, obj, "payload"), path[BP_DETAIL_CAP];
-        if (ref && relative_path(module->path, ref, path)) s->payload = bp_find(p->bundle, path);
-        free(ref);
-        if (!s->payload || s->payload->module) { fail(p, "invalid-payload", location); return; }
+        s->payload = payload_field(ctx, obj, p->bundle, module->path);
+        if (!s->payload) { fail(p, "invalid-payload", location); return; }
     }
     if (s->op == BP_COPY || s->op == BP_REPLACE) {
         s->path = field(ctx, obj, "path");
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }
     switch (s->op) {
+    case BP_RUN: {
+        const char *error = parse_command(ctx, obj, p->bundle, module->path, s);
+        if (error) fail(p, error, location);
+        break;
+    }
     case BP_COPY: break;
     case BP_REPLACE:
         s->from = field(ctx, obj, "from");
