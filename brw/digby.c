@@ -1,4 +1,11 @@
 #include "digby.h"
+#include "blueprint.h"
+
+const char *bp_op_name(enum bp_op op)
+{
+    static const char *const names[BP_OP_COUNT] = {"copy", "replace", "install", "env"};
+    return (unsigned)op < BP_OP_COUNT ? names[op] : "unknown";
+}
 
 const char *digby_plan_setting(const struct digby_setting *s, unsigned capabilities,
                                struct digby_setting_plan *out)

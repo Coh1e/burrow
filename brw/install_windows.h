@@ -3,6 +3,7 @@
 
 #include "digby.h"
 #include <stdbool.h>
+#include <stdio.h>
 #include <wchar.h>
 
 struct local_package {
@@ -47,6 +48,9 @@ const char *brw_check_uninstall(const wchar_t *name, wchar_t dependent[BRW_PACKA
 const char *brw_install_with_dependencies(const struct local_package *package, bool executable,
                                           const wchar_t *dependencies,
                                           const struct digby_plan *plan, size_t *failed_step);
+/* Consumes an open binary payload positioned at offset zero. Caller holds the
+   package mutation lock and has validated the package as a source package. */
+const char *brw_install_stream(const struct local_package *package, bool executable, FILE *payload);
 int brw_report_plan(bool json, bool preview, const char *status,
                     const struct digby_plan *plan, const char *error, size_t step);
 

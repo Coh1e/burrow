@@ -1,0 +1,20 @@
+# A valid content digest alone cannot authorize a package-relative name that
+# traverses an ancestor link, names a Windows device or escapes the root.
+set(bundle "${root}/reader")
+file(MAKE_DIRECTORY "${bundle}" "${root}/external")
+file(WRITE "${root}/external/main.mjs" "export default () => [];")
+file(SHA256 "${root}/external/main.mjs" hash)
+function(reject_member path reason)
+  file(WRITE "${bundle}/blueprint.manifest"
+    "brw-blueprint-v1\nentry\t${path}\nplatform\tany\narch\tany\nmodule\t${path}\t${hash}\n")
+  file(SHA256 "${bundle}/blueprint.manifest" trusted)
+  reject("${reason}")
+endfunction()
+reject_member("../external/main.mjs" unsafe-bundle-path)
+reject_member("CON.txt" unsafe-bundle-path)
+if(UNIX)
+  file(CREATE_LINK "${root}/external" "${bundle}/alias" SYMBOLIC)
+  reject_member("alias/main.mjs" bundle-file-unavailable)
+  file(CREATE_LINK "${root}/external/main.mjs" "${bundle}/hardlink.mjs")
+  reject_member("hardlink.mjs" bundle-file-unavailable)
+endif()

@@ -11,6 +11,8 @@ ctest --test-dir .local/brw-build --output-on-failure
 
 ## Register and use a source
 
+For verified offline bundles that combine package installation with file, text and session environment operations, see [Offline Blueprints](blueprint.md).
+
 ~~~text
 brw source add NAME CATALOG
 brw source list

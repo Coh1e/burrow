@@ -1491,7 +1491,8 @@ const char *brw_install_package(const struct local_package *package,
 
 static const char *run_lifecycle(enum digby_action action, const struct local_package *package,
                                  const struct digby_plan *plan, size_t *failed_step,
-                                 bool source, bool executable, const wchar_t *dependencies)
+                                 bool source, bool executable, const wchar_t *dependencies,
+                                 FILE *archive)
 {
     struct installation install = {0};
     install.package = package;
@@ -1499,6 +1500,7 @@ static const char *run_lifecycle(enum digby_action action, const struct local_pa
     install.action = action;
     install.source = source;
     install.executable = executable;
+    install.archive = archive;
     if (failed_step)
         *failed_step = 0;
     const char *error = digby_execute(plan, run_step, &install, failed_step);
@@ -1518,14 +1520,21 @@ static const char *run_lifecycle(enum digby_action action, const struct local_pa
 const char *brw_run_lifecycle(enum digby_action action, const struct local_package *package,
                              const struct digby_plan *plan, size_t *failed_step)
 {
-    return run_lifecycle(action, package, plan, failed_step, false, false, NULL);
+    return run_lifecycle(action, package, plan, failed_step, false, false, NULL, NULL);
 }
 
 const char *brw_install_with_dependencies(const struct local_package *package, bool executable,
                                           const wchar_t *dependencies,
                                           const struct digby_plan *plan, size_t *failed_step)
 {
-    return run_lifecycle(DIGBY_INSTALL, package, plan, failed_step, true, executable, dependencies);
+    return run_lifecycle(DIGBY_INSTALL, package, plan, failed_step, true, executable, dependencies, NULL);
+}
+
+const char *brw_install_stream(const struct local_package *package, bool executable, FILE *payload)
+{
+    if (!payload) return "archive-open";
+    const struct digby_plan plan = digby_install_plan();
+    return run_lifecycle(DIGBY_INSTALL, package, &plan, NULL, true, executable, NULL, payload);
 }
 
 int brw_list_installed(bool json)

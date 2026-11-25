@@ -1,0 +1,2 @@
+libgit2-1.9.7.tar.gz 1a4fbe7589e814777ae76b64734ad80f4ecad22cd33a22682a2aaea4ae5375e7 https://codeload.github.com/libgit2/libgit2/tar.gz/refs/tags/v1.9.7
+quickjs-2026-06-04.tar.xz b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz
