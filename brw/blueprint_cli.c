@@ -22,16 +22,22 @@ static void field(const char *key, const char *value)
     }
 }
 
-static void print_step(const struct bp_step *s)
+static void print_step(const struct bp_plan *plan, const struct bp_step *s)
 {
-    printf("{\"op\":\"%s\"", bp_op_name(s->op));
+    printf("{\"op\":");
+    quoted(s->skip_op ? s->skip_op : bp_op_name(s->op));
+    if (s->skip_platform) {
+        field("status", "skipped");
+        field("reason", "platform-mismatch");
+        field("platform", s->skip_platform);
+    }
     field("source", s->source);
     field("path", s->path);
     field("name", s->name);
     field("value", s->value);
     field("version", s->version);
     field("entry", s->entry);
-    if (s->op == BP_RUN) {
+    if (!s->skip_op && s->op == BP_RUN) {
         field("program", s->program);
         printf(",\"args\":[");
         for (size_t i = 0; i < s->argc; ++i) {
@@ -39,6 +45,16 @@ static void print_step(const struct bp_step *s)
             if (s->payload && i == s->script_arg) {
                 printf("{\"payload\":");
                 quoted(s->payload->path);
+                putchar('}');
+            } else if (s->bindings[i].output) {
+                const struct bp_output *output = &plan->outputs[s->bindings[i].output - 1];
+                if (s->bindings[i].writer) printf("{\"outputFile\":");
+                else {
+                    printf("{\"from\":");
+                    quoted(output->source);
+                    printf(",\"output\":");
+                }
+                quoted(output->name);
                 putchar('}');
             } else quoted(s->args[i]);
         }
@@ -64,7 +80,7 @@ static void report(const struct bp_plan *plan, bool json, bool preview,
         printf("{\"status\":\"%s\",\"completed\":%zu,\"steps\":[", status, completed);
         for (size_t i = 0; i < plan->count; ++i) {
             if (i) putchar(',');
-            print_step(&plan->steps[i]);
+            print_step(plan, &plan->steps[i]);
         }
         putchar(']');
         field("error", error);
@@ -73,7 +89,7 @@ static void report(const struct bp_plan *plan, bool json, bool preview,
     } else {
         printf("%s (%zu completed)\n", status, completed);
         for (size_t i = 0; i < plan->count; ++i) {
-            print_step(&plan->steps[i]);
+            print_step(plan, &plan->steps[i]);
             putchar('\n');
         }
         if (error) fprintf(stderr, "brw: %s %s\n", error, detail);
@@ -105,10 +121,9 @@ int brw_blueprint_command(int argc, const char *const *argv)
     const char *error = bp_load(argv[1], digest, BRW_BP_PLATFORM, BRW_BP_ARCH,
                                 capabilities, &bundle, detail);
     if (!error) error = bp_build(&bundle, &plan, detail);
-    size_t completed = 0, failed_step = 0;
+    size_t completed = 0;
     if (!error) {
-        error = digby_run_blueprint(&plan, workspace, preview, &completed, &failed_step);
-        if (error) location = plan.steps[failed_step].source;
+        error = digby_run_blueprint(&plan, workspace, preview, &completed, &location);
     }
     report(&plan, json, preview, error, error ? location : "", completed);
     bp_plan_free(&plan);

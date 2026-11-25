@@ -158,10 +158,14 @@ static const char *parse_manifest(char *text, const char *platform, const char *
             if (!bp_safe_path(value)) return "unsafe-bundle-path";
             bundle->entry = copy_string(value);
             if (!bundle->entry) return "out-of-memory";
-        } else if (!strcmp(kind, "requires")) {
+        } else if (!strcmp(kind, "requires") || !strcmp(kind, "optional")) {
             enum bp_op op = BP_COPY;
             while (op < BP_OP_COUNT && strcmp(bp_op_name(op), value)) ++op;
-            if (op == BP_OP_COUNT || !(capabilities & (1u << op))) return "missing-capability";
+            if (op == BP_OP_COUNT) return "missing-capability";
+            if (!(capabilities & (1u << op))) {
+                if (!strcmp(kind, "requires")) return "missing-capability";
+                bundle->unavailable |= 1u << op;
+            }
             if (bundle->required & (1u << op)) return "invalid-manifest";
             bundle->required |= 1u << op;
         } else if (!strcmp(kind, "platform")) {
@@ -188,6 +192,7 @@ const char *bp_load(const char *directory, const char *digest, const char *platf
                     char detail[BP_DETAIL_CAP])
 {
     if (!directory || !*directory || !platform || !arch || !out || !detail) return "invalid-bundle";
+    snprintf(out->platform, sizeof out->platform, "%s", platform);
     snprintf(detail, BP_DETAIL_CAP, "blueprint.manifest");
     if (!valid_digest(digest)) return "invalid-digest";
     struct bp_directory *dir = bp_directory_open(directory);
