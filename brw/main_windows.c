@@ -2,6 +2,7 @@
 #include "source_windows.h"
 #include "paths_windows.h"
 #include "settings_windows.h"
+#include "git_windows.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -65,6 +66,8 @@ int wmain(int argc, wchar_t **argv)
         else
             goto usage;
     }
+    if (!wcscmp(argv[1], L"git"))
+        return brw_git_command(count, args, json, preview);
     if (!wcscmp(argv[1], L"recover") && !count)
         return brw_recover(json, preview);
     if (!wcscmp(argv[1], L"init") && !count)
@@ -122,6 +125,7 @@ int wmain(int argc, wchar_t **argv)
 
 usage:
     fputs("usage: brw install|update NAME VERSION ARCHIVE SHA256 ENTRY [--dry-run] [--json]\n"
+          "       " BRW_GIT_USAGE "\n"
           "       brw rollback NAME VERSION [--dry-run] [--json]\n"
           "       brw source add NAME CATALOG | source remove NAME | source list\n"
           "       brw search [QUERY] | show [SOURCE/]NAME | list\n"

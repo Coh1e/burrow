@@ -13,6 +13,9 @@ struct local_package {
     const wchar_t *entry;
 };
 
+/* Removes a private staging directory tree without traversing reparse points. */
+bool brw_remove_git_stage(const wchar_t *stage);
+
 /* Input strings are borrowed for the duration of the call. Errors are static. */
 const char *brw_validate_package(const struct local_package *package);
 const char *brw_validate_lifecycle(enum digby_action action, const struct local_package *package);

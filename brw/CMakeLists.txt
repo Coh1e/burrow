@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.10...3.25)
 project(brw LANGUAGES C)
+set(CMAKE_C_STANDARD 99)
 if(WIN32)
   cmake_minimum_required(VERSION 3.25)
 endif()
@@ -20,6 +21,10 @@ if(BRW_MINIMAL AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
   message(FATAL_ERROR "BRW_MINIMAL requires Linux")
 endif()
 if(NOT WIN32 AND NOT BRW_MINIMAL)
+  option(BRW_TEST_GIT "Build managed worktree contract tests with the pinned Git sources" OFF)
+  if(BUILD_TESTING AND BRW_TEST_GIT)
+    include(git.cmake)
+  endif()
   return()
 endif()
 if(WIN32 AND NOT MINGW)
@@ -75,6 +80,9 @@ if(BRW_MINIMAL)
   return()
 endif()
 
+include(git.cmake)
+configure_file("${git_source}/COPYING" "${CMAKE_CURRENT_BINARY_DIR}/licenses/libgit2.txt" COPYONLY)
+
 add_executable(brw_shim shim_windows.c)
 target_link_options(brw_shim PRIVATE -municode -static -Wl,--no-insert-timestamp)
 add_executable(brw_gui_shim WIN32 shim_windows.c)
@@ -86,15 +94,16 @@ add_custom_command(OUTPUT "${shim_header}"
   DEPENDS brw_shim brw_gui_shim "${CMAKE_CURRENT_SOURCE_DIR}/embed_shim.cmake"
   VERBATIM)
 
-add_library(brw_common OBJECT main_windows.c cleanup_windows.c evidence_windows.c source_windows.c
+add_library(brw_common OBJECT main_windows.c git_windows.c cleanup_windows.c evidence_windows.c source_windows.c
   download_windows.c paths_windows.c init_windows.c init_command_windows.c settings_command_windows.c
   output_windows.c "${shim_header}")
+target_include_directories(brw_common SYSTEM PRIVATE "${git_source}/include")
 function(add_brw_cli target)
   add_executable(${target} install_windows.c settings_windows.c $<TARGET_OBJECTS:brw_common>)
   add_dependencies(${target} brw_common)
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
   target_compile_definitions(${target} PRIVATE LIBARCHIVE_STATIC)
-  target_link_libraries(${target} PRIVATE digby archive_static bcrypt winhttp advapi32 user32 shell32 ktmw32)
+  target_link_libraries(${target} PRIVATE digby archive_static brw_worktree bcrypt winhttp advapi32 user32 shell32 ktmw32)
   target_link_options(${target} PRIVATE -municode -static)
   set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -109,6 +118,9 @@ if(BUILD_TESTING)
   add_brw_cli(brw_test_interrupt)
   target_compile_definitions(brw_test_interrupt PRIVATE BRW_TEST_INTERRUPTS)
   find_program(POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
+  add_test(NAME brw_git COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+    -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-git.ps1"
+    -Brw "$<TARGET_FILE:brw>" -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME brw_settings
     COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
       -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-settings.ps1"

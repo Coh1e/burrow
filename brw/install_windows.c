@@ -748,11 +748,15 @@ static bool dots(const wchar_t *name)
     return !wcscmp(name, L".") || !wcscmp(name, L"..");
 }
 
-static bool remove_tree(const wchar_t *stage, unsigned depth)
+static bool remove_tree(const wchar_t *stage, unsigned depth, bool git_stage)
 {
-    wchar_t path[PATH_CAP];
-    if (depth > ARCHIVE_DEPTH || !ordinary_path(stage, true) || !join(path, stage, L"*"))
+    if ((!git_stage && depth > ARCHIVE_DEPTH) || !ordinary_path(stage, true))
         return false;
+    wchar_t *path = malloc(PATH_CAP * sizeof *path);
+    if (!path || !join(path, stage, L"*")) {
+        free(path);
+        return false;
+    }
     bool removed = true;
     WIN32_FIND_DATAW entry;
     HANDLE search = FindFirstFileW(path, &entry);
@@ -765,12 +769,15 @@ static bool remove_tree(const wchar_t *stage, unsigned depth)
                 continue;
             }
             if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                if (git_stage && (entry.dwFileAttributes & FILE_ATTRIBUTE_READONLY) &&
+                    !(entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                    SetFileAttributesW(path, entry.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY);
                 if (!DeleteFileW(path))
                     removed = false;
             } else if (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
                 if (!RemoveDirectoryW(path))
                     removed = false;
-            } else if (!remove_tree(path, depth + 1)) {
+            } else if (!remove_tree(path, depth + 1, git_stage)) {
                 removed = false;
             }
         } while (FindNextFileW(search, &entry));
@@ -780,12 +787,18 @@ static bool remove_tree(const wchar_t *stage, unsigned depth)
     } else if (GetLastError() != ERROR_FILE_NOT_FOUND) {
         removed = false;
     }
+    free(path);
     return removed && RemoveDirectoryW(stage);
+}
+
+bool brw_remove_git_stage(const wchar_t *stage)
+{
+    return remove_tree(stage, 0, true);
 }
 
 static bool remove_stage(const wchar_t *stage)
 {
-    return remove_tree(stage, 0);
+    return remove_tree(stage, 0, false);
 }
 
 /* Create a complete file under a staging name before making it visible. */
