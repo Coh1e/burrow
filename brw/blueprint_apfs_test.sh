@@ -3,8 +3,8 @@ set -eu
 format=$1
 brw=$2
 case "$format" in
-    APFS) folded=ON ;;
-    APFSX) folded=OFF ;;
+    APFS) folded=ON; filesystem=APFS ;;
+    APFSX) folded=OFF; filesystem='Case-sensitive APFS' ;;
     *) echo "Unknown APFS format: $format" >&2; exit 2 ;;
 esac
 
@@ -20,7 +20,7 @@ cleanup() {
 }
 mkdir "$volume"
 trap cleanup EXIT
-hdiutil create -size 128m -fs "$format" -volname "brw-$format" "$image"
+hdiutil create -size 128m -fs "$filesystem" -volname "brw-$format" "$image"
 hdiutil attach -nobrowse -mountpoint "$volume" "$image"
 attached=true
 (
