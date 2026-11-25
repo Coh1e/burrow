@@ -29,8 +29,8 @@ set(work "${root}/workspace")
 file(MAKE_DIRECTORY "${bundle}/children" "${work}")
 set(entry [=[
 export default () => [
-  {op:"include",module:"./children/files.mjs",args:{output:"one.txt",word:"first"}},
-  {op:"include",module:"./children/files.mjs",args:{output:"two.txt",word:"second"}},
+  {op:"include",module:"./children/files.mjs",args:{output:"debug.txt",word:"Debug"}},
+  {op:"include",module:"./children/files.mjs",args:{output:"release.txt",word:"Release"}},
   {op:"include",module:"./session.mjs",args:{name:"BRW_BLUEPRINT_TEST"}}
 ];
 ]=])
@@ -39,6 +39,9 @@ file(WRITE "${bundle}/children/files.mjs" [=[
 import {pattern} from "./words.mjs";
 export const inputs = ["output","word"];
 export default ({output,word}) => [
+  ...(word === "Release" ? [
+    {op:"replace",path:"debug.txt",from:"Hello Debug!",to:"Hello Debug! Seen by Release.",count:1}
+  ] : []),
   {op:"copy",payload:"sample.txt",path:output},
   {op:"replace",path:output,from:pattern,to:word,count:1}
 ];
@@ -49,7 +52,7 @@ file(WRITE "${bundle}/session.mjs" "export default ({name}) => [{op:'env',name,v
 set(modules main.mjs children/files.mjs children/words.mjs session.mjs)
 set(payloads children/sample.txt)
 set(caps copy replace env)
-set(expected_steps 5)
+set(expected_steps 6)
 if(DEFINED PAYLOAD)
   set(ENV{BRW_BIN_DIR} "${root}/parent-bin")
   foreach(dir CONFIG CACHE DATA STATE)
@@ -66,7 +69,7 @@ export default ({name}) => [
 ]=])
   string(CONFIGURE "${install_child}" install_child @ONLY)
   file(WRITE "${bundle}/session.mjs" "${install_child}")
-  set(expected_steps 6)
+  set(expected_steps 7)
 endif()
 function(invoke mode expected)
   execute_process(COMMAND "${BRW}" blueprint ${mode} "${bundle}" --sha256 "${trusted}"
@@ -89,6 +92,29 @@ endfunction()
 seal()
 invoke(preview 0)
 string(JSON planned GET "${report}" steps)
+function(check_build_call index call copy_step mode output)
+  string(JSON copy_source GET "${planned}" ${index} source)
+  string(JSON copy_op GET "${planned}" ${index} op)
+  string(JSON copy_path GET "${planned}" ${index} path)
+  math(EXPR index "${index} + 1")
+  string(JSON edit_source GET "${planned}" ${index} source)
+  string(JSON edit_op GET "${planned}" ${index} op)
+  string(JSON edit_path GET "${planned}" ${index} path)
+  string(JSON edit_value GET "${planned}" ${index} to)
+  set(origin "main.mjs[${call}] > children/files.mjs")
+  math(EXPR edit_step "${copy_step} + 1")
+  if(NOT copy_op STREQUAL "copy" OR NOT copy_source STREQUAL "${origin}[${copy_step}]" OR
+     NOT edit_op STREQUAL "replace" OR NOT edit_source STREQUAL "${origin}[${edit_step}]" OR
+     NOT copy_path STREQUAL output OR NOT edit_path STREQUAL output OR NOT edit_value STREQUAL mode)
+    message(FATAL_ERROR "expected ${mode} call at ${origin} writing ${output}: ${planned}")
+  endif()
+endfunction()
+check_build_call(0 1 1 Debug debug.txt)
+string(JSON release_source GET "${planned}" 2 source)
+if(NOT release_source STREQUAL "main.mjs[2] > children/files.mjs[1]")
+  message(FATAL_ERROR "unexpected source for Release's update of the Debug marker: ${release_source}")
+endif()
+check_build_call(3 2 2 Release release.txt)
 file(GLOB outputs "${work}/*")
 if(outputs OR EXISTS "${root}/bin" OR EXISTS "${root}/xdg-STATE")
   message(FATAL_ERROR "preview wrote ${outputs}")
@@ -96,10 +122,7 @@ endif()
 invoke(apply 0)
 string(JSON applied GET "${report}" steps)
 string(JSON n LENGTH "${applied}")
-string(JSON first GET "${applied}" 0 source)
-string(JSON second GET "${applied}" 2 source)
-if(NOT applied STREQUAL planned OR NOT n EQUAL expected_steps OR first STREQUAL second OR
-   NOT first MATCHES "main.mjs.*children/files.mjs")
+if(NOT applied STREQUAL planned OR NOT n EQUAL expected_steps)
   message(FATAL_ERROR "inconsistent plan or child origins: ${applied}")
 endif()
 if(DEFINED PAYLOAD)
@@ -109,10 +132,10 @@ if(DEFINED PAYLOAD)
     message(FATAL_ERROR "installed entry did not launch verified fixture: ${rc} ${stdout}")
   endif()
 endif()
-file(READ "${work}/one.txt" a)
-file(READ "${work}/two.txt" b)
-if(NOT a STREQUAL "Hello first!" OR NOT b STREQUAL "Hello second!")
-  message(FATAL_ERROR "child parameters were lost: '${a}', '${b}'")
+file(READ "${work}/debug.txt" debug_marker)
+file(READ "${work}/release.txt" release_marker)
+if(NOT debug_marker STREQUAL "Hello Debug! Seen by Release." OR NOT release_marker STREQUAL "Hello Release!")
+  message(FATAL_ERROR "incorrect build markers: '${debug_marker}', '${release_marker}'")
 endif()
 
 set(work "${root}/reject")
@@ -134,6 +157,12 @@ function(reject expected_error)
     endif()
   endforeach()
 endfunction()
+string(REPLACE [[,word:"Release"]] "" missing_word "${entry}")
+file(WRITE "${bundle}/main.mjs" "${missing_word}")
+seal()
+reject(missing-input "^main[.]mjs\\[2\\] > children/files[.]mjs: word$")
+file(WRITE "${bundle}/main.mjs" "${entry}")
+seal()
 file(APPEND "${bundle}/blueprint.manifest" "\n")
 reject(manifest-digest-mismatch)
 seal()
@@ -143,6 +172,9 @@ file(WRITE "${bundle}/children/sample.txt" "Hello TOKEN!")
 file(RENAME "${bundle}/children/words.mjs" "${bundle}/omitted")
 reject(bundle-file-unavailable)
 file(RENAME "${bundle}/omitted" "${bundle}/children/words.mjs")
+file(WRITE "${bundle}/session.mjs" "export default () => [{op:'include',module:'./main.mjs',args:{}}];")
+seal()
+reject(blueprint-cycle "^main[.]mjs\\[3\\] > session[.]mjs\\[1\\] > main[.]mjs$")
 file(WRITE "${bundle}/session.mjs" "import '../outside.mjs'; export default () => [];")
 seal()
 reject(invalid-import "main.mjs\\[3\\] > session.mjs.*outside.mjs")
