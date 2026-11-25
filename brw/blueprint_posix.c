@@ -21,6 +21,31 @@ extern char **environ;
 #include <sys/xattr.h>
 #endif
 
+bool bp_create_output_file(struct bp_output_file *file)
+{
+    char path[] = "/tmp/brw-output-XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0) return false;
+    if (!fcntl(fd, F_SETFD, FD_CLOEXEC)) {
+        file->path = strdup(path);
+        if (file->path) file->stream = fdopen(fd, "rb");
+    }
+    if (file->stream) return true;
+    close(fd);
+    unlink(path);
+    free(file->path);
+    file->path = NULL;
+    return false;
+}
+
+bool bp_remove_output_file(struct bp_output_file *file)
+{
+    bool ok = fclose(file->stream) == 0;
+    if (unlink(file->path) && errno != ENOENT) ok = false;
+    free(file->path);
+    return ok;
+}
+
 /* Anchor all lookups, including publication and cleanup, to open directories. */
 static int open_parent(const char *workspace, char *relative, char **leaf)
 {

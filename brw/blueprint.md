@@ -69,6 +69,32 @@ The argument list accepts up to 128 entries, including at most one script refere
 
 The planning runtime has no filesystem, process or network bindings. A bundle may declare up to 128 files. The reader limits the manifest to 128 KiB, each module to 1 MiB, each payload to 64 MiB and loaded member data to 128 MiB. Nested calls, plan size, JavaScript heap, stack and execution time are also bounded. An unavailable capability, invalid import or exceeded planning limit fails before application.
 
+## Passing outputs between calls
+
+A build module declares its required outputs by name. Pass an `outputFile` argument to the command that produces the value.
+
+```js
+export const outputs = ["archive"];
+export default ({mode}) => [{
+  op: "run", program: "cmake",
+  args: ["-P", {payload: "build.cmake"}, mode, {outputFile: "archive"}]
+}];
+```
+
+The script receives a fresh temporary file path for this invocation and output name. Write the archive path into that file as one nonempty UTF-8 line (up to 4096 bytes including any final LF or CRLF). Digby reads it when the invocation finishes. An empty or invalid value fails the producing invocation and stops subsequent steps. The archive itself remains in the build workspace.
+
+```js
+export default () => [
+  {op: "include", module: "build.mjs", args: {mode: "Debug"}},
+  {op: "include", module: "build.mjs", args: {mode: "Release"}},
+  {op: "include", module: "test.mjs", args: {archive: {from: 2, output: "archive"}}}
+];
+```
+
+`from` counts positions in the declaring module's step list starting at one. A later run can use the reference directly in its argument list. A child can receive it as a named input and pass it on as a command argument. Preview shows the producing call path and name. Apply passes the resolved text as one argument.
+
+Set a step or include's `platform` to `windows`, `linux`, `macos` or `any`. On a mismatch the plan reports the skipped position and reason. A selected command referencing a skipped producer fails during planning. Use an `optional` manifest field (for example, `optional<TAB>install`) for a capability only some platforms need. Selecting a step that needs an unavailable capability fails during planning.
+
 ## Build and test
 
 On Windows, prepare the pinned sources with `scripts/fetch-deps.ps1`. The MinGW-w64 build enables Blueprints by default.

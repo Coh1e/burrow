@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
@@ -19,10 +20,23 @@ struct bp_bundle {
     struct bp_file files[BP_MAX_FILES];
     size_t count;
     char *entry;
-    unsigned required; /* 1u << enum bp_op */
+    unsigned required, unavailable; /* 1u << enum bp_op */
+    char platform[8]; /* Host platform supplied to bp_load. */
+};
+
+struct bp_output {
+    char *name, *source; /* Owned declaration name and include position. */
+    size_t end; /* Successful step prefix at which the call returns. */
+};
+
+struct bp_binding {
+    size_t output;
+    bool writer;
 };
 
 struct bp_step {
+    struct bp_binding *bindings; /* Parallel to args. Output indices are one-based. */
+    char *skip_platform, *skip_op;
     enum bp_op op;
     char *source; /* Call path including the position within this module. */
     char *path, *from, *to, *name, *version, *entry, *value;
@@ -34,6 +48,9 @@ struct bp_step {
 
 struct bp_plan {
     struct bp_step steps[BP_MAX_STEPS];
+    struct bp_output outputs[BP_MAX_STEPS];
+    size_t output_count;
+    size_t checks[BP_MAX_STEPS], check_count; /* Output indices in call-return order. */
     size_t count;
 };
 
@@ -50,10 +67,19 @@ const char *bp_build(const struct bp_bundle *bundle, struct bp_plan *out, char d
 void bp_plan_free(struct bp_plan *plan);
 
 /* Runs a successfully built plan against the selected platform backend.
-   completed receives its executed prefix length; on error failed_step
-   identifies the zero-based step whose validation or execution failed. */
+   completed counts successful operations, excluding skipped steps. On error
+   failure_source borrows the failing step or producer position from plan. */
 const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspace, bool preview,
-                                size_t *completed, size_t *failed_step);
+                                size_t *completed, const char **failure_source);
+
+/* Create takes a zero-initialized file. Success owns a UTF-8 path and read
+   stream until remove closes the stream, deletes the file and frees the path. */
+struct bp_output_file {
+    char *path;
+    FILE *stream;
+};
+bool bp_create_output_file(struct bp_output_file *file);
+bool bp_remove_output_file(struct bp_output_file *file);
 
 /* The backend validates every step before the caller applies the first one.
    The workspace must already exist. Only bp_apply_step may change state. */

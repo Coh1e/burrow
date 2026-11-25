@@ -1,7 +1,7 @@
 #include "blueprint_edit.h"
 #include <stdlib.h>
 
-static bool valid_utf8(const char *text, size_t size)
+bool bp_valid_utf8(const char *text, size_t size)
 {
     const unsigned char *p = (const unsigned char *)text, *end = p + size;
     while (p < end) {
@@ -23,7 +23,7 @@ const char *bp_validate_file_operands(const struct bp_step *s)
     if (s->op == BP_COPY)
         return s->payload && !s->payload->module && s->payload->data ? NULL : "invalid-payload";
     if (s->op != BP_REPLACE || !s->from || !*s->from || !s->to) return "invalid-text-step";
-    return valid_utf8(s->from, strlen(s->from)) && valid_utf8(s->to, strlen(s->to)) ?
+    return bp_valid_utf8(s->from, strlen(s->from)) && bp_valid_utf8(s->to, strlen(s->to)) ?
            NULL : "invalid-utf8";
 }
 
@@ -32,7 +32,7 @@ static const char *replacement_size(const struct bp_step *s, const char *text,
 {
     if (size > BP_TEXT_LIMIT) return "text-limit";
     if (memchr(text, 0, size)) return "binary-text";
-    if (!valid_utf8(text, size)) return "invalid-utf8";
+    if (!bp_valid_utf8(text, size)) return "invalid-utf8";
     size_t from = strlen(s->from), to = strlen(s->to), matches = 0;
     if (!from) return "invalid-text-step";
     for (const char *p = text; (p = strstr(p, s->from)) != NULL; p += from) ++matches;

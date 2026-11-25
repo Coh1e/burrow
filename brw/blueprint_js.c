@@ -13,8 +13,10 @@ struct planner {
     char *detail;
     const char *error;
     const char *call;
+    const char *producer;
     const struct bp_file *active[MAX_DEPTH];
     JSValue compiled[BP_MAX_FILES];
+    JSValue snapshot, input_scope;
     size_t visits;
     unsigned interrupts;
     clock_t start;
@@ -177,12 +179,19 @@ void bp_plan_free(struct bp_plan *plan)
     for (size_t i = 0; i < plan->count; ++i) {
         struct bp_step *s = &plan->steps[i];
         for (size_t j = 0; j < s->argc; ++j) free(s->args[j]);
+        free(s->bindings);
+        free(s->skip_platform);
+        free(s->skip_op);
         free(s->args);
         free(s->program);
         free(s->source); free(s->path); free(s->from); free(s->to);
         free(s->name); free(s->version); free(s->entry); free(s->value);
     }
-    plan->count = 0;
+    for (size_t i = 0; i < plan->output_count; ++i) {
+        free(plan->outputs[i].name);
+        free(plan->outputs[i].source);
+    }
+    plan->check_count = plan->output_count = plan->count = 0;
 }
 
 static const struct bp_file *payload_field(JSContext *ctx, JSValueConst obj,
@@ -194,7 +203,64 @@ static const struct bp_file *payload_field(JSContext *ctx, JSValueConst obj,
     return file && !file->module ? file : NULL;
 }
 
-static const char *parse_command(JSContext *ctx, JSValueConst obj, const struct bp_bundle *bundle,
+static char *duplicate(const char *value)
+{
+    char *result = malloc(strlen(value) + 1);
+    if (result) strcpy(result, value);
+    return result;
+}
+
+static void declare_outputs(JSContext *ctx, struct planner *p, JSValueConst ns)
+{
+    JSValue list = JS_GetPropertyStr(ctx, ns, "outputs");
+    size_t count = 0;
+    if (!JS_IsUndefined(list) && (JS_IsArray(ctx, list) != 1 ||
+        !integer_field(ctx, list, "length", &count) ||
+        count > BP_MAX_STEPS - p->plan->output_count)) fail(p, "invalid-outputs", p->call);
+    size_t start = p->plan->output_count;
+    for (size_t i = 0; i < count && !p->error; ++i) {
+        JSValue key = JS_GetPropertyUint32(ctx, list, (uint32_t)i);
+        struct bp_output *output = &p->plan->outputs[p->plan->output_count++];
+        output->name = copy_string(ctx, key);
+        JS_FreeValue(ctx, key);
+        output->source = duplicate(p->producer);
+        output->end = SIZE_MAX;
+        if (!output->source || !output->name || !*output->name)
+            fail(p, "invalid-outputs", p->call);
+        for (size_t j = start; !p->error && j + 1 < p->plan->output_count; ++j)
+            if (!strcmp(p->plan->outputs[j].name, output->name)) fail(p, "invalid-outputs", p->call);
+    }
+    JS_FreeValue(ctx, list);
+}
+
+static bool reference_source(JSContext *ctx, JSValueConst ref, const char *scope,
+                             char source[BP_DETAIL_CAP])
+{
+    size_t index;
+    return integer_field(ctx, ref, "from", &index) && index &&
+           snprintf(source, BP_DETAIL_CAP, "%s[%zu]", scope, index) < BP_DETAIL_CAP;
+}
+
+static void bind_output(struct planner *p, struct bp_binding *binding, const char *name,
+                        const char *source, bool writer, const char *consumer)
+{
+    for (size_t j = 0; j < p->plan->output_count; ++j) {
+        struct bp_output *o = &p->plan->outputs[j];
+        if ((writer || o->end != SIZE_MAX) && !strcmp(source, o->source) && !strcmp(name, o->name)) {
+            binding->output = j + 1;
+            binding->writer = writer;
+            return;
+        }
+    }
+    char detail[BP_DETAIL_CAP];
+    if (snprintf(detail, sizeof detail, "%s: %s (%s)", consumer, source, name) >= (int)sizeof detail) {
+        fail(p, "blueprint-limit", consumer);
+        return;
+    }
+    fail(p, "unavailable-output", detail);
+}
+
+static const char *parse_command(JSContext *ctx, JSValueConst obj, struct planner *p,
                                  const char *module, struct bp_step *s)
 {
     s->program = field(ctx, obj, "program");
@@ -204,11 +270,31 @@ static const char *parse_command(JSContext *ctx, JSValueConst obj, const struct 
     if (!s->program || !*s->program || strchr(s->program, '"') || JS_IsArray(ctx, args) != 1 ||
         !integer_field(ctx, args, "length", &length) || length > BP_MAX_ARGS) goto done;
     s->args = calloc(length + 1, sizeof *s->args);
-    if (!s->args) { error = "out-of-memory"; goto done; }
+    s->bindings = calloc(length + 1, sizeof *s->bindings);
+    if (!s->args || !s->bindings) { error = "out-of-memory"; goto done; }
     for (size_t i = 0; i < length; ++i) {
         JSValue arg = JS_GetPropertyUint32(ctx, args, (uint32_t)i);
-        if (JS_IsObject(arg) && !s->payload) {
-            s->payload = payload_field(ctx, arg, bundle, module);
+        char *write_name = JS_IsObject(arg) ? field(ctx, arg, "outputFile") : NULL;
+        char *read_name = JS_IsObject(arg) ? field(ctx, arg, "output") : NULL;
+        if (write_name || read_name) {
+            char position[BP_DETAIL_CAP];
+            JSValue origin = read_name ? JS_Call(ctx, p->input_scope, JS_UNDEFINED, 1, &arg) : JS_UNDEFINED;
+            char *bound = copy_string(ctx, origin);
+            JS_FreeValue(ctx, origin);
+            const char *source = write_name ? p->producer : NULL;
+            if (!source && reference_source(ctx, arg, bound ? bound : p->call, position)) source = position;
+            if (!source || (write_name && read_name)) fail(p, "invalid-output-reference", s->source);
+            else bind_output(p, &s->bindings[i], write_name ? write_name : read_name,
+                             source, write_name != NULL, s->source);
+            free(bound);
+            free(write_name);
+            free(read_name);
+            JS_FreeValue(ctx, arg);
+            if (p->error) goto done;
+            s->args[i] = duplicate(""); /* Read-only validation placeholder. */
+            if (!s->args[i]) { error = "out-of-memory"; goto done; }
+        } else if (JS_IsObject(arg) && !s->payload) {
+            s->payload = payload_field(ctx, arg, p->bundle, module);
             JS_FreeValue(ctx, arg);
             if (!s->payload) { error = "invalid-payload"; goto done; }
             s->script_arg = i;
@@ -236,6 +322,13 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
     for (s->op = BP_COPY; s->op < BP_OP_COUNT; ++s->op)
         if (!strcmp(op, bp_op_name(s->op))) break;
     if (s->op == BP_OP_COUNT) { fail(p, "invalid-step", location); return; }
+    if (p->bundle->unavailable & (1u << s->op)) {
+        char detail[BP_DETAIL_CAP];
+        if (snprintf(detail, sizeof detail, "%s: %s", location, op) >= (int)sizeof detail)
+            fail(p, "blueprint-limit", location);
+        else fail(p, "missing-capability", detail);
+        return;
+    }
     if (!(p->bundle->required & (1u << s->op))) {
         fail(p, "undeclared-capability", location);
         return;
@@ -250,7 +343,7 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
     }
     switch (s->op) {
     case BP_RUN: {
-        const char *error = parse_command(ctx, obj, p->bundle, module->path, s);
+        const char *error = parse_command(ctx, obj, p, module->path, s);
         if (error) fail(p, error, location);
         break;
     }
@@ -279,18 +372,25 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
 static void expand(JSContext *ctx, struct planner *p, const struct bp_file *file,
                    JSValueConst args, const char *location, size_t depth);
 
-/* Each invocation gets its own JSON inputs, even when an author reuses the
-   same object for two includes. Child code can never mutate its caller's args. */
-static JSValue snapshot_args(JSContext *ctx, JSValueConst args)
-{
-    JSValue json = JS_JSONStringify(ctx, args, JS_UNDEFINED, JS_UNDEFINED);
-    size_t n = 0;
-    const char *bytes = JS_IsString(json) ? JS_ToCStringLen(ctx, &n, json) : NULL;
-    JSValue copy = bytes ? JS_ParseJSON(ctx, bytes, n, "<inputs>") : JS_UNDEFINED;
-    if (bytes) JS_FreeCString(ctx, bytes);
-    JS_FreeValue(ctx, json);
-    return copy;
-}
+/* Carry the lexical scope alongside each "from" field across a JSON snapshot.
+   Restore the original field and keep its origin private to the planner. */
+static const char input_helpers[] =
+    "(() => {"
+    "  const scopes = new WeakMap(), get = scopes.get.bind(scopes), set = scopes.set.bind(scopes);"
+    "  const {parse, stringify} = JSON;"
+    "  function snapshot(args, caller) {"
+    "    const json = stringify(args, function(key, value) {"
+    "      if (key === 'from' && value !== undefined && typeof value !== 'function' && typeof value !== 'symbol')"
+    "        return [value, get(this) || caller];"
+    "      return value;"
+    "    });"
+    "    return parse(json, function(key, value) {"
+    "      if (key === 'from') { set(this, value[1]); return value[0]; }"
+    "      return value;"
+    "    });"
+    "  }"
+    "  return [snapshot, get];"
+    "})()";
 
 static void include(JSContext *ctx, struct planner *p, JSValueConst obj,
                     const struct bp_file *parent, const char *position, size_t depth)
@@ -307,20 +407,47 @@ static void include(JSContext *ctx, struct planner *p, JSValueConst obj,
             fail(p, "blueprint-limit", position);
         else if (!file || !file->module) fail(p, "missing-module", call);
         else {
-            JSValue bound = snapshot_args(ctx, args);
+            JSValue inputs[] = {args, JS_NewString(ctx, p->call)};
+            JSValue bound = JS_Call(ctx, p->snapshot, JS_UNDEFINED, 2, inputs);
+            JS_FreeValue(ctx, inputs[1]);
             if (!JS_IsObject(bound) || JS_IsArray(ctx, bound))
                 fail(p, "invalid-arguments", position);
             else {
                 const char *caller = p->call;
+                const char *producer = p->producer;
+                p->producer = position;
                 p->call = call;
                 expand(ctx, p, file, bound, call, depth + 1);
                 p->call = caller;
+                p->producer = producer;
             }
             JS_FreeValue(ctx, bound);
         }
     }
     JS_FreeValue(ctx, args);
     free(ref);
+}
+
+static bool platform_skips(JSContext *ctx, struct planner *p, JSValueConst obj,
+                           const char *position, const char *op)
+{
+    JSValue value = JS_GetPropertyStr(ctx, obj, "platform");
+    bool specified = !JS_IsUndefined(value);
+    char *platform = copy_string(ctx, value);
+    JS_FreeValue(ctx, value);
+    if (specified && (!platform || (strcmp(platform, "any") && strcmp(platform, "windows") &&
+        strcmp(platform, "linux") && strcmp(platform, "macos")))) fail(p, "invalid-platform", position);
+    if (p->error || !platform || !strcmp(platform, "any") || !strcmp(platform, p->bundle->platform)) {
+        free(platform);
+        return p->error != NULL;
+    }
+    struct bp_step *s = &p->plan->steps[p->plan->count++];
+    *s = (struct bp_step){.op = BP_OP_COUNT};
+    s->skip_platform = platform;
+    s->skip_op = duplicate(op);
+    s->source = duplicate(position);
+    if (!s->source || !s->skip_op) fail(p, "out-of-memory", position);
+    return true;
 }
 
 static void verify_inputs(JSContext *ctx, struct planner *p, JSValueConst ns, JSValueConst args,
@@ -373,6 +500,9 @@ static void expand(JSContext *ctx, struct planner *p, const struct bp_file *file
     JS_FreeValue(ctx, job);
     if (p->error) return;
     JSValue ns = JS_GetModuleNamespace(ctx, def);
+    size_t first_output = p->plan->output_count;
+    declare_outputs(ctx, p, ns);
+    size_t end_output = p->plan->output_count;
     verify_inputs(ctx, p, ns, args, location);
     JSValue fn = JS_GetPropertyStr(ctx, ns, "default");
     JSValue steps = p->error ? JS_UNDEFINED : JS_Call(ctx, fn, JS_UNDEFINED, 1, &args);
@@ -391,10 +521,16 @@ static void expand(JSContext *ctx, struct planner *p, const struct bp_file *file
         JSValue obj = JS_GetPropertyUint32(ctx, steps, (uint32_t)i);
         char *op = field(ctx, obj, "op");
         if (!op) fail(p, "invalid-step", position);
-        else if (!strcmp(op, "include")) include(ctx, p, obj, file, position, depth);
-        else add_step(ctx, p, obj, op, file, position);
+        else if (!platform_skips(ctx, p, obj, position, op)) {
+            if (!strcmp(op, "include")) include(ctx, p, obj, file, position, depth);
+            else add_step(ctx, p, obj, op, file, position);
+        }
         free(op);
         JS_FreeValue(ctx, obj);
+    }
+    for (size_t j = first_output; j < end_output; ++j) {
+        p->plan->outputs[j].end = p->plan->count;
+        p->plan->checks[p->plan->check_count++] = j;
     }
     JS_FreeValue(ctx, steps);
     JS_FreeValue(ctx, fn);
@@ -409,7 +545,7 @@ const char *bp_build(const struct bp_bundle *bundle, struct bp_plan *out, char d
     const struct bp_file *entry = bp_find(bundle, bundle->entry);
     if (!entry || !entry->module) return "missing-module";
     struct planner p = { .bundle = bundle, .plan = out, .detail = detail,
-                         .call = entry->path, .start = clock() };
+                         .call = entry->path, .producer = entry->path, .start = clock() };
     for (size_t i = 0; i < bundle->count; ++i) p.compiled[i] = JS_UNDEFINED;
     JSRuntime *rt = JS_NewRuntime();
     if (!rt) return "blueprint-limit";
@@ -428,10 +564,18 @@ const char *bp_build(const struct bp_bundle *bundle, struct bp_plan *out, char d
         JSValue math = JS_GetPropertyStr(ctx, global, "Math");
         if (JS_SetPropertyStr(ctx, math, "random", JS_UNDEFINED) < 0)
             fail(&p, "module-evaluation", entry->path);
+        JSValue helpers = JS_Eval(ctx, input_helpers, sizeof input_helpers - 1, "<inputs>", JS_EVAL_TYPE_GLOBAL);
+        p.snapshot = JS_GetPropertyUint32(ctx, helpers, 0);
+        p.input_scope = JS_GetPropertyUint32(ctx, helpers, 1);
+        if (!JS_IsFunction(ctx, p.snapshot) || !JS_IsFunction(ctx, p.input_scope))
+            fail(&p, "blueprint-limit", entry->path);
+        JS_FreeValue(ctx, helpers);
         JSValue args = JS_NewObject(ctx);
         if (!p.error) expand(ctx, &p, entry, args, entry->path, 0);
         if (JS_IsJobPending(rt)) fail(&p, "async-blueprint", entry->path);
         JS_FreeValue(ctx, args);
+        JS_FreeValue(ctx, p.input_scope);
+        JS_FreeValue(ctx, p.snapshot);
         JS_FreeValue(ctx, math);
         JS_FreeValue(ctx, global);
     }

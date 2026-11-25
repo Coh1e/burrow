@@ -12,6 +12,45 @@
 #include "command_line_windows.h"
 #include <bcrypt.h>
 
+bool bp_create_output_file(struct bp_output_file *file)
+{
+    wchar_t path[32768];
+    DWORD n = GetTempPathW(32768, path);
+    ULONGLONG id;
+    if (!n || n >= 32768 || BCryptGenRandom(NULL, (PUCHAR)&id, sizeof id,
+        BCRYPT_USE_SYSTEM_PREFERRED_RNG) ||
+        swprintf(path + n, 32768 - n, L"brw-output-%016llx", id) < 0) return false;
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, path, -1, NULL, 0, NULL, NULL);
+    file->path = bytes ? malloc((size_t)bytes) : NULL;
+    if (!file->path) return false;
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, file->path, bytes, NULL, NULL);
+    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                           CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+        int fd = _open_osfhandle((intptr_t)h, _O_RDONLY | _O_BINARY | _O_NOINHERIT);
+        if (fd < 0) CloseHandle(h);
+        else {
+            file->stream = _fdopen(fd, "rb");
+            if (file->stream) return true;
+            _close(fd);
+        }
+        DeleteFileW(path);
+    }
+    free(file->path);
+    file->path = NULL;
+    return false;
+}
+
+bool bp_remove_output_file(struct bp_output_file *file)
+{
+    wchar_t *path = wide(file->path);
+    bool ok = fclose(file->stream) == 0;
+    if (!path || !DeleteFileW(path)) ok = false;
+    free(path);
+    free(file->path);
+    return ok;
+}
+
 static HANDLE open_parent(const char *workspace, wchar_t *path, wchar_t **leaf)
 {
     wchar_t *root = wide(workspace);
