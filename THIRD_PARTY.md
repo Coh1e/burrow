@@ -4,6 +4,7 @@ Dependencies are fetched at fixed versions into the ignored project-local depend
 
 | Dependency | Version | Source / license |
 | --- | --- | --- |
+| QuickJS | 2026-06-04 | [Official source archive](https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz), MIT. Blueprint builds copy the upstream LICENSE beside the executable. |
 | nlohmann/json | 3.12.0 | [Official release](https://github.com/nlohmann/json/releases/tag/v3.12.0), MIT; original license fetched and hash-checked with the header |
 | libgit2 | 1.9.7 | [Official release](https://github.com/libgit2/libgit2/releases/tag/v1.9.7), GPLv2 with linking exception; complete upstream COPYING includes bundled dependency notices |
 | libarchive | 3.7.7 | [Official release](https://github.com/libarchive/libarchive/releases/tag/v3.7.7), BSD-2-Clause; complete upstream COPYING is copied beside the build |

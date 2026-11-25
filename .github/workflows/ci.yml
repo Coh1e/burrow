@@ -10,6 +10,28 @@ on:
   pull_request:
 
 jobs:
+  blueprint-apfs:
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build brw with the pinned Blueprint dependencies
+        id: build
+        run: |
+          sh scripts/fetch-blueprint-deps.sh
+          cmake -S brw -B .local/brw-blueprint -DBRW_BLUEPRINT=ON -DBUILD_TESTING=ON
+          cmake --build .local/brw-blueprint --target brw --parallel
+          shasum -a 256 .local/brw-blueprint/brw
+      - name: Verify Blueprint on case-insensitive APFS
+        run: sh brw/blueprint_apfs_test.sh APFS "$GITHUB_WORKSPACE/.local/brw-blueprint/brw"
+      - name: Verify Blueprint on case-sensitive APFS
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: sh brw/blueprint_apfs_test.sh APFSX "$GITHUB_WORKSPACE/.local/brw-blueprint/brw"
+
   build-and-test:
     runs-on: windows-latest
     timeout-minutes: 45

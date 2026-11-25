@@ -3,6 +3,7 @@
 #include "paths_windows.h"
 #include "settings_windows.h"
 #include "git_windows.h"
+#include "blueprint_cli.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -50,6 +51,10 @@ int wmain(int argc, wchar_t **argv)
     };
     if (argc < 2)
         goto usage;
+#ifdef BRW_BLUEPRINT
+    if (!wcscmp(argv[1], L"blueprint"))
+        return brw_blueprint_wcommand(argc - 2, argv + 2);
+#endif
     if (!wcscmp(argv[1], L"env") || !wcscmp(argv[1], L"registry"))
         return brw_settings_command(argc, argv);
     size_t command = 0;
@@ -126,6 +131,9 @@ int wmain(int argc, wchar_t **argv)
 usage:
     fputs("usage: brw install|update NAME VERSION ARCHIVE SHA256 ENTRY [--dry-run] [--json]\n"
           "       " BRW_GIT_USAGE "\n"
+#ifdef BRW_BLUEPRINT
+          "       " BRW_BLUEPRINT_USAGE "\n"
+#endif
           "       brw rollback NAME VERSION [--dry-run] [--json]\n"
           "       brw source add NAME CATALOG | source remove NAME | source list\n"
           "       brw search [QUERY] | show [SOURCE/]NAME | list\n"

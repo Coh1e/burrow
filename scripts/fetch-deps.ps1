@@ -29,12 +29,24 @@ foreach ($file in @(
 }
 Write-Output 'Verified nlohmann/json v3.12.0'
 
-$gitArchive = Get-PinnedFile 'libgit2-1.9.7.tar.gz' 'https://codeload.github.com/libgit2/libgit2/tar.gz/refs/tags/v1.9.7' '1a4fbe7589e814777ae76b64734ad80f4ecad22cd33a22682a2aaea4ae5375e7' $sources
-if (-not (Test-Path -LiteralPath (Join-Path $sources 'libgit2-1.9.7/CMakeLists.txt'))) {
-    & tar.exe -xf $gitArchive -C $sources 'libgit2-1.9.7/CMakeLists.txt' 'libgit2-1.9.7/cmake/*' 'libgit2-1.9.7/include/*' 'libgit2-1.9.7/src/*' 'libgit2-1.9.7/deps/*' 'libgit2-1.9.7/COPYING'
-    if ($LASTEXITCODE -ne 0) { throw 'Git library source extraction failed' }
+foreach ($pin in (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'blueprint-sources.txt'))) {
+    $name, $digest, $url = $pin.Split(' ')
+    $archive = Get-PinnedFile $name $url $digest $sources
+    $directory = $name.Substring(0, $name.IndexOf('.tar.'))
+    $members = @()
+    if ($directory -like 'libgit2-*') {
+        $marker = 'CMakeLists.txt'
+        $members = @("$directory/CMakeLists.txt", "$directory/cmake/*", "$directory/include/*",
+                     "$directory/src/*", "$directory/deps/*", "$directory/COPYING")
+    } elseif ($directory -like 'quickjs-*') {
+        $marker = 'quickjs.c'
+    } else { throw "Unknown Blueprint dependency: $name" }
+    if (-not (Test-Path -LiteralPath (Join-Path $sources "$directory/$marker"))) {
+        & tar.exe -xf $archive -C $sources @members
+        if ($LASTEXITCODE -ne 0) { throw "Source extraction failed: $name" }
+    }
+    Write-Output "Verified $directory sources"
 }
-Write-Output 'Verified libgit2 v1.9.7 sources'
 
 $archiveDependencies = @(
     @{Name='libarchive-3.7.7.tar.gz'; Url='https://codeload.github.com/libarchive/libarchive/tar.gz/refs/tags/v3.7.7'; Hash='fa62384995e8aa4f5a901c184fb5c91e56a29e24c05b6881a7f8fd5bbea694d2'; Directory='libarchive-3.7.7'},
