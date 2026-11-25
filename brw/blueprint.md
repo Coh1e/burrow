@@ -9,6 +9,8 @@ brw blueprint apply kit --sha256 DIGEST --workspace project --json
 
 `apply --dry-run` also previews. Each invocation verifies the manifest bytes, loads and hashes every declared file, and builds the complete plan before it executes a step. The JSON `steps` array records the operation, operands and call path. On failure, `completed` counts successful steps and `detail` identifies the failing input or call site. Completed operations retain their results.
 
+If read-only preflight cannot determine whether two planned output paths differing in ASCII case refer to the same destination, both preview and apply return `path-case-unknown` with `completed` set to zero. A confirmed duplicate copy destination returns `destination-exists`.
+
 ## Package layout
 
 Version 1 uses an ASCII manifest with tab-separated fields and LF or CRLF lines. In this example, replace each digest placeholder with the SHA-256 of the named file's exact bytes.

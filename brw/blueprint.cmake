@@ -48,4 +48,14 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME blueprint_cli COMMAND "${CMAKE_COMMAND}" "-DBRW=$<TARGET_FILE:brw>" ${bp_fixture_args}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/blueprint_test.cmake")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME blueprint_cli_ramfs COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/blueprint_ramfs_test.sh"
+      "${CMAKE_COMMAND}" "-DBRW=$<TARGET_FILE:brw>" -DBLUEPRINT_COPY_CASE_ONLY=ON
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/blueprint_test.cmake")
+    set_tests_properties(blueprint_cli_ramfs PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME blueprint_cli_unknown_case COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/blueprint_unknown_case_test.sh"
+      "${CMAKE_COMMAND}" "-DBRW=$<TARGET_FILE:brw>" -DBLUEPRINT_UNKNOWN_CASE_ONLY=ON
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/blueprint_test.cmake")
+    set_tests_properties(blueprint_cli_unknown_case PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
 endif()

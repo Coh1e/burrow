@@ -34,7 +34,9 @@ static int interrupt(JSRuntime *rt, void *opaque)
     (void)rt;
     if (++p->interrupts < 5000 &&
         ((double)clock() - (double)p->start) / CLOCKS_PER_SEC < 2.0) return 0;
-    fail(p, "blueprint-limit", "execution budget exhausted");
+    char detail[BP_DETAIL_CAP];
+    snprintf(detail, sizeof detail, "%s: execution budget exhausted", p->call);
+    fail(p, "blueprint-limit", detail);
     return 1;
 }
 

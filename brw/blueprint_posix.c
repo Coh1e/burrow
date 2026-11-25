@@ -1,10 +1,21 @@
 #define _POSIX_C_SOURCE 200809L
 #include "blueprint_edit.h"
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/attr.h>
+#include <sys/mount.h>
+#else
+#include <linux/fs.h>
+#include <linux/magic.h>
+#include <sys/ioctl.h>
+#include <sys/vfs.h>
+#include <sys/xattr.h>
+#endif
 
 /* Anchor all lookups, including publication and cleanup, to open directories. */
 static int open_parent(const char *workspace, char *relative, char **leaf)
@@ -21,6 +32,87 @@ static int open_parent(const char *workspace, char *relative, char **leaf)
         *leaf = slash + 1;
     }
     return parent;
+}
+
+/* Some shared mounts omit case-policy metadata. Look up a second spelling of
+   an actual single-link file in this directory without modifying any entry. */
+static int observe_directory_case(int dir)
+{
+    int fd = dup(dir);
+    if (fd < 0) return -1;
+    DIR *entries = fdopendir(fd);
+    if (!entries) { close(fd); return -1; }
+    int result = -1;
+    struct dirent *entry;
+    while (result < 0 && (entry = readdir(entries)) != NULL) {
+        size_t i = strcspn(entry->d_name, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+        if (!entry->d_name[i]) continue;
+        struct stat original, alternate;
+        if (fstatat(dir, entry->d_name, &original, AT_SYMLINK_NOFOLLOW) ||
+            !S_ISREG(original.st_mode) || original.st_nlink != 1) continue;
+        char *name = strdup(entry->d_name);
+        if (!name) break;
+        name[i] ^= 0x20; /* toggle one ASCII letter */
+        if (!fstatat(dir, name, &alternate, AT_SYMLINK_NOFOLLOW))
+            result = alternate.st_dev != original.st_dev || alternate.st_ino != original.st_ino;
+        else if (errno == ENOENT) result = 1;
+        free(name);
+    }
+    closedir(entries);
+    return result;
+}
+
+/* Return 1 for sensitive, 0 for folded, -1 when the mount cannot tell us.
+   Preview must not create a temporary entry to probe a directory. */
+static int directory_case_sensitive(int dir)
+{
+#ifdef __APPLE__
+    struct statfs volume;
+    struct attrlist attrs = { .bitmapcount = ATTR_BIT_MAP_COUNT,
+                              .volattr = ATTR_VOL_INFO | ATTR_VOL_CAPABILITIES };
+    struct { uint32_t size; vol_capabilities_attr_t caps; } reply;
+    if (fstatfs(dir, &volume) ||
+        getattrlist(volume.f_mntonname, &attrs, &reply, sizeof reply, 0) ||
+        reply.size != sizeof reply ||
+        !(reply.caps.valid[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_CASE_SENSITIVE))
+        return observe_directory_case(dir);
+    return !!(reply.caps.capabilities[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_CASE_SENSITIVE);
+#else
+    char wsl_flag;
+    if (fgetxattr(dir, "system.wsl_case_sensitive", &wsl_flag, sizeof wsl_flag) == 1 &&
+        (wsl_flag == '0' || wsl_flag == '1')) return wsl_flag == '1';
+    long flags = 0;
+    if (!ioctl(dir, FS_IOC_GETFLAGS, &flags)) return !(flags & FS_CASEFOLD_FL);
+    /* ramfs uses case-sensitive VFS lookup and has no per-directory case flag. */
+    struct statfs fs;
+    if (!fstatfs(dir, &fs) && (unsigned long)fs.f_type == RAMFS_MAGIC) return 1;
+    return observe_directory_case(dir);
+#endif
+}
+
+const char *bp_compare_output_case(const char *workspace, const char *a,
+                                   const char *b, enum bp_output_match *match)
+{
+    char *pa = strdup(a), *pb = strdup(b), *la = NULL, *lb = NULL;
+    int da = pa ? open_parent(workspace, pa, &la) : -1;
+    int db = pb ? open_parent(workspace, pb, &lb) : -1;
+    struct stat ia, ib;
+    const char *error = "inspect-output";
+    if (da >= 0 && db >= 0 && !fstat(da, &ia) && !fstat(db, &ib)) {
+        error = NULL;
+        bool same_dir = ia.st_dev == ib.st_dev && ia.st_ino == ib.st_ino;
+        *match = same_dir ? BP_SAME_OUTPUT : BP_DISTINCT_OUTPUTS;
+        if (same_dir && strcmp(la, lb)) {
+            int sensitive = directory_case_sensitive(da);
+            if (sensitive < 0) *match = BP_UNKNOWN_CASE;
+            else if (sensitive) *match = BP_DISTINCT_OUTPUTS;
+        }
+    }
+    if (da >= 0) close(da);
+    if (db >= 0) close(db);
+    free(pa);
+    free(pb);
+    return error;
 }
 
 static const char *read_file(int parent, const char *name, struct stat *before,

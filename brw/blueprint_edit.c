@@ -50,14 +50,20 @@ const char *bp_replace_text(FILE *stage, const struct bp_step *s, const char *te
     return brw_literal(stage, text, s->from, s->to, &s->count) ? "write-text" : NULL;
 }
 
-static bool same_path(const char *a, const char *b)
+static unsigned fold_ascii(unsigned c)
 {
-#ifdef _WIN32
-    /* bp_safe_path admits only printable ASCII names. */
-    return !_stricmp(a, b);
-#else
-    return !strcmp(a, b);
-#endif
+    return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
+}
+
+static const char *compare_outputs(const char *workspace, const char *a, const char *b,
+                                   enum bp_output_match *match)
+{
+    *match = BP_SAME_OUTPUT;
+    if (!strcmp(a, b)) return NULL;
+    *match = BP_DISTINCT_OUTPUTS;
+    for (size_t i = 0; a[i] || b[i]; ++i)
+        if (fold_ascii((unsigned char)a[i]) != fold_ascii((unsigned char)b[i])) return NULL;
+    return bp_compare_output_case(workspace, a, b, match);
 }
 
 /* Build the validated result in memory to supply the next edit on this
@@ -101,10 +107,18 @@ const char *bp_validate_text_plan(const char *workspace, const struct bp_plan *p
         size_t size = 0;
         for (size_t j = i; j < stop; ++j) {
             const struct bp_step *s = &plan->steps[j];
-            if ((s->op != BP_REPLACE && s->op != BP_COPY) || !same_path(first->path, s->path))
-                continue;
+            if (s->op != BP_REPLACE && s->op != BP_COPY) continue;
+            enum bp_output_match match;
+            const char *error = compare_outputs(workspace, first->path, s->path, &match);
+            if (!error && match == BP_UNKNOWN_CASE)
+                error = "path-case-unknown";
+            if (error) {
+                first_error = error;
+                stop = j;
+                break;
+            }
+            if (match == BP_DISTINCT_OUTPUTS) continue;
             checked[j] = true;
-            const char *error = NULL;
             if (s->op == BP_COPY) {
                 if (j != i) error = "destination-exists";
                 else {

@@ -35,11 +35,11 @@ file(WRITE "${work}/existing" "A${malformed}")
 reject_text_step(2 invalid-utf8)
 
 # The first replacement yields exactly the allowed 16 MiB; the second
-# would grow it beyond the cap. On Windows both spellings name one file.
+# would grow it beyond the cap. Use the alias when this directory supports it.
 string(REPEAT "X" 4096 seed)
 file(WRITE "${bundle}/seed" "${seed}")
 set(spelling marker)
-if(WIN32)
+if(EXISTS "${work}/EXISTING")
   set(spelling MARKER)
 endif()
 file(WRITE "${bundle}/main.mjs"

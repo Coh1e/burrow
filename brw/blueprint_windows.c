@@ -32,6 +32,39 @@ static HANDLE open_parent(const char *workspace, wchar_t *path, wchar_t **leaf)
     return dir;
 }
 
+const char *bp_compare_output_case(const char *workspace, const char *a,
+                                   const char *b, enum bp_output_match *match)
+{
+    wchar_t *pa = wide(a), *pb = wide(b), *la = NULL, *lb = NULL;
+    HANDLE da = pa ? open_parent(workspace, pa, &la) : INVALID_HANDLE_VALUE;
+    HANDLE db = pb ? open_parent(workspace, pb, &lb) : INVALID_HANDLE_VALUE;
+    BY_HANDLE_FILE_INFORMATION ia, ib;
+    const char *error = "inspect-output";
+    if (da != INVALID_HANDLE_VALUE && db != INVALID_HANDLE_VALUE &&
+        GetFileInformationByHandle(da, &ia) && GetFileInformationByHandle(db, &ib)) {
+        error = NULL;
+        bool same_dir = ia.dwVolumeSerialNumber == ib.dwVolumeSerialNumber &&
+                        ia.nFileIndexHigh == ib.nFileIndexHigh && ia.nFileIndexLow == ib.nFileIndexLow;
+        *match = same_dir ? BP_SAME_OUTPUT : BP_DISTINCT_OUTPUTS;
+        if (same_dir && wcscmp(la, lb)) {
+            FILE_CASE_SENSITIVE_INFO info;
+            /* FileCaseSensitiveInfo is omitted by SDKs targeting older Windows. */
+            if (GetFileInformationByHandleEx(da, (FILE_INFO_BY_HANDLE_CLASS)23, &info, sizeof info))
+                *match = (info.Flags & FILE_CS_FLAG_CASE_SENSITIVE_DIR) ? BP_DISTINCT_OUTPUTS : BP_SAME_OUTPUT;
+            else {
+                DWORD flags;
+                if (!GetVolumeInformationByHandleW(da, NULL, 0, NULL, NULL, &flags, NULL, 0) ||
+                    (flags & FILE_CASE_SENSITIVE_SEARCH)) *match = BP_UNKNOWN_CASE;
+            }
+        }
+    }
+    if (da != INVALID_HANDLE_VALUE) CloseHandle(da);
+    if (db != INVALID_HANDLE_VALUE) CloseHandle(db);
+    free(pa);
+    free(pb);
+    return error;
+}
+
 static HANDLE new_stage(HANDLE parent, bool temporary, const wchar_t *target)
 {
     for (unsigned i = 0; i < 64; ++i) {
