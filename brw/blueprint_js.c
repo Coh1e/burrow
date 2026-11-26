@@ -197,6 +197,8 @@ void bp_plan_free(struct bp_plan *plan)
         if (s->state) {
             free_command(&s->state->check);
             free_command(&s->state->change);
+            free(s->state->required);
+            free(s->state->detected);
             free(s->state);
         }
         free(s->skip_platform);
@@ -336,12 +338,10 @@ done:
     return error;
 }
 
-static const char *parse_state(JSContext *ctx, JSValueConst obj, struct planner *p,
-                               const char *module, struct bp_step *s)
+static bool parse_unmet_codes(JSContext *ctx, JSValueConst obj, struct bp_state *state)
 {
-    struct bp_state *state = s->state = calloc(1, sizeof *state);
-    if (!state) return "out-of-memory";
     JSValue list = JS_GetPropertyStr(ctx, obj, "unmet");
+    if (JS_IsUndefined(list)) return state->required != NULL;
     size_t length;
     bool valid = JS_IsArray(ctx, list) == 1 && integer_field(ctx, list, "length", &length) &&
                  length <= 255;
@@ -353,18 +353,36 @@ static const char *parse_state(JSContext *ctx, JSValueConst obj, struct planner 
         if (valid) state->unmet[code] = 1;
     }
     JS_FreeValue(ctx, list);
-    if (!valid) return "invalid-unmet-codes";
+    return valid;
+}
+
+static const char *parse_state(JSContext *ctx, JSValueConst obj, struct planner *p,
+                               const char *module, struct bp_step *s)
+{
+    struct bp_state *state = s->state = calloc(1, sizeof *state);
+    if (!state) return "out-of-memory";
+    bool host = s->op == BP_HOST;
+    if (host) {
+        state->required = field(ctx, obj, "required");
+        if (!state->required || !*state->required || strpbrk(state->required, "\r\n") ||
+            !bp_valid_utf8(state->required, strlen(state->required)))
+            return "invalid-host-requirement";
+    }
+    if (!parse_unmet_codes(ctx, obj, state)) return "invalid-unmet-codes";
     for (unsigned i = 0; i < 2; ++i) {
         struct bp_step *command = i ? &state->change : &state->check;
         command->op = BP_RUN;
         command->source = s->source;
-        JSValue value = JS_GetPropertyStr(ctx, obj, i ? "change" : "check");
+        const char *key = i ? (host ? "repair" : "change") : "check";
+        JSValue value = JS_GetPropertyStr(ctx, obj, key);
+        if (host && i && JS_IsUndefined(value)) return NULL;
         const char *error = JS_IsObject(value) ? parse_command(ctx, value, p, module, command)
                                                : "invalid-command";
         JS_FreeValue(ctx, value);
         if (error) return error;
         for (size_t j = 0; j < command->argc; ++j)
             if (command->bindings[j].writer) return "invalid-output-reference";
+        if (i) state->has_change = true;
     }
     return NULL;
 }
@@ -415,7 +433,8 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
             !valid_registry) fail(p, "invalid-tool", location);
         break;
     }
-    case BP_STATE: {
+    case BP_STATE:
+    case BP_HOST: {
         const char *error = parse_state(ctx, obj, p, module->path, s);
         if (error) fail(p, error, location);
         break;

@@ -21,6 +21,16 @@ extern char **environ;
 #include <sys/xattr.h>
 #endif
 
+FILE *bp_temp_stream(void)
+{
+    FILE *file = tmpfile();
+    if (file && fcntl(fileno(file), F_SETFD, FD_CLOEXEC) < 0) {
+        fclose(file);
+        return NULL;
+    }
+    return file;
+}
+
 bool bp_create_output_file(struct bp_output_file *file)
 {
     char path[] = "/tmp/brw-output-XXXXXX";
@@ -302,7 +312,8 @@ static const char *launch_command(const struct bp_step *s, const char *workspace
     posix_spawn_file_actions_t actions;
     if (posix_spawn_file_actions_init(&actions)) return "child-launch";
     int rc = posix_spawn_file_actions_addchdir_np(&actions, workspace);
-    if (!rc) rc = posix_spawn_file_actions_adddup2(&actions, STDERR_FILENO, STDOUT_FILENO);
+    int output = s->capture_stdout ? fileno(s->capture_stdout) : STDERR_FILENO;
+    if (!rc) rc = posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO);
     pid_t child;
     if (!rc) rc = spawn_command(&child, s, &actions, argv);
     posix_spawn_file_actions_destroy(&actions);

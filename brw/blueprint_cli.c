@@ -73,6 +73,8 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
         putchar(']');
     }
     if (s->state) {
+        field("required", s->state->required);
+        field("detected", s->state->detected);
         printf(",\"unmet\":[");
         bool first = true;
         for (unsigned code = 1; code < sizeof s->state->unmet; ++code) {
@@ -83,8 +85,11 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
         }
         printf("],\"check\":");
         print_step(plan, &s->state->check);
-        printf(",\"change\":");
-        print_step(plan, &s->state->change);
+        if (s->state->has_change) {
+            if (s->op == BP_HOST) printf(",\"onMismatch\":[\"repair\",\"recheck\"],\"repair\":");
+            else printf(",\"change\":");
+            print_step(plan, &s->state->change);
+        }
         print_state_status(s->state->status);
         if (s->state->has_exit_code) printf(",\"exitCode\":%lu", s->state->exit_code);
     }
@@ -130,7 +135,9 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
         }
         field("error", error);
         if (*detail) field("detail", detail);
-        if (result->command_started) printf(",\"commandStarted\":true,\"mayHaveSideEffects\":true");
+        if (result->command_started) printf(",\"commandStarted\":true");
+        if (result->repair_completed) printf(",\"repairCompleted\":true");
+        if (result->command_started || result->repair_completed) printf(",\"mayHaveSideEffects\":true");
         puts("}");
     } else {
         printf("%s (%zu completed)\n", status, result->completed);
@@ -146,7 +153,8 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
             }
         }
         if (error) fprintf(stderr, "brw: %s %s\n", error, detail);
-        if (result->command_started) fputs("The external command started and may have left side effects.\n", stderr);
+        if (result->repair_completed) fputs("The host repair completed and may have left side effects.\n", stderr);
+        else if (result->command_started) fputs("The external command started and may have left side effects.\n", stderr);
     }
 }
 
@@ -170,7 +178,7 @@ int brw_blueprint_command(int argc, const char *const *argv)
     char detail[BP_DETAIL_CAP] = "";
     struct bp_run_result result = {.failure_source = detail};
     unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) |
-        (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL) | (1u << BP_DEFAULT);
+        (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL) | (1u << BP_DEFAULT) | (1u << BP_HOST);
 #ifdef BRW_BP_NATIVE_INSTALL
     capabilities |= 1u << BP_INSTALL;
 #endif

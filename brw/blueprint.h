@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_OP_COUNT };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_HOST, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
 enum { BP_PACKAGE_PATH_CAP = 260 }; /* Includes the trailing NUL. */
 
@@ -47,6 +47,7 @@ struct bp_step {
     char *program, **args; /* Owned strings. The staged payload occupies script_arg. */
     char *tool; /* Owned name of the previously declared tool used by this step. */
     const char *child_path; /* Borrowed dependency PATH prefix during command execution. */
+    FILE *capture_stdout; /* Borrowed during a host probe. NULL routes child output to stderr. */
     const struct bp_package *package; /* Borrowed from the resolved host lock. */
     enum bp_state_status entry_status; /* Result of an explicit default entry step. */
     size_t argc, script_arg;
@@ -56,6 +57,8 @@ struct bp_step {
 
 struct bp_state {
     struct bp_step check, change;
+    bool has_change;
+    char *required, *detected; /* Owned host requirement and most recent successful observation. */
     unsigned char unmet[256]; /* Portable process exit codes 1..255. */
     enum bp_state_status status;
     unsigned long exit_code;
@@ -79,6 +82,7 @@ const char *bp_load(const char *directory, const char *digest, const char *platf
                     char detail[BP_DETAIL_CAP]);
 void bp_bundle_free(struct bp_bundle *bundle);
 bool bp_safe_path(const char *path);
+bool bp_valid_utf8(const char *text, size_t size);
 bool bp_safe_package_path(const char *path);
 const struct bp_file *bp_find(const struct bp_bundle *bundle, const char *path);
 const char *bp_build(const struct bp_bundle *bundle, struct bp_plan *out, char detail[BP_DETAIL_CAP]);
@@ -88,6 +92,7 @@ struct bp_run_result {
     size_t completed; /* Successful operations, excluding skipped steps. */
     const char *failure_source; /* Failing step or producer position, borrowed from the plan. */
     bool command_started; /* The external command that failed actually started. */
+    bool repair_completed; /* A host repair exited successfully before the failing recheck. */
 };
 
 /* Runs a successfully built plan and initializes the result, including on failure. */
@@ -102,6 +107,10 @@ struct bp_output_file {
 };
 bool bp_create_output_file(struct bp_output_file *file);
 bool bp_remove_output_file(struct bp_output_file *file);
+
+/* Open an empty seekable binary stream for child stdout. NULL on failure.
+   The caller closes the stream with fclose, which removes its backing file. */
+FILE *bp_temp_stream(void);
 
 /* Validates operands against an existing workspace without applying the step. */
 const char *bp_validate_step(const char *workspace, const struct bp_step *step);

@@ -239,7 +239,7 @@ done:
     return error;
 }
 
-static FILE *payload_stream(const struct bp_file *payload)
+FILE *bp_temp_stream(void)
 {
     wchar_t temp[MAX_PATH + 1];
     DWORD n = GetTempPathW(MAX_PATH + 1, temp);
@@ -248,7 +248,12 @@ static FILE *payload_stream(const struct bp_file *payload)
     if (dir == INVALID_HANDLE_VALUE) return NULL;
     HANDLE file = new_stage(dir, true, NULL);
     CloseHandle(dir);
-    FILE *f = file == INVALID_HANDLE_VALUE ? NULL : stream(file);
+    return file == INVALID_HANDLE_VALUE ? NULL : stream(file);
+}
+
+static FILE *payload_stream(const struct bp_file *payload)
+{
+    FILE *f = bp_temp_stream();
     if (f && (fwrite(payload->data, 1, payload->size, f) != payload->size || fseek(f, 0, SEEK_SET))) {
         fclose(f);
         f = NULL;
@@ -359,8 +364,16 @@ static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, w
     start.hStdOutput = start.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION child;
     wchar_t *environment = NULL;
+    HANDLE capture = NULL;
     if (!error && apply && s->child_path && !(environment = child_environment(s->child_path)))
         error = "child-environment";
+    if (!error && apply && s->capture_stdout) {
+        HANDLE output = (HANDLE)_get_osfhandle(_fileno(s->capture_stdout));
+        if (DuplicateHandle(GetCurrentProcess(), output, GetCurrentProcess(), &capture,
+                            0, TRUE, DUPLICATE_SAME_ACCESS))
+            start.hStdOutput = capture;
+        else error = "child-launch";
+    }
     if (!error && apply) {
         if (!CreateProcessW(application, line, NULL, NULL, TRUE,
                             CREATE_UNICODE_ENVIRONMENT, environment, cwd, &start, &child))
@@ -368,6 +381,7 @@ static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, w
         else if (started)
             *started = true;
     }
+    if (capture) CloseHandle(capture);
     free(environment);
     for (size_t i = 0; i <= s->argc; ++i)
         if (args[i] != script) free(args[i]);
