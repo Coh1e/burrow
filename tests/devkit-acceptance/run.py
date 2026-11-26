@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE / "kit"
 ARCHIVE = "w64devkit-x64-2.11.0.7z.exe"
 MANIFEST = "blueprint.manifest"
-TRUSTED_MANIFEST = "758f459bf6d3f19d70f6034e6e1f22f5bcd5cd328e64795e60bb0a645ca4072f"
+TRUSTED_MANIFEST = "358a93fcdeb87b4a2d0a279295194be25e0ef848b9af5951c32be9a69f772593"
 
 
 def sha256(path):
@@ -59,15 +59,17 @@ def check_rejections(run_blueprint, root, workspace):
         for mode in ("preview", "apply"):
             trusted = sha256(kit / MANIFEST) if name == "capability" else TRUSTED_MANIFEST
             result = run_blueprint(name + "-" + mode, mode, kit, 1, trusted)
-            require(result.get("error") == error and result.get("completed") == 0,
-                    f"{name} {mode}: expected {error} before the first write: {result}")
-            require(not any(workspace.iterdir()), f"{name} {mode} wrote to the workspace")
+            detail = "unknown-devkit-capability" if name == "capability" else module.name
+            require((result.get("error"), result.get("detail"), result.get("completed")) == (error, detail, 0),
+                    f"{name} {mode}: expected {error} for {detail} with zero completed steps: {result}")
+            require(not any(workspace.iterdir()), f"{name} {mode} left files in the workspace")
         results[name] = error
     sentinel = workspace / "keep.txt"
     sentinel.write_bytes(b"existing user file")
     for mode in ("preview", "apply"):
         result = run_blueprint("occupied-" + mode, mode, KIT, 1)
-        require(result.get("error") == "host-requirement-unmet" and result.get("completed") == 0,
+        require((result.get("error"), result.get("detail"), result.get("completed")) ==
+                ("host-requirement-unmet", "main.mjs[1] > toolchain.mjs[1]", 0),
                 f"{mode} did not refuse the occupied workspace before extraction")
         require(list(workspace.iterdir()) == [sentinel] and sentinel.read_bytes() == b"existing user file",
                 f"{mode} modified the occupied workspace")
@@ -109,12 +111,13 @@ def run(brw, archive, root, report):
         env[f"XDG_{kind}_HOME"] = str(root / kind.lower())
     report.update(initial=str(initial), relocated=str(moved), caller=str(caller), parentPath=env["PATH"])
 
-    def invoke(name, args, expected=0):
-        process = subprocess.run(args, cwd=caller, env=env, stdin=subprocess.DEVNULL, capture_output=True,
+    def invoke(name, args, expected=0, input_text=None):
+        process = subprocess.run(args, cwd=caller, env=env, input=input_text,
+                                 stdin=subprocess.DEVNULL if input_text is None else None, capture_output=True,
                                  text=True, encoding="utf-8", errors="replace", timeout=300)
         with (root / "commands.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps(dict(label=name, command=args, cwd=str(caller), exit=process.returncode,
-                                      stdout=process.stdout, stderr=process.stderr)) + "\n")
+                                      stdin=input_text, stdout=process.stdout, stderr=process.stderr)) + "\n")
         require(process.returncode == expected,
                 f"{name} returned {process.returncode}, expected {expected}: "
                 f"{process.stdout[-600:]} {process.stderr[-600:]}")
@@ -129,7 +132,9 @@ def run(brw, archive, root, report):
     before = directory_state(observed)
     report["rejections"] = check_rejections(blueprint, root, initial)
     preview = blueprint("preview", "preview")
-    require(directory_state(observed) == before, "Planning changed the project, package, cache or entry state")
+    after = directory_state(observed)
+    report["planningSnapshots"] = {"before": before, "after": after}
+    require(after == before, "Filesystem snapshots differ after the rejected cases and successful preview")
     apply = blueprint("apply", "apply")
     steps = [(s["op"], s["source"]) for s in preview["steps"]]
     require(steps == [(s["op"], s["source"]) for s in apply["steps"]], "Apply differs from preview")
@@ -145,11 +150,22 @@ def run(brw, archive, root, report):
     require(not initial.exists() and (moved / "devkit.cmd").is_file(), "Incomplete devkit relocation")
 
     env["BRW_ACCEPTANCE_ENTRY"] = str(moved / "devkit.cmd")
+    # Simulate a caller still configured for the old installation.
+    for key in ("GCC_EXEC_PREFIX", "COMPILER_PATH", "LIBRARY_PATH"):
+        env[key] = str(initial / "w64devkit") + os.sep
 
-    def session(label, command):
+    def session(label, command="", input_text=None):
         # Launch cmd's fixed command text from caller. A quoted variable supplies the entry path.
-        return invoke(label, f'"{system / "cmd.exe"}" /d /v:off /s /c ""%BRW_ACCEPTANCE_ENTRY%" {command}"')
+        return invoke(label, f'"{system / "cmd.exe"}" /d /v:off /s /c ""%BRW_ACCEPTANCE_ENTRY%" {command}"',
+                      input_text=input_text)
 
+    bin_dir = (moved / "w64devkit/bin").resolve(strict=True)
+    require(bin_dir.is_relative_to(moved), f"Tool directory resolves outside the relocated devkit: {bin_dir}")
+    shell = session("interactive-session", input_text="@echo off\necho SESSION_CWD=%CD%\nwhere.exe gcc.exe\nexit 0\n")
+    lines = shell.splitlines()
+    require("SESSION_CWD=" + str(caller) in lines and
+            any(Path(line) == bin_dir / "gcc.exe" for line in lines),
+            "Interactive session did not retain the caller directory and relocated compiler")
     session("configure", 'cmake -S probe -B build -G "MinGW Makefiles"')
     build = caller / "build"
     cache = {}
@@ -158,11 +174,16 @@ def run(brw, archive, root, report):
             key, value = line.split("=", 1)
             cache[key.split(":")[0]] = value
     tools = {}
-    bin_dir = (moved / "w64devkit/bin").resolve(strict=True)
     for key in ("CMAKE_COMMAND", "CMAKE_MAKE_PROGRAM", "CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER"):
         path = Path(cache[key]).resolve(strict=True)
         require(path.parent == bin_dir, f"{key} selected {path}, outside {bin_dir}")
         tools[key] = str(path)
+    for compiler, frontend in (("gcc", "cc1"), ("g++", "cc1plus")):
+        selected = session("find-" + frontend, f"{compiler} -print-prog-name={frontend}").strip()
+        path = Path(selected).resolve(strict=True)
+        require(path.is_relative_to(moved) and path.name.lower() == frontend + ".exe",
+                f"{compiler} selected an unexpected frontend: {path}")
+        tools[frontend] = str(path)
     report["tools"] = tools
     report["compileCommands"] = json.loads((build / "compile_commands.json").read_text(encoding="utf-8"))
     report["targetTriple"] = session("compiler-target", "gcc -dumpmachine").strip()
@@ -178,6 +199,7 @@ def run(brw, archive, root, report):
         actual = session("run-" + target, f"build\\{target}.exe").strip()
         require(actual == output, f"{target}: expected {output!r}, got {actual!r}")
         report["programs"][target] = {"stdout": actual, "sha256": sha256(build / (target + ".exe"))}
+    report["networkAfterBuild"] = verify_offline()
 
 
 if __name__ == "__main__":
