@@ -5,7 +5,6 @@
 #include <string.h>
 
 enum { BP_TEXT_LIMIT = 16 * 1024 * 1024 };
-bool bp_valid_utf8(const char *text, size_t size);
 
 static inline bool bp_env_name(const char *name)
 {

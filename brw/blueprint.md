@@ -114,6 +114,44 @@ Both commands use the same working directory, argument passing and verified scri
 
 Preview and dry-run may execute the check, so its author must ensure it is read-only. After an earlier action or planned change, preview reports `check-at-execution` with the reason `earlier-step-may-change-state`. Apply checks at the step's position, runs the change only for an unmet result, then repeats the check. A state counts as completed once confirmed satisfied. File operations following a state change validate their inputs against the resulting workspace. The report includes the state status and check exit code when available.
 
+## Check a host requirement
+
+Declare the `host` capability and place the check before the steps that need it.
+The example also requires the `run` capability for the build.
+Here the driver utility prints its current mode. The build requires the exact
+value `compute`.
+
+```js
+export default () => [
+  {
+    op: "host", required: "compute",
+    check: {program: "driverctl", args: ["get-mode"]},
+    repair: {program: "driverctl", args: ["set-mode", "compute"]}
+  },
+  {op: "run", program: "cmake", args: ["--build", "."]}
+];
+```
+
+The read-only check prints one nonempty UTF-8 line to stdout, using the
+same size limit and line endings as a named output. Exit zero and an exact
+match with `required`, including case and spaces, satisfy the requirement.
+The optional `unmet` list names additional exit codes that indicate a
+mismatch. These must also return the detected value. Any other exit code,
+a launch failure or an invalid line stops the blueprint. The command can
+send diagnostics to stderr. Both `check` and `repair` can consume earlier
+named outputs, use verified script payloads, or run locked tools. Declare
+output producers in an unconditional `run` step.
+
+Omit `repair` to check the host without changing it. On a mismatch, preview
+and apply report `host-requirement-unmet` with the `detected` and `required`
+values. With a repair, preview shows the command and its position between
+the initial check and the recheck in `onMismatch`. Preview defers the check
+if an earlier action could affect it. Apply runs the repair only on a
+mismatch, then runs the same check again. A second mismatch reports
+`recheck-unmet` with the new observation. If the recheck fails, the report
+records `repairCompleted` and `mayHaveSideEffects` so the operator can
+inspect changes made by the repair. Later steps start only after the check passes.
+
 ## Lock a tool from registered sources
 
 Register the platform's catalog with `brw source add sdk /absolute/path/to/catalog`. The Blueprint CLI uses the existing `brw-catalog-v1` row format described in [the brw README](README.md). The catalog may list several versions of a package. Declare `requires<TAB>tool` in the manifest and select the tool in a module:
