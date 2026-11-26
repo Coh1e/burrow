@@ -35,7 +35,7 @@
 
 每个平台保留系统与架构、构建版本、蓝图和锁定记录修订、实际命令、退出码、预览及执行报告。用动作调用记录、产物内容或摘要、默认入口指向核对结果。失败项记录首个偏差及位置，未运行项记录原因。
 
-2026-11-26，三个宿主均在干净的提交 `86c9466f60ceadcc5cf4d6348edbc762022ad51b` 上运行了同一份根蓝图和构建子蓝图。`blueprint.manifest` 的 SHA-256 均为 `6fb5571a9c159a52f18e444e8784c9ff10f011ace54ab60f45e4b4dae05dd9c6`。表内的锁摘要取 SHA-256 的前 12 位，完整值和每条锁定记录见各平台压缩包。[本轮蓝图清单](../tests/blueprint-acceptance/kit/blueprint.manifest)
+2026-11-26，三个宿主均在干净的提交 `86c9466f60ceadcc5cf4d6348edbc762022ad51b` 上运行了同一份根蓝图和构建子蓝图。`blueprint.manifest` 的 SHA-256 均为 `6fb5571a9c159a52f18e444e8784c9ff10f011ace54ab60f45e4b4dae05dd9c6`。以下通过数、动作次数和故障退出码取自本轮 `python tests/blueprint-acceptance/run.py --build-dir <构建目录> --evidence <新目录>` 的记录。表内的锁摘要取 SHA-256 的前 12 位，完整值和每条锁定记录见各平台压缩包。[本轮蓝图清单](../tests/blueprint-acceptance/kit/blueprint.manifest) · [各平台实跑命令](#复跑与核对)
 
 | 宿主与编译器 | 平台锁摘要 | 预览、应用、重跑 | 独立故障 | 边界用例 | 原始记录 |
 | --- | --- | --- | --- | --- | --- |
