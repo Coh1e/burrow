@@ -1,0 +1,12 @@
+brw-blueprint-v1
+entry	main.mjs
+platform	any
+arch	any
+requires	state
+requires	tool
+requires	env
+requires	run
+module	main.mjs	fac7b070e5f646f0dc155c75b97854eda41d94d9c0431fd807021ab5b344b523
+module	build/job.mjs	e07cc2c4f054920e0fb53427a069c99b060913c768ba06cf42f12da62eb1303c
+payload	project.py	3dd50db0346fb9881f392fb71518d66b23fbb93e4602400d63120996897185c5
+payload	build/build.py	7519a33f47a5686a27574f6bd9b2648123787e6481a045af090693b7d7413755
