@@ -4,7 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { LINE_CAP = 8192, MAX_CANDIDATES = 65536 };
+/* The Windows catalog reader accepts up to 4608 wide characters per row.
+   Allow four UTF-8 bytes per character, plus the source and trailing tab in a lock row. */
+enum { ID_CAP = 128, CATALOG_LINE_CAP = 4608 * 4, LOCK_LINE_CAP = CATALOG_LINE_CAP + ID_CAP + 1,
+       MAX_CANDIDATES = 65536 };
 
 static char *copy(const char *s)
 {
@@ -24,7 +27,7 @@ char *bp_join(const char *dir, const char *name)
 
 bool bp_package_id(const char *s)
 {
-    if (!s || !bp_safe_path(s) || *s == '.' || strlen(s) >= 64) return false;
+    if (!s || !bp_safe_path(s) || *s == '.' || strlen(s) >= ID_CAP) return false;
     return strspn(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.") == strlen(s);
 }
 
@@ -73,8 +76,8 @@ static bool valid_requirement(const char *s)
 {
     if (!strcmp(s, "*") || bp_package_id(s)) return true;
     size_t n = strlen(s);
-    if (n < 3 || n >= 64 || strcmp(s + n - 2, ".*")) return false;
-    char prefix[64];
+    if (n < 3 || n >= ID_CAP || strcmp(s + n - 2, ".*")) return false;
+    char prefix[ID_CAP];
     memcpy(prefix, s, n - 2);
     prefix[n - 2] = 0;
     return bp_package_id(prefix);
@@ -85,7 +88,10 @@ static char *take(char **rest, char delimiter)
     char *field = *rest;
     if (!field) return NULL;
     *rest = strchr(field, delimiter);
-    if (*rest) *(*rest)++ = 0;
+    if (*rest) {
+        **rest = 0;
+        ++*rest;
+    }
     return field;
 }
 
@@ -93,7 +99,7 @@ static bool dependencies(const char *s)
 {
     while (*s) {
         size_t n = strcspn(s, ",");
-        char name[64];
+        char name[ID_CAP];
         if (n >= sizeof name) return false;
         memcpy(name, s, n);
         name[n] = 0;
@@ -102,6 +108,30 @@ static bool dependencies(const char *s)
         if (*s && !*++s) return false;
     }
     return true;
+}
+
+static bool http_location(const char *s)
+{
+    size_t n = strcspn(s, ":");
+    if ((n != 4 && n != 5) || strncmp(s + n, "://", 3)) return false;
+    char scheme[6] = {0};
+    memcpy(scheme, s, n);
+    return equal(scheme, "http") || equal(scheme, "https");
+}
+
+static bool package_entry(const char *s)
+{
+    if (strlen(s) >= 260) return false;
+    for (;;) {
+        size_t n = strcspn(s, "/");
+        char part[ID_CAP];
+        if (n >= sizeof part) return false;
+        memcpy(part, s, n);
+        part[n] = 0;
+        if (!bp_package_id(part)) return false;
+        if (!s[n]) return true;
+        s += n + 1;
+    }
 }
 
 struct catalog {
@@ -134,8 +164,7 @@ static const char *add_row(struct catalog *db, const char *source, const char *l
     row.depends = fields ? fields : "";
     if (!bp_package_id(row.name) || !bp_package_id(row.version) || !row.entry ||
         (strcmp(row.kind, "exe") && strcmp(row.kind, "archive")) || !hex_digest(row.digest) ||
-        (!bp_package_id(row.location) && strncmp(row.location, "https://", 8) &&
-         strncmp(row.location, "http://", 7)) || !bp_safe_path(row.entry) || !dependencies(row.depends)) {
+        (!bp_package_id(row.location) && !http_location(row.location)) || !package_entry(row.entry) || !dependencies(row.depends)) {
         free(row.storage);
         return "catalog-format";
     }
@@ -143,12 +172,12 @@ static const char *add_row(struct catalog *db, const char *source, const char *l
     return NULL;
 }
 
-static int read_line(FILE *file, char line[LINE_CAP])
+static int read_line(FILE *file, char *line, size_t capacity)
 {
     size_t n = 0;
     int c;
     while ((c = fgetc(file)) != EOF && c != '\n') {
-        if (!c || n + 1 == LINE_CAP) return -1;
+        if (!c || n + 1 == capacity) return -1;
         line[n++] = (char)c;
     }
     if (ferror(file)) return -1;
@@ -159,11 +188,12 @@ static int read_line(FILE *file, char line[LINE_CAP])
 
 static const char *read_rows(struct catalog *db, FILE *file, const char *header, const char *source)
 {
-    char line[LINE_CAP];
+    char line[LOCK_LINE_CAP];
+    size_t capacity = source ? CATALOG_LINE_CAP : LOCK_LINE_CAP;
     const char *format = source ? "catalog-format" : "lock-format";
-    if (read_line(file, line) != 1 || strcmp(line, header)) return format;
+    if (read_line(file, line, capacity) != 1 || strcmp(line, header)) return format;
     int rc;
-    while ((rc = read_line(file, line)) == 1) {
+    while ((rc = read_line(file, line, capacity)) == 1) {
         char *fields = line;
         const char *registry = source ? source : take(&fields, '\t');
         if (!fields) return format;
@@ -242,7 +272,7 @@ static const char *resolve(struct resolution *r, const char *name, size_t step, 
     r->chain[depth] = best->name;
     const char *deps = best->depends;
     while (*deps) {
-        char dep[64];
+        char dep[ID_CAP];
         size_t n = strcspn(deps, ",");
         memcpy(dep, deps, n);
         dep[n] = 0;
@@ -317,7 +347,7 @@ static bool cached(const struct bp_package *p)
 static char *installed_artifact(const struct bp_package *p)
 {
     if (strcmp(p->kind, "exe")) return NULL;
-    char relative[512];
+    char relative[2 * ID_CAP + 280];
     int n = snprintf(relative, sizeof relative, "packages/%s/%s/%s", p->name, p->version, p->entry);
     if (n < 0 || (size_t)n >= sizeof relative) return NULL;
     char *data = bp_data_dir();

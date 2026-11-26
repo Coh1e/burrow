@@ -162,6 +162,7 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
         }
         if (step->skip_op) continue;
         if (step->op == BP_TOOL) {
+            earlier_effect = true;
             if (preview) continue;
             error = bp_apply_packages(plan->lock, i);
         } else if (step->state) {

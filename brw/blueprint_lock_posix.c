@@ -1,5 +1,6 @@
 #define _XOPEN_SOURCE 700
 #include "blueprint_lock.h"
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -101,6 +102,10 @@ int bp_source_add(const char *name, const char *input)
     if (!error) {
         root = xdg("XDG_CONFIG_HOME", ".config", "burrow/sources", true);
         record = bp_join(root, name);
+        if (record) {
+            char *base = strrchr(record, '/') + 1;
+            for (; *base; ++base) *base = (char)tolower((unsigned char)*base);
+        }
         error = record ? publish(record, write_registration, catalog, false) : "source-directory";
     }
     free(record);
