@@ -60,6 +60,24 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
         }
         putchar(']');
     }
+    if (s->state) {
+        printf(",\"unmet\":[");
+        bool first = true;
+        for (unsigned code = 1; code < sizeof s->state->unmet; ++code) {
+            if (s->state->unmet[code]) {
+                printf("%s%u", first ? "" : ",", code);
+                first = false;
+            }
+        }
+        printf("],\"check\":");
+        print_step(plan, &s->state->check);
+        printf(",\"change\":");
+        print_step(plan, &s->state->change);
+        field("status", s->state->status);
+        if (s->state->status && !strcmp(s->state->status, "check-at-execution"))
+            field("reason", "earlier-step-may-change-state");
+        if (s->state->has_exit_code) printf(",\"exitCode\":%lu", s->state->exit_code);
+    }
     if (s->payload) {
         field("payload", s->payload->path);
         field("sha256", s->payload->digest);
@@ -114,7 +132,7 @@ int brw_blueprint_command(int argc, const char *const *argv)
     struct bp_plan plan = {0};
     char detail[BP_DETAIL_CAP] = "";
     const char *location = detail;
-    unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) | (1u << BP_RUN);
+    unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) | (1u << BP_RUN) | (1u << BP_STATE);
 #ifdef BRW_BP_NATIVE_INSTALL
     capabilities |= 1u << BP_INSTALL;
 #endif

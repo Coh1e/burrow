@@ -285,7 +285,7 @@ static const char *install(const struct bp_step *s, bool apply)
     return error;
 }
 
-static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, wchar_t *script, bool apply)
+static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, wchar_t *script, bool apply, unsigned long *exit_code)
 {
     wchar_t *args[BP_MAX_ARGS + 1] = {wide(s->program)};
     if (args[0] && wcspbrk(args[0], L"/\\") && args[0][0] != L'/' &&
@@ -320,10 +320,11 @@ static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, w
               GetExitCodeProcess(child.hProcess, &code);
     CloseHandle(child.hProcess);
     if (!ok) return "child-wait";
-    return code ? "child-failed" : NULL;
+    if (exit_code) *exit_code = code;
+    return code && !exit_code ? "child-failed" : NULL;
 }
 
-static const char *run_script(const struct bp_step *s, const wchar_t *cwd, bool apply)
+static const char *run_script(const struct bp_step *s, const wchar_t *cwd, bool apply, unsigned long *exit_code)
 {
     wchar_t path[32768];
     DWORD prefix = GetTempPathW(32768, path);
@@ -342,14 +343,14 @@ static const char *run_script(const struct bp_step *s, const wchar_t *cwd, bool 
     path[dir_length] = L'\\';
     wcscpy(path + dir_length + 1, name);
     free(name);
-    if (!apply) return launch_command(s, cwd, path, false);
+    if (!apply) return launch_command(s, cwd, path, false, exit_code);
     const char *error = "payload-stage";
     HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file != INVALID_HANDLE_VALUE) {
         DWORD written;
         bool ok = WriteFile(file, s->payload->data, (DWORD)s->payload->size, &written, NULL) &&
                   written == s->payload->size;
-        if (CloseHandle(file) && ok) error = launch_command(s, cwd, path, true);
+        if (CloseHandle(file) && ok) error = launch_command(s, cwd, path, true, exit_code);
         if (!DeleteFileW(path) && !error) error = "cleanup-stage";
     }
     path[dir_length] = 0;
@@ -357,7 +358,8 @@ static const char *run_script(const struct bp_step *s, const wchar_t *cwd, bool 
     return error;
 }
 
-static const char *run_command(const char *workspace, const struct bp_step *s, bool apply)
+const char *bp_run_command(const char *workspace, const struct bp_step *s, bool apply,
+                           unsigned long *exit_code)
 {
     wchar_t *cwd = wide(workspace);
     DWORD attrs = cwd ? GetFileAttributesW(cwd) : INVALID_FILE_ATTRIBUTES;
@@ -365,7 +367,7 @@ static const char *run_command(const char *workspace, const struct bp_step *s, b
     if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY))
         error = "invalid-workspace";
     else
-        error = s->payload ? run_script(s, cwd, apply) : launch_command(s, cwd, NULL, apply);
+        error = s->payload ? run_script(s, cwd, apply, exit_code) : launch_command(s, cwd, NULL, apply, exit_code);
     free(cwd);
     return error;
 }
@@ -377,7 +379,7 @@ static const char *operation(const char *workspace, const struct bp_step *s, boo
     case BP_COPY:
     case BP_REPLACE: return file_op(workspace, s, apply);
     case BP_INSTALL: return install(s, apply);
-    case BP_RUN: return run_command(workspace, s, apply);
+    case BP_RUN: return bp_run_command(workspace, s, apply, NULL);
     case BP_ENV: {
         if (!bp_env_name(s->name) || !s->value) return "invalid-environment";
         wchar_t *name = wide(s->name), *value = wide(s->value);

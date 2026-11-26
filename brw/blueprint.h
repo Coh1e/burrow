@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_OP_COUNT };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
 
 struct bp_file {
@@ -35,6 +35,7 @@ struct bp_binding {
 };
 
 struct bp_step {
+    struct bp_state *state; /* Owned by a state step. */
     struct bp_binding *bindings; /* Parallel to args. Output indices are one-based. */
     char *skip_platform, *skip_op;
     enum bp_op op;
@@ -44,6 +45,14 @@ struct bp_step {
     size_t argc, script_arg;
     size_t count;
     const struct bp_file *payload; /* Borrowed from the verified bundle. */
+};
+
+struct bp_state {
+    struct bp_step check, change;
+    unsigned char unmet[256]; /* Portable process exit codes 1..255. */
+    const char *status;
+    unsigned long exit_code;
+    bool has_exit_code;
 };
 
 struct bp_plan {
@@ -89,6 +98,10 @@ const char *bp_validate_step(const char *workspace, const struct bp_step *step);
 const char *bp_validate_text_plan(const char *workspace, const struct bp_plan *plan,
                                   size_t *failed_step);
 const char *bp_apply_step(const char *workspace, const struct bp_step *step);
+/* When exit_code is supplied, normal exits (including nonzero) return success
+   and store the child status. Launch, wait and staging failures return errors. */
+const char *bp_run_command(const char *workspace, const struct bp_step *s, bool apply,
+                           unsigned long *exit_code);
 const char *bp_op_name(enum bp_op op);
 
 #endif
