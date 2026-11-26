@@ -1,5 +1,6 @@
 #include "blueprint_cli.h"
 #include "blueprint.h"
+#include "blueprint_lock.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -36,6 +37,7 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
     field("name", s->name);
     field("value", s->value);
     field("version", s->version);
+    field("registry", s->registry);
     field("entry", s->entry);
     if (!s->skip_op && s->op == BP_RUN) {
         field("program", s->program);
@@ -91,10 +93,10 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
     putchar('}');
 }
 
-static void report(const struct bp_plan *plan, bool json, bool preview,
+static void report(const struct bp_plan *plan, bool json, bool preview, bool generate,
                    const char *error, const char *detail, size_t completed)
 {
-    const char *status = error ? "failed" : preview ? "planned" : "applied";
+    const char *status = error ? "failed" : generate ? "locked" : preview ? "planned" : "applied";
     if (json) {
         printf("{\"status\":\"%s\",\"completed\":%zu,\"steps\":[", status, completed);
         for (size_t i = 0; i < plan->count; ++i) {
@@ -102,6 +104,22 @@ static void report(const struct bp_plan *plan, bool json, bool preview,
             print_step(plan, &plan->steps[i]);
         }
         putchar(']');
+        if (plan->lock && plan->lock->count) {
+            printf(",\"locked\":[");
+            for (size_t i = 0; i < plan->lock->count; ++i) {
+                const struct bp_package *row = &plan->lock->rows[i];
+                if (i) putchar(',');
+                printf("{\"name\":");
+                quoted(row->name);
+                field("platform", BRW_BP_PLATFORM "-" BRW_BP_ARCH);
+                field("version", row->version);
+                field("source", row->registry);
+                field("sha256", row->digest);
+                field("depends", row->depends);
+                printf(",\"reused\":%s}", row->reused ? "true" : "false");
+            }
+            putchar(']');
+        }
         field("error", error);
         if (*detail) field("detail", detail);
         puts("}");
@@ -111,6 +129,13 @@ static void report(const struct bp_plan *plan, bool json, bool preview,
             print_step(plan, &plan->steps[i]);
             putchar('\n');
         }
+        if (plan->lock) {
+            for (size_t i = 0; i < plan->lock->count; ++i) {
+                const struct bp_package *r = &plan->lock->rows[i];
+                printf("%s %s/%s %s %s\n", BRW_BP_PLATFORM "-" BRW_BP_ARCH,
+                       r->registry, r->name, r->version, r->digest);
+            }
+        }
         if (error) fprintf(stderr, "brw: %s %s\n", error, detail);
     }
 }
@@ -119,7 +144,8 @@ int brw_blueprint_command(int argc, const char *const *argv)
 {
     const char *digest = NULL, *workspace = NULL;
     bool json = false, dry_run = false;
-    if (argc < 2 || (strcmp(argv[0], "preview") && strcmp(argv[0], "apply"))) goto usage;
+    bool generate = argc >= 2 && !strcmp(argv[0], "lock");
+    if (argc < 2 || (!generate && strcmp(argv[0], "preview") && strcmp(argv[0], "apply"))) goto usage;
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "--sha256") && !digest && i + 1 < argc) digest = argv[++i];
         else if (!strcmp(argv[i], "--workspace") && !workspace && i + 1 < argc) workspace = argv[++i];
@@ -127,13 +153,13 @@ int brw_blueprint_command(int argc, const char *const *argv)
         else if (!strcmp(argv[i], "--dry-run") && !dry_run) dry_run = true;
         else goto usage;
     }
-    if (!digest || !workspace || !*workspace || !*argv[1]) goto usage;
+    if ((generate && dry_run) || !digest || !workspace || !*workspace || !*argv[1]) goto usage;
     bool preview = dry_run || !strcmp(argv[0], "preview");
     struct bp_bundle bundle = {0};
     struct bp_plan plan = {0};
     char detail[BP_DETAIL_CAP] = "";
     const char *location = detail;
-    unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) | (1u << BP_RUN) | (1u << BP_STATE);
+    unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) | (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL);
 #ifdef BRW_BP_NATIVE_INSTALL
     capabilities |= 1u << BP_INSTALL;
 #endif
@@ -141,10 +167,15 @@ int brw_blueprint_command(int argc, const char *const *argv)
                                 capabilities, &bundle, detail);
     if (!error) error = bp_build(&bundle, &plan, detail);
     size_t completed = 0;
-    if (!error) {
+    struct bp_lock lock = {0};
+    plan.lock = &lock;
+    if (!error) error = bp_prepare_lock(&plan, &bundle, argv[1], BRW_BP_PLATFORM "-" BRW_BP_ARCH,
+                                        generate, &lock, detail);
+    if (!error && !generate) {
         error = digby_run_blueprint(&plan, workspace, preview, &completed, &location);
     }
-    report(&plan, json, preview, error, error ? location : "", completed);
+    report(&plan, json, preview, generate, error, error ? location : "", completed);
+    bp_lock_free(&lock);
     bp_plan_free(&plan);
     bp_bundle_free(&bundle);
     return error ? 1 : 0;

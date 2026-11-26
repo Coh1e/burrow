@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <wchar.h>
 
+typedef const char *(*brw_catalog_visitor)(const wchar_t *source, const wchar_t *catalog, void *context);
+/* Visits registered locations without selecting versions or installing packages. */
+const char *brw_visit_catalogs(brw_catalog_visitor visitor, void *context);
 int brw_source_command(const wchar_t *verb, size_t count, const wchar_t **args,
                        bool json, bool preview);
 void brw_json_string(const wchar_t *value);

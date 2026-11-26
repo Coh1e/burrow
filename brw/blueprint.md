@@ -112,6 +112,26 @@ Both commands use the same working directory, argument passing and verified scri
 
 Preview and dry-run may execute the check, so its author must ensure it is read-only. After an earlier action or planned change, preview reports `check-at-execution` with the reason `earlier-step-may-change-state`. Apply checks at the step's position, runs the change only for an unmet result, then repeats the check. A state counts as completed once confirmed satisfied. File operations following a state change validate their inputs against the resulting workspace. The report includes the state status and check exit code when available.
 
+## Lock a tool from registered sources
+
+Register the platform's catalog with `brw source add sdk /absolute/path/to/catalog`. The Blueprint CLI uses the existing `brw-catalog-v1` row format described in [the brw README](README.md). The catalog may list several versions of a package. Declare `requires<TAB>tool` in the manifest and select the tool in a module:
+
+```js
+export default () => [{op: "tool", registry: "sdk", name: "builder", version: "1.*"}];
+```
+
+```sh
+brw blueprint lock kit --sha256 DIGEST --workspace project --json
+brw blueprint preview kit --sha256 DIGEST --workspace project --json
+brw blueprint apply kit --sha256 DIGEST --workspace project --json
+```
+
+Run `lock` to generate or refresh `kit/blueprint.<os>-<arch>.lock` on the target host. Commit that file alongside the manifest and review changes to both. The manifest digest covers the Blueprint modules and payloads. The separate lock file is a trusted input specifying the exact source, artifact location, digest, entry and dependency names for each resolved version.
+
+Use an exact version, `*`, or a dotted prefix such as `1.*`. Generation selects the highest matching version, comparing digit runs numerically and other characters by ASCII value. Every occurrence of a tool contributes its requirement. Dependency names resolve across registered sources. If multiple sources offer a compatible package, qualify its declaration with `registry`. Missing packages, ambiguous versions and cycles abort generation before the current lock is replaced.
+
+Preview and apply read the host lock before starting any step. The `locked` array lists dependencies before their consumers. A missing or conflicting record reports the package and OS/architecture. At a tool step, apply stages the pinned artifact bytes in the user's Burrow cache and verifies SHA-256 before publishing them. A cache hit requires a matching digest. An installed single-file dependency at the recorded name and version can supply the original bytes after verification. For an installed archive, reuse requires the original verified archive bytes. On Linux and macOS, HTTP(S) sources use `curl`. Ordinary apply keeps the selected versions when the catalog gains new releases. Unlocked install steps retain their existing behavior.
+
 ## Build and test
 
 On Windows, prepare the pinned sources with `scripts/fetch-deps.ps1`. The MinGW-w64 build enables Blueprints by default.

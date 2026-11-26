@@ -211,6 +211,8 @@ struct selection {
     const wchar_t *qualified;
     const wchar_t *catalog;
     bool search;
+    brw_catalog_visitor visitor;
+    void *context;
     struct match *first;
     struct match **tail;
 };
@@ -314,7 +316,10 @@ static const char *scan_sources(const wchar_t *root, struct selection *selection
                 error = "source-record";
                 break;
             }
-            if (selection) {
+            if (selection && selection->visitor) {
+                error = selection->visitor(data.cFileName, catalog, selection->context);
+                if (error) break;
+            } else if (selection) {
                 selection->catalog = catalog;
                 error = read_catalog(catalog, data.cFileName, collect, selection);
                 selection->catalog = NULL;
@@ -438,6 +443,14 @@ static const char *resolve_dependencies(struct dependency_plan *plan, struct mat
     *plan->tail = match;
     plan->tail = &match->install_next;
     return NULL;
+}
+
+const char *brw_visit_catalogs(brw_catalog_visitor visitor, void *context)
+{
+    wchar_t root[PATH_CAP];
+    const char *error = source_root(root, false);
+    struct selection selection = {.visitor = visitor, .context = context};
+    return error ? error : scan_sources(root, &selection, false);
 }
 
 static void reset_dependency_order(struct dependency_plan *plan)

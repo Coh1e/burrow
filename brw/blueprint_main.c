@@ -4,6 +4,8 @@
 
 int main(int argc, char **argv)
 {
+    if (argc == 5 && !strcmp(argv[1], "source") && !strcmp(argv[2], "add"))
+        return bp_source_add(argv[3], argv[4]);
     if (argc > 1 && !strcmp(argv[1], "blueprint"))
         return brw_blueprint_command(argc - 2, (const char *const *)(argv + 2));
     fputs("usage: " BRW_BLUEPRINT_USAGE "\n", stderr);
