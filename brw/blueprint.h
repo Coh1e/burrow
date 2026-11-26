@@ -5,8 +5,9 @@
 #include <stddef.h>
 #include <stdio.h>
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_OP_COUNT };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
+enum { BP_PACKAGE_PATH_CAP = 260 }; /* Includes the trailing NUL. */
 
 struct bp_file {
     char *path;
@@ -34,6 +35,8 @@ struct bp_binding {
     bool writer;
 };
 
+enum bp_state_status { BP_UNCHECKED, BP_SATISFIED, BP_UNMET, BP_CHANGED, BP_DEFERRED };
+
 struct bp_step {
     struct bp_state *state; /* Owned by a state step. */
     struct bp_binding *bindings; /* Parallel to args. Output indices are one-based. */
@@ -42,12 +45,14 @@ struct bp_step {
     char *source; /* Call path including the position within this module. */
     char *path, *from, *to, *name, *version, *entry, *value;
     char *program, **args; /* Owned strings. The staged payload occupies script_arg. */
+    char *tool; /* Owned name of the previously declared tool used by this step. */
+    const char *child_path; /* Borrowed dependency PATH prefix during command execution. */
+    const struct bp_package *package; /* Borrowed from the resolved host lock. */
+    enum bp_state_status entry_status; /* Result of an explicit default entry step. */
     size_t argc, script_arg;
     size_t count;
     const struct bp_file *payload; /* Borrowed from the verified bundle. */
 };
-
-enum bp_state_status { BP_UNCHECKED, BP_SATISFIED, BP_UNMET, BP_CHANGED, BP_DEFERRED };
 
 struct bp_state {
     struct bp_step check, change;
@@ -74,6 +79,7 @@ const char *bp_load(const char *directory, const char *digest, const char *platf
                     char detail[BP_DETAIL_CAP]);
 void bp_bundle_free(struct bp_bundle *bundle);
 bool bp_safe_path(const char *path);
+bool bp_safe_package_path(const char *path);
 const struct bp_file *bp_find(const struct bp_bundle *bundle, const char *path);
 const char *bp_build(const struct bp_bundle *bundle, struct bp_plan *out, char detail[BP_DETAIL_CAP]);
 void bp_plan_free(struct bp_plan *plan);
@@ -81,7 +87,7 @@ void bp_plan_free(struct bp_plan *plan);
 /* Runs a successfully built plan against the selected platform backend.
    completed counts successful operations, excluding skipped steps. On error
    failure_source borrows the failing step or producer position from plan. */
-const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspace, bool preview,
+const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, bool preview,
                                 size_t *completed, const char **failure_source);
 
 /* Create takes a zero-initialized file. Success owns a UTF-8 path and read

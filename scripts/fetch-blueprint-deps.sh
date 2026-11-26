@@ -24,7 +24,7 @@ while read -r archive digest url; do
     fi
     case "$archive" in
         libgit2-*) tar --no-same-owner -xf "$sources/$archive" -C "$sources" "${archive%%.tar.*}/src/util/hash/rfc6234" ;;
-        quickjs-*) tar --no-same-owner -xf "$sources/$archive" -C "$sources" ;;
+        quickjs-*|libarchive-*|zlib-*) tar --no-same-owner -xf "$sources/$archive" -C "$sources" ;;
         *) echo "Unknown Blueprint dependency: $archive" >&2; exit 1 ;;
     esac
 done < "$repo/scripts/blueprint-sources.txt"

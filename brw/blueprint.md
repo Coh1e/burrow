@@ -132,11 +132,65 @@ Use an exact version, `*`, or a dotted prefix such as `1.*`. Generation selects 
 
 Preview and apply read the host lock before starting any step. The `locked` array lists dependencies before their consumers. A missing or conflicting record reports the package and OS/architecture. At a tool step, apply stages the pinned artifact bytes in the user's Burrow cache and verifies SHA-256 before publishing them. A cache hit requires a matching digest. An installed single-file dependency at the recorded name and version can supply the original bytes after verification. For an installed archive, reuse requires the original verified archive bytes. On Linux and macOS, HTTP(S) sources use `curl`. Ordinary apply keeps the selected versions when the catalog gains new releases. Unlocked install steps retain their existing behavior.
 
+### Run one action with a locked version
+
+Declare the tool before the command that uses it. Use `tool` in place of
+`program` in a `run` step or in a desired state's `check` or `change` command.
+The name refers to the earlier tool declaration. Declare the capabilities
+used by the steps in the manifest.
+
+```js
+export default () => [
+  {op: "tool", registry: "sdk", name: "builder", version: "2.*"},
+  {op: "run", tool: "builder", args: ["build", "Release build"]}
+];
+```
+
+The action runs the entry from the locked version's package directory.
+Other versions can coexist. For example, if the user's `builder` command
+points to version 1, it still launches version 1 after this action.
+For an archive, the entry runs alongside the files shipped with it.
+For the duration of the action, its child process can find the locked direct
+and transitive dependencies by their executable names on `PATH`.
+The tool step retains the location of its verified artifact for later actions
+in that invocation, including after an `env` step selects another cache.
+
+### Switch the user's default command
+
+Declare the `default` capability and add a separate target state after the
+tool declaration. This example uses the same host lock as the action above.
+
+```js
+export default () => [
+  {op: "tool", registry: "sdk", name: "builder", version: "2.*"},
+  {op: "default", tool: "builder"}
+];
+```
+
+Preview shows the locked version and the full user command path in the
+step's `entry` field. It reports whether the entry is already selected, or
+defers the check if an earlier action could change it. Apply creates or
+switches that entry. The path is
+`builder.exe` on Windows or `builder` on Linux and macOS under
+`BRW_BIN_DIR`, which defaults to the user's `.local/bin` directory.
+Applying the same selection again keeps the entry pointed at that version.
+Commands launched through this entry also use its locked direct and transitive
+dependencies. Selecting a different dependency version for a single action
+leaves the public command's selection in place until the next explicit switch.
+If the selected installed program or one of its archived files has changed,
+preview and apply report a conflict.
+An unrelated file occupying the command path causes the switch to fail.
+
+On Windows, a default with locked dependencies stores its private search
+path in the launcher's `.target` record. Existing target-only records are
+supported. Use this version of `brw` or newer to manage an entry written
+with a dependency search path.
+
 ## Build and test
 
 On Windows, prepare the pinned sources with `scripts/fetch-deps.ps1`. The MinGW-w64 build enables Blueprints by default.
 
-On Linux and macOS, run the following commands from the repository root with a native C compiler, CMake 3.19 or newer, curl and tar. The preparation script verifies the pinned QuickJS and libgit2 archives in `.local/deps/sources` and downloads any missing archives. With both archives present, preparation, build and tests run offline.
+On Linux and macOS, run the following commands from the repository root with a native C compiler, CMake 3.19 or newer, curl and tar. The preparation script verifies the pinned QuickJS, libgit2, libarchive and zlib archives in `.local/deps/sources` and downloads any missing archives. With the archives present, preparation, build and tests run offline.
 
 ```sh
 sh scripts/fetch-blueprint-deps.sh

@@ -264,6 +264,35 @@ static const char *file_op(const char *workspace, const struct bp_step *s, bool 
     return error;
 }
 
+const char bp_path_separator = ':';
+
+static int spawn_command(pid_t *child, const struct bp_step *s,
+                         const posix_spawn_file_actions_t *actions, char **argv)
+{
+    if (!s->tool) return posix_spawnp(child, s->program, actions, NULL, argv, environ);
+    if (!s->child_path) return posix_spawn(child, s->program, actions, NULL, argv, environ);
+
+    size_t count = 0;
+    while (environ[count]) ++count;
+    char **env = malloc((count + 2) * sizeof *env);
+    char *path = NULL;
+    const char *original = getenv("PATH");
+    if (!env || asprintf(&path, "PATH=%s%s%s", s->child_path, original ? ":" : "",
+                         original ? original : "") < 0) {
+        free(env);
+        return ENOMEM;
+    }
+    size_t n = 0;
+    for (size_t i = 0; i < count; ++i)
+        if (strncmp(environ[i], "PATH=", 5)) env[n++] = environ[i];
+    env[n++] = path;
+    env[n] = NULL;
+    int rc = posix_spawn(child, s->program, actions, NULL, argv, env);
+    free(path);
+    free(env);
+    return rc;
+}
+
 static const char *launch_command(const struct bp_step *s, const char *workspace, char *script, unsigned long *exit_code)
 {
     char *argv[BP_MAX_ARGS + 2] = {s->program};
@@ -274,7 +303,7 @@ static const char *launch_command(const struct bp_step *s, const char *workspace
     int rc = posix_spawn_file_actions_addchdir_np(&actions, workspace);
     if (!rc) rc = posix_spawn_file_actions_adddup2(&actions, STDERR_FILENO, STDOUT_FILENO);
     pid_t child;
-    if (!rc) rc = posix_spawnp(&child, s->program, &actions, NULL, argv, environ);
+    if (!rc) rc = spawn_command(&child, s, &actions, argv);
     posix_spawn_file_actions_destroy(&actions);
     if (rc) return "child-launch";
     int status;

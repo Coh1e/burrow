@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "blueprint_lock.h"
+#include "install_windows.h"
 #include "paths_windows.h"
 #include "source_windows.h"
 
@@ -56,6 +57,11 @@ char *bp_data_dir(void)
 {
     wchar_t path[BRW_PATH_CAP];
     return brw_path(BRW_DATA, path, false) ? NULL : utf8(path);
+}
+
+char *bp_package_child(const char *parent, const char *name)
+{
+    return bp_join(parent, name);
 }
 
 static FILE *stream(HANDLE h, int flags, const char *mode)
@@ -121,4 +127,74 @@ const char *bp_fetch_artifact(const char *location, FILE *file)
     const char *error = path ? brw_download(path, file) : "invalid-location";
     free(path);
     return error;
+}
+
+const char bp_home_key[] = "USERPROFILE";
+
+bool bp_env_key_equal(const char *name, const char *key)
+{
+    return _stricmp(name, key) == 0;
+}
+
+char *bp_default_entry(const struct bp_package *p, const char *bin_override, const char *home_override)
+{
+    wchar_t bin[BRW_PATH_CAP], path[BRW_PATH_CAP];
+    wchar_t *package = wide_path(p->name);
+    wchar_t *planned_bin = bin_override ? wide_path(bin_override) : NULL;
+    wchar_t *planned_home = home_override ? wide_path(home_override) : NULL;
+    char *result = package && (!bin_override || planned_bin) && (!home_override || planned_home) &&
+        !brw_planned_bin(bin, planned_bin, planned_home) &&
+        brw_command_entry_path(bin, package, path) ? utf8(path) : NULL;
+    free(planned_bin);
+    free(planned_home);
+    free(package);
+    return result;
+}
+
+static const char *locked_package(const struct bp_package *p, const char *cache, const char *child_path,
+                                  bool preview, bool check_default, bool *status, char **program)
+{
+    wchar_t *name = wide_path(p->name), *version = wide_path(p->version), *path = cache ? wide_path(cache) : NULL;
+    wchar_t *digest = wide_path(p->digest), *entry = wide_path(p->entry), *depends = wide_path(p->depends);
+    wchar_t *prefix = child_path ? wide_path(child_path) : NULL;
+    if (prefix)
+        for (wchar_t *c = prefix; *c; ++c)
+            if (*c == L'/') *c = L'\\';
+    struct local_package pkg = {name, version, path, digest, entry};
+    wchar_t target[BRW_PATH_CAP];
+    const char *error = "invalid-package";
+    bool executable = !strcmp(p->kind, "exe");
+    if (name && version && (!cache || path) && digest && entry && depends && (!child_path || prefix)) {
+        error = preview ? brw_check_locked_package(&pkg, executable, depends, prefix, check_default, status)
+                        : brw_use_locked_package(&pkg, executable, depends, prefix, status, target);
+        if (!error && program && !(*program = utf8(target))) error = "out-of-memory";
+    }
+    free(prefix);
+    free(name);
+    free(version);
+    free(path);
+    free(digest);
+    free(entry);
+    free(depends);
+    return error;
+}
+
+const char *bp_materialize_tool(const struct bp_package *p, const char *cache, char **program)
+{
+    return locked_package(p, cache, NULL, false, false, NULL, program);
+}
+
+const char *bp_set_default(const struct bp_package *p, const char *cache, const char *child_path, bool *changed)
+{
+    return locked_package(p, cache, child_path, false, true, changed, NULL);
+}
+
+const char *bp_check_tool(const struct bp_package *p, const char *cache, bool *present)
+{
+    return locked_package(p, cache, NULL, true, false, present, NULL);
+}
+
+const char *bp_default_matches(const struct bp_package *p, const char *cache, const char *child_path, bool *matches)
+{
+    return locked_package(p, cache, child_path, true, true, matches, NULL);
 }

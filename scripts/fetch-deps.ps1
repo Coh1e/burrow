@@ -40,6 +40,8 @@ foreach ($pin in (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'blueprint-s
                      "$directory/src/*", "$directory/deps/*", "$directory/COPYING")
     } elseif ($directory -like 'quickjs-*') {
         $marker = 'quickjs.c'
+    } elseif ($directory -like 'libarchive-*' -or $directory -like 'zlib-*') {
+        $marker = 'CMakeLists.txt'
     } else { throw "Unknown Blueprint dependency: $name" }
     if (-not (Test-Path -LiteralPath (Join-Path $sources "$directory/$marker"))) {
         & tar.exe -xf $archive -C $sources @members
@@ -49,8 +51,6 @@ foreach ($pin in (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'blueprint-s
 }
 
 $archiveDependencies = @(
-    @{Name='libarchive-3.7.7.tar.gz'; Url='https://codeload.github.com/libarchive/libarchive/tar.gz/refs/tags/v3.7.7'; Hash='fa62384995e8aa4f5a901c184fb5c91e56a29e24c05b6881a7f8fd5bbea694d2'; Directory='libarchive-3.7.7'},
-    @{Name='zlib-1.3.1.tar.gz'; Url='https://codeload.github.com/madler/zlib/tar.gz/refs/tags/v1.3.1'; Hash='17e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c'; Directory='zlib-1.3.1'},
     @{Name='xz-5.6.4.tar.gz'; Url='https://codeload.github.com/tukaani-project/xz/tar.gz/refs/tags/v5.6.4'; Hash='f6820629a1f7304b4c7364b5f5dae04fa8b799e41224e96cae1a8d94cf7d0b55'; Directory='xz-5.6.4'},
     @{Name='zstd-1.5.7.tar.gz'; Url='https://codeload.github.com/facebook/zstd/tar.gz/refs/tags/v1.5.7'; Hash='37d7284556b20954e56e1ca85b80226768902e2edabd3b649e9e72c0c9012ee3'; Directory='zstd-1.5.7'; Exclude='*/tests/*'},
     @{Name='bzip2-1.0.8.tar.gz'; Url='https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz'; Hash='ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269'; Directory='bzip2-1.0.8'}

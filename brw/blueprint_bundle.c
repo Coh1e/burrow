@@ -32,9 +32,9 @@ static bool reserved(const char *part, size_t n)
            (same_ascii(part, "com", 3) || same_ascii(part, "lpt", 3));
 }
 
-bool bp_safe_path(const char *path)
+static bool safe_relative_path(const char *path, size_t max_length)
 {
-    if (!path || !*path || strlen(path) > 255) return false;
+    if (!path || !*path || strlen(path) > max_length) return false;
     const char *part = path;
     for (const char *p = path; ; ++p) {
         unsigned c = (unsigned char)*p;
@@ -47,6 +47,16 @@ bool bp_safe_path(const char *path)
                      (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == ' '))
             return false;
     }
+}
+
+bool bp_safe_path(const char *path)
+{
+    return safe_relative_path(path, 255);
+}
+
+bool bp_safe_package_path(const char *path)
+{
+    return safe_relative_path(path, BP_PACKAGE_PATH_CAP - 1);
 }
 
 static bool valid_digest(const char *s)
