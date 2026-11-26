@@ -152,6 +152,8 @@ points to version 1, it still launches version 1 after this action.
 For an archive, the entry runs alongside the files shipped with it.
 For the duration of the action, its child process can find the locked direct
 and transitive dependencies by their executable names on `PATH`.
+The tool step retains the location of its verified artifact for later actions
+in that invocation, including after an `env` step selects another cache.
 
 ### Switch the user's default command
 
@@ -172,7 +174,17 @@ switches that entry. The path is
 `builder.exe` on Windows or `builder` on Linux and macOS under
 `BRW_BIN_DIR`, which defaults to the user's `.local/bin` directory.
 Applying the same selection again keeps the entry pointed at that version.
+Commands launched through this entry also use its locked direct and transitive
+dependencies. Selecting a different dependency version for a single action
+leaves the public command's selection in place until the next explicit switch.
+If the selected installed program or one of its archived files has changed,
+preview and apply report a conflict.
 An unrelated file occupying the command path causes the switch to fail.
+
+On Windows, a default with locked dependencies stores its private search
+path in the launcher's `.target` record. Existing target-only records are
+supported. Use this version of `brw` or newer to manage an entry written
+with a dependency search path.
 
 ## Build and test
 

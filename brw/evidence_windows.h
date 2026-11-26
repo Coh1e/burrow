@@ -7,6 +7,10 @@
 /* SHA-256 covers identity, type and contents, including directory children.
    A missing object has all-zero evidence. Unreadable objects return false. */
 struct brw_evidence { unsigned char bytes[32]; };
+/* These ordinary files at the version root describe installation state. */
+bool brw_version_metadata(const wchar_t *name);
+/* False if the file or directory contains named NTFS streams. */
+bool brw_ordinary_streams(const wchar_t *path);
 bool brw_evidence(const wchar_t *path, struct brw_evidence *result);
 /* Shallow directory identity remains stable as its recorded children are removed. */
 bool brw_node_evidence(const wchar_t *path, struct brw_evidence *result);

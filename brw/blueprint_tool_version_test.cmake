@@ -109,6 +109,13 @@ invoke(apply 0)
 check_entry_status(satisfied)
 check_default(2)
 
+set(installed_v2 "$ENV{XDG_DATA_HOME}/burrow/packages/builder/2/${command_name}")
+configure_file("${repo}/v1.exe" "${installed_v2}" COPYONLY)
+check_modified_payload("${installed_v2}" "${default_entry}")
+configure_file("${repo}/v2.exe" "${installed_v2}" COPYONLY)
+invoke(preview 0)
+check_entry_status(satisfied)
+
 set(caps tool run default)
 file(WRITE "${bundle}/main.mjs" "export default () => [${select_tool},
   {op:'run',program:'${CMAKE_COMMAND}',args:['-E','true']},{op:'default',tool:'builder'}]")
@@ -122,20 +129,24 @@ endif()
 
 # A released archive may need sibling resources when run from a project directory.
 set(archive_tree "${root}/version archive")
-file(MAKE_DIRECTORY "${archive_tree}/bin")
+file(MAKE_DIRECTORY "${archive_tree}/Bin" "${archive_tree}/bin")
 if(WIN32)
-  set(archive_entry "bin/build.exe")
+  set(archive_entry "Bin/build.exe")
   configure_file("${TOOL_2}" "${archive_tree}/${archive_entry}" COPYONLY)
 else()
-  set(archive_entry "bin/build")
+  set(archive_entry "Bin/build")
   file(WRITE "${archive_tree}/${archive_entry}" [=[#!/bin/sh
 cat "$0.sibling" > "$2"
 ]=])
   file(CHMOD "${archive_tree}/${archive_entry}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 endif()
 file(WRITE "${archive_tree}/${archive_entry}.sibling" "3")
+# The archive spells one implicit parent both ways. Case-sensitive volumes
+# retain both directories and case-insensitive volumes retain a single one.
+file(WRITE "${archive_tree}/bin/helper.dat" "helper")
 execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${repo}/builder.tar" --format=gnutar
-  "${archive_entry}" "${archive_entry}.sibling" WORKING_DIRECTORY "${archive_tree}" COMMAND_ERROR_IS_FATAL ANY)
+  "${archive_entry}" "${archive_entry}.sibling" bin/helper.dat
+  WORKING_DIRECTORY "${archive_tree}" COMMAND_ERROR_IS_FATAL ANY)
 file(SHA256 "${repo}/builder.tar" hash)
 file(APPEND "${repo}/catalog" "builder\t3\tarchive\tbuilder.tar\t${hash}\t${archive_entry}\n")
 set(caps run tool)
@@ -150,6 +161,24 @@ if(NOT actual STREQUAL "3")
   message(FATAL_ERROR "locked archive failed to read its sibling: ${actual}")
 endif()
 check_default(2)
+
+# The archive's entry remains intact when a sibling changes.
+set(archive_bin "${root}/archive default bin")
+set(ENV{BRW_BIN_DIR} "${archive_bin}")
+set(caps tool default)
+file(WRITE "${bundle}/main.mjs" "export default () => [${select_archive},{op:'default',tool:'builder'}]")
+seal()
+invoke(apply 0)
+invoke(preview 0)
+check_entry_status(satisfied)
+invoke(apply 0)
+check_entry_status(satisfied)
+set(installed_sibling "$ENV{XDG_DATA_HOME}/burrow/packages/builder/3/${archive_entry}.sibling")
+file(WRITE "${installed_sibling}" "4")
+check_modified_payload("${installed_sibling}" "${archive_bin}/${command_name}")
+file(WRITE "${installed_sibling}" "3")
+set(ENV{BRW_BIN_DIR} "${bin}")
+set(caps tool run)
 
 # Even with a matching executable on PATH, ambiguous or unbound actions fail preflight.
 set(work "${root}/rejected tool workspace")

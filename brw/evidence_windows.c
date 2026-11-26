@@ -7,6 +7,13 @@
 #include "shim_windows.h"
 
 enum evidence_kind { NODE, TREE, PAYLOAD };
+bool brw_version_metadata(const wchar_t *name)
+{
+    return !wcscmp(name, L".brw-files") || !wcscmp(name, L".brw-entry") ||
+           !wcscmp(name, L".brw-shim") || !wcscmp(name, L".brw-depends") ||
+           (!wcsncmp(name, L".brw-shim-", 10) && wcslen(name + 10) == 64 &&
+            wcsspn(name + 10, L"0123456789abcdef") == 64);
+}
 static bool snapshot(BCRYPT_ALG_HANDLE algorithm, const wchar_t *path,
                      struct brw_evidence *result, unsigned depth, enum evidence_kind kind);
 
@@ -32,8 +39,7 @@ static bool children(BCRYPT_ALG_HANDLE algorithm, BCRYPT_HASH_HANDLE hash,
             continue;
         if (kind == PAYLOAD && !depth &&
             !(entry.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) &&
-            (!wcscmp(entry.cFileName, L".brw-files") || !wcscmp(entry.cFileName, L".brw-entry") ||
-             !wcscmp(entry.cFileName, L".brw-shim") || !wcscmp(entry.cFileName, L".brw-depends")))
+            brw_version_metadata(entry.cFileName))
             continue;
         size_t chars = wcslen(entry.cFileName);
         if (length + chars + 2 > BRW_PATH_CAP) { ok = false; break; }
@@ -56,7 +62,7 @@ static bool children(BCRYPT_ALG_HANDLE algorithm, BCRYPT_HASH_HANDLE hash,
            BCryptHashData(hash, sum.bytes, sizeof sum.bytes, 0) >= 0;
 }
 
-static bool ordinary_streams(const wchar_t *path)
+bool brw_ordinary_streams(const wchar_t *path)
 {
     WIN32_FIND_STREAM_DATA stream;
     HANDLE search = FindFirstStreamW(path, FindStreamInfoStandard, &stream, 0);
@@ -88,7 +94,7 @@ static bool snapshot(BCRYPT_ALG_HANDLE algorithm, const wchar_t *path,
     BY_HANDLE_FILE_INFORMATION info;
     BCRYPT_HASH_HANDLE hash = NULL;
     bool ok = GetFileInformationByHandle(file, &info) &&
-              !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && ordinary_streams(path) &&
+              !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && brw_ordinary_streams(path) &&
               BCryptCreateHash(algorithm, &hash, NULL, 0, NULL, 0, 0) >= 0;
     if (ok) {
         DWORD identity[] = {info.dwVolumeSerialNumber, info.nFileIndexHigh,

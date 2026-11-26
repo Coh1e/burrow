@@ -192,7 +192,7 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             if (preview && earlier_entry_effect) {
                 step->entry_status = BP_DEFERRED;
             } else if (preview) {
-                error = bp_default_matches(step->package, &matches);
+                error = bp_check_default(plan->lock, step, &matches);
                 if (!error) step->entry_status = matches ? BP_SATISFIED : BP_UNMET;
             } else {
                 error = bp_use_default(plan->lock, step, &changed);

@@ -59,11 +59,13 @@ const char *brw_install_stream(const struct local_package *package, bool executa
    A non-NULL default_changed requests default publication and receives true
    only when it succeeds in changing the public entry. */
 const char *brw_use_locked_package(const struct local_package *package, bool executable,
-                                   const wchar_t *dependencies, bool *default_changed,
+                                   const wchar_t *dependencies, const wchar_t *child_path, bool *default_changed,
                                    wchar_t target[BRW_PATH_CAP]);
-/* Read-only check of the public shim and its recorded version and entry. */
-const char *brw_default_matches(const wchar_t *name, const wchar_t *version,
-                                const wchar_t *entry, bool *matches);
+/* Inputs are borrowed. A NULL archive means the original bytes are unavailable.
+   Read-only. Reports a verified match or false for a missing/unverifiable version. */
+const char *brw_check_locked_package(const struct local_package *package, bool executable,
+                                     const wchar_t *dependencies, const wchar_t *child_path,
+                                     bool check_default, bool *matches);
 int brw_report_plan(bool json, bool preview, const char *status,
                     const struct digby_plan *plan, const char *error, size_t step);
 

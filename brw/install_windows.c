@@ -24,6 +24,8 @@ enum { PATH_CAP = BRW_PATH_CAP, NAME_CAP = 128, ENTRY_CAP = MAX_PATH, ARCHIVE_DE
 struct installation {
     const struct local_package *package;
     const wchar_t *dependencies;
+    const wchar_t *child_path;
+    bool active_path_matches;
     enum digby_action action;
     FILE *archive;
     bool source;
@@ -406,6 +408,15 @@ static bool read_record(const wchar_t *path, wchar_t *value, size_t capacity)
     return valid;
 }
 
+/* Other public bin directories may still use this version's original launcher.
+   Remember each additional image before publishing it; keep the primary receipt. */
+static bool launcher_record(const wchar_t *version, const wchar_t *digest, wchar_t record[PATH_CAP])
+{
+    wchar_t name[75];
+    swprintf(name, 75, L".brw-shim-%ls", digest);
+    return join(record, version, name);
+}
+
 static bool owned_shim(struct installation *install, const wchar_t *version)
 {
     wchar_t record[PATH_CAP], expected[65];
@@ -428,7 +439,9 @@ static bool owned_shim(struct installation *install, const wchar_t *version)
             !hash_contents(NULL, shim_image, sizeof shim_image, expected))
             return false;
     }
-    return !wcscmp(install->shim_hash, expected);
+    return !wcscmp(install->shim_hash, expected) ||
+           (launcher_record(version, install->shim_hash, record) && read_record(record, expected, 65) &&
+            !wcscmp(install->shim_hash, expected));
 }
 
 static const char *read_active(struct installation *install);
@@ -468,8 +481,16 @@ static const char *prepare(struct installation *install)
 
 static const char *read_active(struct installation *install)
 {
-    wchar_t target[PATH_CAP];
-    if (!ordinary_path(install->bin, true) || !read_record(install->sidecar, target, PATH_CAP))
+    wchar_t target[PATH_CAP], *path = NULL;
+    FILE *sidecar = ordinary_path(install->bin, true) && ordinary_path(install->sidecar, false)
+                  ? _wfsopen(install->sidecar, L"rb", _SH_DENYWR) : NULL;
+    if (!sidecar) return "entry-conflict";
+    bool valid = brw_read_shim_target(sidecar, target, &path);
+    fclose(sidecar);
+    install->active_path_matches = path && install->child_path ? !_wcsicmp(path, install->child_path)
+                                                               : !path && !install->child_path;
+    free(path);
+    if (!valid)
         return "entry-conflict";
     size_t prefix = wcslen(install->package_dir);
     if (_wcsnicmp(target, install->package_dir, prefix) || target[prefix] != L'\\')
@@ -668,25 +689,110 @@ static const char *stage_executable(struct installation *install, FILE *inventor
     return fprintf(inventory, "%ls\n", install->package->entry) < 0 ? "version-record" : NULL;
 }
 
-static const char *stage_payload(struct installation *install)
+struct disk_member {
+    wchar_t *name;
+    bool directory, seen;
+};
+
+struct disk_listing {
+    struct disk_member *items;
+    size_t count, capacity, seen;
+};
+
+static bool list_payload(struct disk_listing *list, const wchar_t *directory, const wchar_t *parent)
 {
-    if (!stage_directory(install->packages, install->stage))
-        return "stage-directory";
-    wchar_t inventory[PATH_CAP];
-    if (!join(inventory, install->stage, L".brw-files"))
-        return "version-record";
-    FILE *files = _wfopen(inventory, L"wb");
-    if (!files)
-        return "version-record";
-    if (install->executable) {
-        const char *error = stage_executable(install, files);
-        return fclose(files) && !error ? "version-record" : error;
+    wchar_t pattern[PATH_CAP];
+    if (!join(pattern, directory, L"*")) return false;
+    WIN32_FIND_DATAW item;
+    HANDLE search = FindFirstFileW(pattern, &item);
+    if (search == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND;
+    bool ok = true;
+    do {
+        if (!wcscmp(item.cFileName, L".") || !wcscmp(item.cFileName, L"..")) continue;
+        bool folder = (item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        if (item.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) { ok = false; break; }
+        if (!*parent && !folder && brw_version_metadata(item.cFileName)) continue;
+        wchar_t name[ENTRY_CAP], full[PATH_CAP];
+        if (wcslen(parent) + !!*parent + wcslen(item.cFileName) >= ENTRY_CAP ||
+            !join(full, directory, item.cFileName)) { ok = false; break; }
+        swprintf(name, ENTRY_CAP, L"%ls%ls%ls", parent, *parent ? L"/" : L"", item.cFileName);
+        if (!relative_path(name) || !brw_ordinary_streams(full)) { ok = false; break; }
+        if (list->count == list->capacity) {
+            size_t capacity = list->capacity ? list->capacity * 2 : 32;
+            if (capacity <= list->capacity || capacity > (size_t)-1 / sizeof *list->items) { ok = false; break; }
+            struct disk_member *larger = realloc(list->items, capacity * sizeof *larger);
+            if (!larger) { ok = false; break; }
+            list->items = larger;
+            list->capacity = capacity;
+        }
+        wchar_t *copy = _wcsdup(name);
+        if (!copy) { ok = false; break; }
+        list->items[list->count++] = (struct disk_member){.name = copy, .directory = folder};
+        if (folder && !list_payload(list, full, name)) { ok = false; break; }
+    } while (FindNextFileW(search, &item));
+    ok = ok && GetLastError() == ERROR_NO_MORE_FILES;
+    FindClose(search);
+    return ok;
+}
+
+static int compare_members(const void *a, const void *b)
+{
+    return wcscmp(((const struct disk_member *)a)->name, ((const struct disk_member *)b)->name);
+}
+
+/* A file in the archive also accounts for its implicit parent directories. */
+static bool match_member(struct disk_listing *list, const wchar_t *root, const wchar_t *name, bool directory)
+{
+    wchar_t canonical[ENTRY_CAP];
+    size_t n = 0;
+    struct disk_member key = {.name = canonical};
+    for (const wchar_t *part = name;;) {
+        size_t length = wcscspn(part, L"/");
+        bool parent = part[length] != 0;
+        wmemcpy(canonical + n, part, length);
+        canonical[n + length] = 0;
+        struct disk_member *item = list->count ? bsearch(&key, list->items, list->count,
+                sizeof *list->items, compare_members) : NULL;
+        if (!item && (parent || directory)) {
+            /* The first archive spelling creates the directory. Another
+               spelling may reuse it only if this filesystem resolves it. */
+            wchar_t full[PATH_CAP];
+            WIN32_FIND_DATAW actual;
+            HANDLE found = join(full, root, canonical) ? FindFirstFileW(full, &actual) : INVALID_HANDLE_VALUE;
+            if (found == INVALID_HANDLE_VALUE) return false;
+            FindClose(found);
+            if (wcslen(actual.cFileName) != length || _wcsicmp(canonical + n, actual.cFileName)) return false;
+            wcscpy(canonical + n, actual.cFileName);
+            item = list->count ? bsearch(&key, list->items, list->count, sizeof *list->items, compare_members) : NULL;
+            if (!item || !item->seen) return false;
+        }
+        if (!item || item->directory != (parent || directory) || (item->seen && !item->directory)) return false;
+        if (!item->seen) { item->seen = true; ++list->seen; }
+        if (!parent) return true;
+        n += length;
+        canonical[n++] = L'/';
+        part += length + 1;
     }
+}
+
+static bool matches_archive_file(struct archive *reader, const wchar_t *path)
+{
+    FILE *file = _wfsopen(path, L"rb", _SH_DENYWR);
+    if (!file) return false;
+    char archived[8192], installed[8192];
+    la_ssize_t n;
+    while ((n = archive_read_data(reader, archived, sizeof archived)) > 0) {
+        if (fread(installed, 1, (size_t)n, file) != (size_t)n || memcmp(installed, archived, (size_t)n)) break;
+    }
+    bool ok = !n && fgetc(file) == EOF && !ferror(file);
+    fclose(file);
+    return ok;
+}
+
+static const char *read_archive_payload(struct installation *install, FILE *files, struct disk_listing *disk)
+{
     struct archive *reader = archive_read_new();
-    if (!reader) {
-        fclose(files);
-        return "archive-open";
-    }
+    if (!reader) return "archive-open";
     const char *error = "archive-open";
     bool found_entry = false;
     if (archive_read_support_format_tar(reader) == ARCHIVE_OK &&
@@ -707,12 +813,20 @@ static const char *stage_payload(struct installation *install)
                 (!folder && archive_entry_filetype(entry) != AE_IFREG) ||
                 archive_entry_hardlink(entry) || archive_entry_symlink(entry) ||
                 !archive_path(archive_entry_pathname(entry), folder, install->source, name) ||
-                !join(path, install->stage, name)) {
+                !join(path, disk ? install->version : install->stage, name)) {
                 error = "archive-path";
                 break;
             }
             if (!*name)
                 continue;
+            if (disk) {
+                if (!match_member(disk, install->version, name, folder) || (!folder && !matches_archive_file(reader, path))) {
+                    error = "version-conflict";
+                    break;
+                }
+                if (!folder && !wcscmp(name, install->package->entry)) found_entry = true;
+                continue;
+            }
             error = stage_parents(install->stage, name, files);
             if (error)
                 break;
@@ -738,6 +852,19 @@ static const char *stage_payload(struct installation *install)
             error = "entry-missing";
     }
     archive_read_free(reader);
+    return error;
+}
+
+static const char *stage_payload(struct installation *install)
+{
+    if (!stage_directory(install->packages, install->stage))
+        return "stage-directory";
+    wchar_t inventory[PATH_CAP];
+    if (!join(inventory, install->stage, L".brw-files"))
+        return "version-record";
+    FILE *files = _wfopen(inventory, L"wb");
+    if (!files) return "version-record";
+    const char *error = install->executable ? stage_executable(install, files) : read_archive_payload(install, files, NULL);
     if (fclose(files) && !error)
         error = "version-record";
     return error;
@@ -828,6 +955,22 @@ static bool write_record(const wchar_t *directory, const wchar_t *path,
 {
     DWORD size = (DWORD)((wcslen(value) + 1) * sizeof *value);
     return publish_file(directory, path, value, size, replace);
+}
+
+static bool write_target(const struct installation *install, const wchar_t *path, const wchar_t *target)
+{
+    if (!install->child_path) return write_record(install->bin, path, target, false);
+    size_t n = wcslen(target) + 1, m = wcslen(install->child_path) + 1;
+    if (m > 32767) return false;
+    size_t tag = sizeof BRW_SHIM_PATH_TAG / sizeof(wchar_t) - 1;
+    wchar_t *record = malloc((n + tag + m) * sizeof *record);
+    if (!record) return false;
+    wmemcpy(record, target, n);
+    wmemcpy(record + n, BRW_SHIM_PATH_TAG, tag);
+    wmemcpy(record + n + tag, install->child_path, m);
+    bool ok = publish_file(install->bin, path, record, (DWORD)((n + tag + m) * sizeof *record), false);
+    free(record);
+    return ok;
 }
 
 /* Identify retained versions across different data roots sharing one state root. */
@@ -932,12 +1075,17 @@ static bool publication_paths(struct publication *tx, const struct installation 
     if (wcsncmp(tag, L".stage-", 7) || !tag[7] ||
         wcsspn(tag + 7, L"0123456789-") != wcslen(tag + 7) ||
         !ordinary_path(install->packages, true) || !ordinary_path(install->package_dir, true) ||
-        !ordinary_path(install->bin, true) || !ordinary_path(install->state, true) ||
+        (log->format == 1 && !ordinary_path(install->bin, true)) || !ordinary_path(install->state, true) ||
         !join(tx->journal, install->state, L"publication-v1") ||
         !join(tx->paths[STAGED_VERSION], install->packages, tag) ||
         !install_record_path(install, log->version, tx->paths[RECEIPT]))
         return false;
     wcscpy(tx->paths[VERSION], install->version);
+    if (log->format == 2) {
+        wchar_t name[80];
+        swprintf(name, 80, L"%ls-receipt", tag);
+        return join(tx->paths[STAGED_RECEIPT], install->state, name);
+    }
     wcscpy(tx->paths[TARGET], install->sidecar);
     wcscpy(tx->paths[SHIM], install->shim);
     const struct { enum endpoint slot; const wchar_t *base, *suffix; } temporary[] = {
@@ -972,9 +1120,11 @@ static void plan_moves(struct publication *tx)
 
 static const char *snapshot_endpoints(const struct publication *tx, struct brw_evidence *values)
 {
-    for (unsigned i = 0; i < ENDPOINT_COUNT; ++i)
-        if (!brw_evidence(tx->paths[i], &values[i]))
+    for (unsigned i = 0; i < ENDPOINT_COUNT; ++i) {
+        if (!*tx->paths[i]) values[i] = (struct brw_evidence){{0}};
+        else if (!brw_evidence(tx->paths[i], &values[i]))
             return (i == SHIM || i == TARGET) ? "entry-conflict" : "publication-conflict";
+    }
     return NULL;
 }
 
@@ -1094,10 +1244,10 @@ static const char *publish_transaction(struct installation *install, const wchar
 {
     struct publication tx = {0};
     struct publication_log *log = &tx.log;
-    log->format = 1;
+    log->format = target ? 1 : 2; /* Version and receipt only, without a public command. */
     wcscpy(log->package, install->package->name);
     wcscpy(log->version, install->package->version);
-    wcscpy(log->bin, install->bin);
+    if (target) wcscpy(log->bin, install->bin);
     wcscpy(log->packages, install->packages);
     if (*install->stage)
         wcscpy(log->stage, wcsrchr(install->stage, L'\\') + 1);
@@ -1111,9 +1261,11 @@ static const char *publish_transaction(struct installation *install, const wchar
         receipt = write_record(install->state, tx.paths[STAGED_RECEIPT], install->version, false);
         if (!receipt) { error = "install-record"; goto cleanup; }
     }
-    sidecar = write_record(install->bin, tx.paths[STAGED_TARGET], target, false);
-    if (!sidecar) goto cleanup;
-    if (!replace || wcscmp(install->shim_hash, image->digest)) {
+    if (target) {
+        sidecar = write_target(install, tx.paths[STAGED_TARGET], target);
+        if (!sidecar) goto cleanup;
+    }
+    if (target && (!replace || wcscmp(install->shim_hash, image->digest))) {
         shim = publish_file(install->bin, tx.paths[STAGED_SHIM], image->bytes, image->size, false);
         if (!shim) goto cleanup;
     }
@@ -1176,13 +1328,20 @@ static const char *recover_locked(bool preview, bool *pending)
                  log->cleanup <= DISCARD_BACKUPS &&
                  (log->cleanup || (fgetc(file) == EOF && !ferror(file)));
     fclose(file);
-    if (!valid || log->format != 1 || log->stage[63] || log->package[NAME_CAP-1] ||
+    if (!valid || (log->format != 1 && log->format != 2) || log->stage[63] || log->package[NAME_CAP-1] ||
         log->version[NAME_CAP-1] || log->packages[PATH_CAP-1] || log->bin[PATH_CAP-1] ||
         !brw_package_component(log->package) || !brw_package_component(log->version))
         return "publication-journal";
     package.name = log->package;
     package.version = log->version;
     install.package = &package;
+    if (log->format == 2) {
+        if (*log->bin || absent(&log->before[STAGED_VERSION]) || absent(&log->before[STAGED_RECEIPT]))
+            return "publication-journal";
+        for (unsigned i = STAGED_TARGET; i < ENDPOINT_COUNT; ++i)
+            if (!absent(&log->before[i])) return "publication-journal";
+        install.scoped = true;
+    }
     error = package_roots(&install, false);
     if (error) return error;
     if (_wcsicmp(log->packages, install.packages) || _wcsicmp(log->bin, install.bin))
@@ -1306,9 +1465,11 @@ static const char *publish_retained_entry(struct installation *install, const wc
         return "version-record";
     /* A retained version may have been published by an older launcher build. */
     if (!read_record(record, recorded, 65) || wcscmp(recorded, image.digest)) {
-        if (!wcscmp(install->active_version, install->package->version))
+        if (!wcscmp(install->active_version, install->package->version) && install->active_path_matches)
             return NULL;
-        if (!write_record(install->version, record, image.digest, true))
+        if (!launcher_record(install->version, image.digest, record) ||
+            ((!read_record(record, recorded, 65) || wcscmp(recorded, image.digest)) &&
+             !write_record(install->version, record, image.digest, false)))
             return "version-record";
     }
     return publish_transaction(install, target, &image, replace);
@@ -1421,9 +1582,7 @@ static bool owned_tree(const wchar_t *directory, const wchar_t *relative, const 
         bool folder = (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         bool root = !*relative;
         bool inventory = root && !wcscmp(file.cFileName, L".brw-files");
-        bool metadata = !folder && (inventory || (root && (!wcscmp(file.cFileName, L".brw-depends") ||
-                                                         !wcscmp(file.cFileName, L".brw-entry") ||
-                                                         !wcscmp(file.cFileName, L".brw-shim"))));
+        bool metadata = !folder && root && brw_version_metadata(file.cFileName);
         wchar_t name[ENTRY_CAP], path[PATH_CAP];
         if (wcslen(relative) + wcslen(file.cFileName) + 2 > ENTRY_CAP) {
             owned = false;
@@ -1619,6 +1778,7 @@ static const char *materialize_version(struct installation *install)
         if (!ordinary_path(install->version, true) ||
             !same_payload(install->stage, install->version))
             return "version-conflict";
+        if (!install->scoped && !owned_inactive_version(install)) return "entry-conflict";
         if (!remove_stage(install->stage)) return "cleanup-stage";
     } else {
         struct launcher_image image;
@@ -1626,19 +1786,10 @@ static const char *materialize_version(struct installation *install)
         if (error) return error;
         if (InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
             return "cancelled";
-        if (!MoveFileExW(install->stage, install->version, MOVEFILE_WRITE_THROUGH))
-            return "publish-version";
+        return publish_transaction(install, NULL, NULL, false);
     }
     install->stage[0] = 0;
     return NULL;
-}
-
-static const char *record_locked_version(struct installation *install)
-{
-    wchar_t path[PATH_CAP], value[PATH_CAP];
-    if (!install_record_path(install, install->package->version, path)) return "install-record";
-    if (read_record(path, value, PATH_CAP) && !_wcsicmp(value, install->version)) return NULL;
-    return write_record(install->state, path, install->version, false) ? NULL : "install-record";
 }
 
 static bool missing_path(const wchar_t *path)
@@ -1653,21 +1804,62 @@ static const char *read_default(struct installation *install, bool *matches)
     *matches = false;
     if (missing_path(install->shim) && missing_path(install->sidecar)) return NULL;
     const char *error = read_active(install);
-    if (!error) *matches = !_wcsicmp(install->active_version, install->package->version) &&
+    if (!error) *matches = install->active_path_matches &&
+                           !_wcsicmp(install->active_version, install->package->version) &&
                            !_wcsicmp(install->active_entry, install->package->entry);
     return error;
 }
 
-const char *brw_default_matches(const wchar_t *name, const wchar_t *version,
-                                const wchar_t *entry, bool *matches)
+/* Compare the installed payload to the lock without creating a staging tree. */
+static const char *inspect_locked_payload(struct installation *install, bool *present)
 {
-    if (!name || !brw_package_component(name) || !version || !brw_package_component(version) ||
-        !entry || !relative_path(entry) || !matches) return "invalid-package";
-    struct local_package package = {.name = name, .version = version, .entry = entry};
-    struct installation install = {.package = &package};
+    *present = false;
+    if (missing_path(install->version)) return NULL;
+    if (!ordinary_path(install->version, true) || !brw_ordinary_streams(install->version)) return "version-conflict";
+    if (!install->executable && !install->package->archive) return NULL;
+    struct disk_listing disk = {0};
+    const char *error = list_payload(&disk, install->version, L"") ? NULL : "version-conflict";
+    if (!error && disk.count) qsort(disk.items, disk.count, sizeof *disk.items, compare_members);
+    if (!error && install->executable) {
+        wchar_t target[PATH_CAP], hash[65];
+        FILE *file = disk.count == 1 && !disk.items[0].directory &&
+                     !wcscmp(disk.items[0].name, install->package->entry) &&
+                     join(target, install->version, install->package->entry) ? _wfsopen(target, L"rb", _SH_DENYWR) : NULL;
+        if (!file || !hash_contents(file, NULL, 0, hash) || _wcsicmp(hash, install->package->digest))
+            error = "version-conflict";
+        if (file) fclose(file);
+    } else if (!error) {
+        error = verify(install);
+        if (!error) error = read_archive_payload(install, NULL, &disk);
+        if (!error && disk.seen != disk.count) error = "version-conflict";
+        if (install->archive) fclose(install->archive);
+    }
+    for (size_t i = 0; i < disk.count; ++i) free(disk.items[i].name);
+    free(disk.items);
+    *present = !error;
+    return error;
+}
+
+const char *brw_check_locked_package(const struct local_package *package, bool executable,
+                                     const wchar_t *dependencies, const wchar_t *child_path,
+                                     bool check_default, bool *matches)
+{
+    *matches = false;
+    struct installation install = {.package = package, .source = true, .scoped = !check_default,
+        .executable = executable, .dependencies = dependencies, .child_path = child_path};
     const char *error = package_roots(&install, false);
     if (!error && !package_paths(&install)) error = "install-directory";
-    return error ? error : read_default(&install, matches);
+    bool present = false;
+    if (!error) error = inspect_locked_payload(&install, &present);
+    if (error || !check_default) { *matches = present; return error; }
+    if ((error = read_default(&install, matches)) != NULL) return error;
+    if (!missing_path(install.version)) {
+        error = brw_path(BRW_STATE, install.state, false);
+        if (error) return error;
+        if (!owned_inactive_version(&install)) return "entry-conflict";
+    }
+    if (!present) *matches = false;
+    return NULL;
 }
 
 static const char *default_locked_version(struct installation *install, const wchar_t *target,
@@ -1692,7 +1884,7 @@ static const char *default_locked_version(struct installation *install, const wc
 }
 
 const char *brw_use_locked_package(const struct local_package *package, bool executable,
-                                   const wchar_t *dependencies, bool *default_changed,
+                                   const wchar_t *dependencies, const wchar_t *child_path, bool *default_changed,
                                    wchar_t target[BRW_PATH_CAP])
 {
     if (!package || !package->name || !package->version || !package->entry ||
@@ -1700,7 +1892,7 @@ const char *brw_use_locked_package(const struct local_package *package, bool exe
     if (default_changed) *default_changed = false;
     struct installation install = {.package = package, .action = DIGBY_INSTALL, .source = true,
                                    .scoped = !default_changed,
-                                   .executable = executable, .dependencies = dependencies};
+                                   .executable = executable, .dependencies = dependencies, .child_path = child_path};
     const char *error = brw_validate_source_package(package, executable);
     if (!error && !brw_dependency_names(dependencies)) error = "dependency-state";
     if (!error) error = brw_begin_package_changes();
@@ -1712,7 +1904,6 @@ const char *brw_use_locked_package(const struct local_package *package, bool exe
     if (!error) error = materialize_version(&install);
     if (!error && InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
         error = "cancelled";
-    if (!error) error = record_locked_version(&install);
     if (!error && default_changed) error = default_locked_version(&install, target, default_changed);
     if (install.archive) fclose(install.archive);
     if (*install.stage && !remove_stage(install.stage) && !error) error = "cleanup-stage";

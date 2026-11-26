@@ -6,6 +6,26 @@
 #include "shim_windows.h"
 #include "shim_script_windows.h"
 
+/* A shim changes only its own environment before launching its sole child. */
+static int prepend_path(const wchar_t *prefix)
+{
+    DWORD need = GetEnvironmentVariableW(L"PATH", NULL, 0);
+    if (!need && GetLastError() != ERROR_ENVVAR_NOT_FOUND) return 0;
+    size_t n = wcslen(prefix);
+    if (n + need + 1 > 32767) return 0;
+    wchar_t *path = malloc((n + need + 1) * sizeof *path);
+    if (!path) return 0;
+    wcscpy(path, prefix);
+    int valid = 1;
+    if (need > 1) {
+        path[n] = L';';
+        valid = GetEnvironmentVariableW(L"PATH", path + n + 1, need) == need - 1;
+    }
+    int ok = valid && SetEnvironmentVariableW(L"PATH", path);
+    free(path);
+    return ok;
+}
+
 int wmain(int argc, wchar_t **argv)
 {
     wchar_t sidecar[BRW_PATH_CAP];
@@ -15,11 +35,11 @@ int wmain(int argc, wchar_t **argv)
     FILE *file = _wfopen(sidecar, L"rb");
     if (!file)
         return 126;
-    wchar_t target[BRW_PATH_CAP];
-    size_t length = fread(target, sizeof *target, BRW_PATH_CAP, file);
-    int valid = !ferror(file) && feof(file) && length > 1 &&
-                target[length - 1] == 0 && wcslen(target) == length - 1;
+    wchar_t target[BRW_PATH_CAP], *prefix = NULL;
+    int valid = brw_read_shim_target(file, target, &prefix);
     fclose(file);
+    if (valid && prefix) valid = prepend_path(prefix);
+    free(prefix);
     if (!valid)
         return 126;
 

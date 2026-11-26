@@ -7,6 +7,7 @@
 
 enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
+enum { BP_PACKAGE_PATH_CAP = 260 }; /* Includes the trailing NUL. */
 
 struct bp_file {
     char *path;
@@ -78,6 +79,7 @@ const char *bp_load(const char *directory, const char *digest, const char *platf
                     char detail[BP_DETAIL_CAP]);
 void bp_bundle_free(struct bp_bundle *bundle);
 bool bp_safe_path(const char *path);
+bool bp_safe_package_path(const char *path);
 const struct bp_file *bp_find(const struct bp_bundle *bundle, const char *path);
 const char *bp_build(const struct bp_bundle *bundle, struct bp_plan *out, char detail[BP_DETAIL_CAP]);
 void bp_plan_free(struct bp_plan *plan);

@@ -151,25 +151,25 @@ char *bp_default_entry(const struct bp_package *p, const char *bin_override, con
     return result;
 }
 
-const char *bp_default_matches(const struct bp_package *p, bool *matches)
+static const char *locked_package(const struct bp_package *p, const char *cache, const char *child_path,
+                                  bool preview, bool check_default, bool *status, char **program)
 {
-    wchar_t *name = wide_path(p->name), *version = wide_path(p->version), *entry = wide_path(p->entry);
-    const char *error = brw_default_matches(name, version, entry, matches);
-    free(name);
-    free(version);
-    free(entry);
-    return error;
-}
-
-static const char *use_package(const struct bp_package *p, const char *cache, char **program, bool *changed)
-{
-    wchar_t *name = wide_path(p->name), *version = wide_path(p->version), *path = wide_path(cache);
+    wchar_t *name = wide_path(p->name), *version = wide_path(p->version), *path = cache ? wide_path(cache) : NULL;
     wchar_t *digest = wide_path(p->digest), *entry = wide_path(p->entry), *depends = wide_path(p->depends);
+    wchar_t *prefix = child_path ? wide_path(child_path) : NULL;
+    if (prefix)
+        for (wchar_t *c = prefix; *c; ++c)
+            if (*c == L'/') *c = L'\\';
     struct local_package pkg = {name, version, path, digest, entry};
     wchar_t target[BRW_PATH_CAP];
-    const char *error = name && version && path && digest && entry && depends ?
-        brw_use_locked_package(&pkg, !strcmp(p->kind, "exe"), depends, changed, target) : "invalid-package";
-    if (!error && program && !(*program = utf8(target))) error = "out-of-memory";
+    const char *error = "invalid-package";
+    bool executable = !strcmp(p->kind, "exe");
+    if (name && version && (!cache || path) && digest && entry && depends && (!child_path || prefix)) {
+        error = preview ? brw_check_locked_package(&pkg, executable, depends, prefix, check_default, status)
+                        : brw_use_locked_package(&pkg, executable, depends, prefix, status, target);
+        if (!error && program && !(*program = utf8(target))) error = "out-of-memory";
+    }
+    free(prefix);
     free(name);
     free(version);
     free(path);
@@ -181,10 +181,20 @@ static const char *use_package(const struct bp_package *p, const char *cache, ch
 
 const char *bp_materialize_tool(const struct bp_package *p, const char *cache, char **program)
 {
-    return use_package(p, cache, program, NULL);
+    return locked_package(p, cache, NULL, false, false, NULL, program);
 }
 
-const char *bp_set_default(const struct bp_package *p, const char *cache, bool *changed)
+const char *bp_set_default(const struct bp_package *p, const char *cache, const char *child_path, bool *changed)
 {
-    return use_package(p, cache, NULL, changed);
+    return locked_package(p, cache, child_path, false, true, changed, NULL);
+}
+
+const char *bp_check_tool(const struct bp_package *p, const char *cache, bool *present)
+{
+    return locked_package(p, cache, NULL, true, false, present, NULL);
+}
+
+const char *bp_default_matches(const struct bp_package *p, const char *cache, const char *child_path, bool *matches)
+{
+    return locked_package(p, cache, child_path, true, true, matches, NULL);
 }

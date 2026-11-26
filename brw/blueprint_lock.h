@@ -6,6 +6,7 @@
 /* Rows own a single allocation containing their immutable catalog fields. */
 struct bp_package {
     char *storage;
+    char *artifact; /* Owned verified cache path captured when the tool step ran. */
     const char *registry, *name, *version, *kind, *location, *digest, *entry, *depends;
     size_t first_step;
     bool reused;
@@ -24,6 +25,8 @@ const char *bp_prepare_lock(struct bp_plan *plan, const struct bp_bundle *bundle
 void bp_lock_free(struct bp_lock *lock);
 const char *bp_apply_packages(struct bp_lock *lock, size_t step);
 bool bp_package_id(const char *text);
+/* Match a legacy entry against the registered declarations of its package/version. */
+bool bp_registered_entry(const struct bp_package *requested, const char *version, const char *entry);
 /* Reads the remainder of the borrowed stream, starting at its current position. */
 bool bp_matches_digest(FILE *file, const char *expected);
 /* Caller owns the absolute path derived from the locked version and entry. */
@@ -33,6 +36,7 @@ char *bp_version_entry(const struct bp_package *p);
 const char *bp_use_tool(const struct bp_lock *lock, const struct bp_step *step,
                         char **program, char **child_path);
 const char *bp_use_default(const struct bp_lock *lock, const struct bp_step *step, bool *changed);
+const char *bp_check_default(const struct bp_lock *lock, const struct bp_step *step, bool *matches);
 
 /* Platform adapters. All strings are UTF-8. Visitor arguments are borrowed.
    Path results are caller-owned. A failed atomic write preserves the old file. */
@@ -52,12 +56,17 @@ char *bp_package_child(const char *parent, const char *name);
 /* Materialize the verified version without publishing a user command entry.
    On success the caller owns *program. Diagnostic codes are static. */
 const char *bp_materialize_tool(const struct bp_package *p, const char *cache, char **program);
+/* Read-only equivalent for a scoped tool. A missing version is not a conflict. */
+const char *bp_check_tool(const struct bp_package *p, const char *cache, bool *present);
 /* Return the owned absolute entry path without writing. Overrides are earlier
    env declarations; NULL selects the corresponding process environment value. */
 extern const char bp_home_key[];
 bool bp_env_key_equal(const char *name, const char *key);
 char *bp_default_entry(const struct bp_package *p, const char *bin_override, const char *home_override);
-/* Inspect or switch the managed entry, preserving unrelated user commands. */
-const char *bp_default_matches(const struct bp_package *p, bool *matches);
-const char *bp_set_default(const struct bp_package *p, const char *cache, bool *changed);
+/* The borrowed child_path is NULL or the locked dependency search prefix.
+   Inspection is read-only and cache may be NULL if no verified local source exists. */
+const char *bp_default_matches(const struct bp_package *p, const char *cache, const char *child_path,
+                               bool *matches);
+const char *bp_set_default(const struct bp_package *p, const char *cache, const char *child_path,
+                           bool *changed);
 #endif
