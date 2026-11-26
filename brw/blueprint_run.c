@@ -65,18 +65,35 @@ static const char *check_state(const char *workspace, struct bp_state *state,
         state->exit_code = code;
         state->has_exit_code = true;
         if (!code) {
-            state->status = attempt ? "changed" : "satisfied";
+            state->status = attempt ? BP_CHANGED : BP_SATISFIED;
             return NULL;
         }
         if (code >= sizeof state->unmet || !state->unmet[code]) return "check-failed";
-        state->status = "unmet";
+        state->status = BP_UNMET;
         if (attempt) return "recheck-unmet";
         if (preview) return NULL;
-        state->has_exit_code = false;
         error = command(workspace, &state->change, outputs, NULL);
         if (error) return error;
     }
     return NULL;
+}
+
+/* Workspace-dependent file checks after a state must use the updated files. */
+static const char *validate_segment(const char *workspace, const struct bp_plan *plan,
+                                    size_t start, size_t end, size_t *failed)
+{
+    if (start != 0) {
+        for (size_t i = start; i < end; ++i) {
+            const struct bp_step *step = &plan->steps[i];
+            if (step->op != BP_COPY && step->op != BP_REPLACE) continue;
+            const char *error = bp_validate_step(workspace, step);
+            if (error) {
+                *failed = i;
+                return error;
+            }
+        }
+    }
+    return bp_validate_text_range(workspace, plan, start, end, failed);
 }
 
 const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspace, bool preview,
@@ -84,22 +101,31 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
 {
     *completed = 0;
     for (size_t i = 0; i < plan->count; ++i) {
+        struct bp_state *state = plan->steps[i].state;
+        if (state) {
+            state->status = BP_UNCHECKED;
+            state->has_exit_code = false;
+        }
+    }
+    bool follows_state = false;
+    for (size_t i = 0; i < plan->count; ++i) {
         const struct bp_step *s = &plan->steps[i];
         if (s->skip_op) continue;
         const char *error;
         if (s->state) {
+            follows_state = true;
             error = bp_validate_step(workspace, &s->state->check);
             if (!error) error = bp_validate_step(workspace, &s->state->change);
+        } else if (follows_state && (s->op == BP_COPY || s->op == BP_REPLACE)) {
+            error = bp_validate_file_operands(s);
         } else error = bp_validate_step(workspace, s);
         if (error) {
             *failure_source = s->source;
             return error;
         }
     }
-    size_t failed = 0;
-    const char *error = bp_validate_text_plan(workspace, plan, &failed);
-    if (error) *failure_source = plan->steps[failed].source;
-    if (error) return error;
+    size_t segment_end = 0;
+    const char *error = NULL;
     bool earlier_effect = false;
     struct runtime_output outputs[BP_MAX_STEPS] = {0};
     size_t check = 0;
@@ -120,16 +146,28 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
         }
         if (error || i == plan->count) break;
         const struct bp_step *step = &plan->steps[i];
+        if (i >= segment_end && !step->state) {
+            /* A state change may create or edit the input of a later text operation. */
+            segment_end = i + 1;
+            while (segment_end < plan->count && !plan->steps[segment_end].state) ++segment_end;
+            if (!preview || !earlier_effect) {
+                size_t failed = i;
+                error = validate_segment(workspace, plan, i, segment_end, &failed);
+                if (error) {
+                    *failure_source = plan->steps[failed].source;
+                    break;
+                }
+            }
+        }
         if (step->skip_op) continue;
         if (step->state) {
-            step->state->has_exit_code = false;
-            step->state->status = NULL;
             if (preview && (earlier_effect || needs_output(&step->state->check))) {
-                step->state->status = "check-at-execution";
+                earlier_effect = true;
+                step->state->status = BP_DEFERRED;
                 continue;
             }
             error = check_state(workspace, step->state, outputs, preview);
-            if (!error && strcmp(step->state->status, "satisfied")) earlier_effect = true;
+            if (!error && step->state->status != BP_SATISFIED) earlier_effect = true;
         } else {
             earlier_effect = true;
             if (preview) continue;

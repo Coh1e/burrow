@@ -26,4 +26,8 @@ const char *bp_compare_output_case(const char *workspace, const char *a,
                                    const char *b, enum bp_output_match *match);
 const char *bp_validate_file_operands(const struct bp_step *s);
 const char *bp_replace_text(FILE *stage, const struct bp_step *s, const char *text, size_t size);
+/* Validate the half-open segment between external states. Indices refer to plan. */
+const char *bp_validate_text_range(const char *workspace, const struct bp_plan *plan,
+                                   size_t start, size_t end, size_t *failed_step);
+
 #endif

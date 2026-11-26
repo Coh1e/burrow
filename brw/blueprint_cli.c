@@ -73,8 +73,9 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
         print_step(plan, &s->state->check);
         printf(",\"change\":");
         print_step(plan, &s->state->change);
-        field("status", s->state->status);
-        if (s->state->status && !strcmp(s->state->status, "check-at-execution"))
+        static const char *const statuses[] = {NULL, "satisfied", "unmet", "changed", "check-at-execution"};
+        field("status", statuses[s->state->status]);
+        if (s->state->status == BP_DEFERRED)
             field("reason", "earlier-step-may-change-state");
         if (s->state->has_exit_code) printf(",\"exitCode\":%lu", s->state->exit_code);
     }

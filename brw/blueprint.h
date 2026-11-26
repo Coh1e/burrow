@@ -47,10 +47,12 @@ struct bp_step {
     const struct bp_file *payload; /* Borrowed from the verified bundle. */
 };
 
+enum bp_state_status { BP_UNCHECKED, BP_SATISFIED, BP_UNMET, BP_CHANGED, BP_DEFERRED };
+
 struct bp_state {
     struct bp_step check, change;
     unsigned char unmet[256]; /* Portable process exit codes 1..255. */
-    const char *status;
+    enum bp_state_status status;
     unsigned long exit_code;
     bool has_exit_code;
 };
@@ -90,16 +92,16 @@ struct bp_output_file {
 bool bp_create_output_file(struct bp_output_file *file);
 bool bp_remove_output_file(struct bp_output_file *file);
 
-/* The backend validates every step before the caller applies the first one.
-   The workspace must already exist. Only bp_apply_step may change state. */
+/* Validates operands against an existing workspace without applying the step. */
 const char *bp_validate_step(const char *workspace, const struct bp_step *step);
 /* Checks replacement inputs/outputs, including values produced by earlier
    steps. failed_step receives the zero-based failing step on error. */
 const char *bp_validate_text_plan(const char *workspace, const struct bp_plan *plan,
                                   size_t *failed_step);
 const char *bp_apply_step(const char *workspace, const struct bp_step *step);
-/* When exit_code is supplied, normal exits (including nonzero) return success
-   and store the child status. Launch, wait and staging failures return errors. */
+/* With apply false, validate without launching or writing exit_code. With apply
+   true, execute the command. If exit_code is supplied, normal exits (including
+   nonzero) store the child status. Launch, wait and staging failures return errors. */
 const char *bp_run_command(const char *workspace, const struct bp_step *s, bool apply,
                            unsigned long *exit_code);
 const char *bp_op_name(enum bp_op op);
