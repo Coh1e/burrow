@@ -101,11 +101,12 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
 }
 
 static void report(const struct bp_plan *plan, bool json, bool preview, bool generate,
-                   const char *error, const char *detail, size_t completed)
+                   const char *error, const struct bp_run_result *result)
 {
     const char *status = error ? "failed" : generate ? "locked" : preview ? "planned" : "applied";
+    const char *detail = error && result->failure_source ? result->failure_source : "";
     if (json) {
-        printf("{\"status\":\"%s\",\"completed\":%zu,\"steps\":[", status, completed);
+        printf("{\"status\":\"%s\",\"completed\":%zu,\"steps\":[", status, result->completed);
         for (size_t i = 0; i < plan->count; ++i) {
             if (i) putchar(',');
             print_step(plan, &plan->steps[i]);
@@ -129,9 +130,10 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
         }
         field("error", error);
         if (*detail) field("detail", detail);
+        if (result->command_started) printf(",\"commandStarted\":true,\"mayHaveSideEffects\":true");
         puts("}");
     } else {
-        printf("%s (%zu completed)\n", status, completed);
+        printf("%s (%zu completed)\n", status, result->completed);
         for (size_t i = 0; i < plan->count; ++i) {
             print_step(plan, &plan->steps[i]);
             putchar('\n');
@@ -144,6 +146,7 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
             }
         }
         if (error) fprintf(stderr, "brw: %s %s\n", error, detail);
+        if (result->command_started) fputs("The external command started and may have left side effects.\n", stderr);
     }
 }
 
@@ -165,7 +168,7 @@ int brw_blueprint_command(int argc, const char *const *argv)
     struct bp_bundle bundle = {0};
     struct bp_plan plan = {0};
     char detail[BP_DETAIL_CAP] = "";
-    const char *location = detail;
+    struct bp_run_result result = {.failure_source = detail};
     unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) |
         (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL) | (1u << BP_DEFAULT);
 #ifdef BRW_BP_NATIVE_INSTALL
@@ -174,15 +177,14 @@ int brw_blueprint_command(int argc, const char *const *argv)
     const char *error = bp_load(argv[1], digest, BRW_BP_PLATFORM, BRW_BP_ARCH,
                                 capabilities, &bundle, detail);
     if (!error) error = bp_build(&bundle, &plan, detail);
-    size_t completed = 0;
     struct bp_lock lock = {0};
     plan.lock = &lock;
     if (!error) error = bp_prepare_lock(&plan, &bundle, argv[1], BRW_BP_PLATFORM "-" BRW_BP_ARCH,
                                         generate, &lock, detail);
     if (!error && !generate) {
-        error = digby_run_blueprint(&plan, workspace, preview, &completed, &location);
+        error = digby_run_blueprint(&plan, workspace, preview, &result);
     }
-    report(&plan, json, preview, generate, error, error ? location : "", completed);
+    report(&plan, json, preview, generate, error, &result);
     bp_lock_free(&lock);
     bp_plan_free(&plan);
     bp_bundle_free(&bundle);
