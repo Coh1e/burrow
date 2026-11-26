@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_OP_COUNT };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
 
 struct bp_file {
@@ -37,7 +37,7 @@ struct bp_binding {
 struct bp_step {
     struct bp_state *state; /* Owned by a state step. */
     struct bp_binding *bindings; /* Parallel to args. Output indices are one-based. */
-    char *skip_platform, *skip_op;
+    char *skip_platform, *skip_op, *registry;
     enum bp_op op;
     char *source; /* Call path including the position within this module. */
     char *path, *from, *to, *name, *version, *entry, *value;
@@ -58,6 +58,7 @@ struct bp_state {
 };
 
 struct bp_plan {
+    struct bp_lock *lock; /* Borrowed for the duration of CLI execution. */
     struct bp_step steps[BP_MAX_STEPS];
     struct bp_output outputs[BP_MAX_STEPS];
     size_t output_count;

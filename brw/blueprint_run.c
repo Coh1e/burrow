@@ -1,4 +1,5 @@
 #include "blueprint_edit.h"
+#include "blueprint_lock.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,7 +111,7 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
     bool follows_state = false;
     for (size_t i = 0; i < plan->count; ++i) {
         const struct bp_step *s = &plan->steps[i];
-        if (s->skip_op) continue;
+        if (s->skip_op || s->op == BP_TOOL) continue;
         const char *error;
         if (s->state) {
             follows_state = true;
@@ -160,7 +161,10 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
             }
         }
         if (step->skip_op) continue;
-        if (step->state) {
+        if (step->op == BP_TOOL) {
+            if (preview) continue;
+            error = bp_apply_packages(plan->lock, i);
+        } else if (step->state) {
             if (preview && (earlier_effect || needs_output(&step->state->check))) {
                 earlier_effect = true;
                 step->state->status = BP_DEFERRED;

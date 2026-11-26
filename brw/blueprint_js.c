@@ -200,6 +200,7 @@ void bp_plan_free(struct bp_plan *plan)
         }
         free(s->skip_platform);
         free(s->skip_op);
+        free(s->registry);
         free(s->source); free(s->path); free(s->from); free(s->to);
         free(s->name); free(s->version); free(s->entry); free(s->value);
     }
@@ -391,6 +392,17 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }
     switch (s->op) {
+    case BP_TOOL: {
+        JSValue registry = JS_GetPropertyStr(ctx, obj, "registry");
+        s->registry = copy_string(ctx, registry);
+        bool valid_registry = JS_IsUndefined(registry) || (s->registry && *s->registry);
+        JS_FreeValue(ctx, registry);
+        s->name = field(ctx, obj, "name");
+        s->version = field(ctx, obj, "version");
+        if (!s->name || !*s->name || !s->version || !*s->version ||
+            !valid_registry) fail(p, "invalid-tool", location);
+        break;
+    }
     case BP_STATE: {
         const char *error = parse_state(ctx, obj, p, module->path, s);
         if (error) fail(p, error, location);
