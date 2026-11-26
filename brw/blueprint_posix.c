@@ -279,7 +279,10 @@ const char bp_path_separator = ':';
 static int spawn_command(pid_t *child, const struct bp_step *s,
                          const posix_spawn_file_actions_t *actions, char **argv)
 {
-    if (!s->tool) return posix_spawnp(child, s->program, actions, NULL, argv, environ);
+    /* Darwin's posix_spawnp can misreport ENOENT for ./program with a chdir action.
+       Only bare program names need a PATH search. */
+    if (!s->tool && !strchr(s->program, '/'))
+        return posix_spawnp(child, s->program, actions, NULL, argv, environ);
     if (!s->child_path) return posix_spawn(child, s->program, actions, NULL, argv, environ);
 
     size_t count = 0;
