@@ -1,0 +1,147 @@
+{
+  "host": "Windows-11-10.0.26300-SP0",
+  "architecture": "AMD64",
+  "invocation": [
+    "D:\\Projects\\burrow\\.local\\tools\\python\\cpython-3.13.7-windows-x86_64-none\\python.exe",
+    "-B",
+    "tests/devkit-acceptance/run.py",
+    "--brw",
+    ".local/issue123-build/brw.exe",
+    "--archive",
+    ".local/issue120-tools/w64devkit-x64-2.11.0.7z.exe",
+    "--run-dir",
+    ".local/131-final"
+  ],
+  "network": {
+    "appContainer": true,
+    "networkCapabilities": [],
+    "tcpProbes": [
+      {
+        "address": "192.0.2.1",
+        "port": 443,
+        "winError": 10013
+      },
+      {
+        "address": "2001:db8::1",
+        "port": 443,
+        "winError": 10013
+      }
+    ]
+  },
+  "brw": "D:\\Projects\\burrow\\.local\\issue123-build\\brw.exe",
+  "brwSha256": "cf58716900b71d13c02c10f9edf479ab9c4cdf68ba8eb8d0e05d499fe74c1279",
+  "manifestSha256": "358a93fcdeb87b4a2d0a279295194be25e0ef848b9af5951c32be9a69f772593",
+  "lockSha256": "cc2dd77de5d478831f8f2467295b8808ea7a05602af96ca1ad7c17e412ae1877",
+  "archive": "D:\\Projects\\burrow\\.local\\issue120-tools\\w64devkit-x64-2.11.0.7z.exe",
+  "archiveSha256": "54c2bb9962e8a30c8270e34c5efc3d5fee579f53087fa7d435b95fbba2af7b2b",
+  "initial": "D:\\Projects\\burrow\\.local\\131-final\\initial",
+  "relocated": "D:\\Projects\\burrow\\.local\\131-final\\relocated devkit",
+  "caller": "D:\\Projects\\burrow\\.local\\131-final\\caller",
+  "parentPath": "C:\\WINDOWS\\System32;C:\\WINDOWS;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0",
+  "rejections": {
+    "tampered": "file-digest-mismatch",
+    "missing": "bundle-file-unavailable",
+    "capability": "missing-capability",
+    "oversized": "bundle-limit",
+    "occupied": "host-requirement-unmet"
+  },
+  "planningSnapshots": {
+    "before": {
+      "D:\\Projects\\burrow\\.local\\131-final\\initial": {},
+      "D:\\Projects\\burrow\\.local\\131-final\\entries": null,
+      "D:\\Projects\\burrow\\.local\\131-final\\cache": null,
+      "D:\\Projects\\burrow\\.local\\131-final\\config": {
+        "burrow": null,
+        "burrow/sources": null,
+        "burrow/sources/devkit": "db1e208405bce29910c97d30b4fb95cfe9cfca7134d0a381d9f5446f7a293b3b"
+      },
+      "D:\\Projects\\burrow\\.local\\131-final\\data": null,
+      "D:\\Projects\\burrow\\.local\\131-final\\state": null
+    },
+    "after": {
+      "D:\\Projects\\burrow\\.local\\131-final\\initial": {},
+      "D:\\Projects\\burrow\\.local\\131-final\\entries": null,
+      "D:\\Projects\\burrow\\.local\\131-final\\cache": null,
+      "D:\\Projects\\burrow\\.local\\131-final\\config": {
+        "burrow": null,
+        "burrow/sources": null,
+        "burrow/sources/devkit": "db1e208405bce29910c97d30b4fb95cfe9cfca7134d0a381d9f5446f7a293b3b"
+      },
+      "D:\\Projects\\burrow\\.local\\131-final\\data": null,
+      "D:\\Projects\\burrow\\.local\\131-final\\state": null
+    }
+  },
+  "steps": [
+    [
+      "host",
+      "main.mjs[1] > toolchain.mjs[1]"
+    ],
+    [
+      "tool",
+      "main.mjs[1] > toolchain.mjs[2]"
+    ],
+    [
+      "run",
+      "main.mjs[1] > toolchain.mjs[3]"
+    ],
+    [
+      "copy",
+      "main.mjs[2] > session.mjs[1]"
+    ]
+  ],
+  "tools": {
+    "CMAKE_COMMAND": "D:\\Projects\\burrow\\.local\\131-final\\relocated devkit\\w64devkit\\bin\\cmake.exe",
+    "CMAKE_MAKE_PROGRAM": "D:\\Projects\\burrow\\.local\\131-final\\relocated devkit\\w64devkit\\bin\\mingw32-make.exe",
+    "CMAKE_C_COMPILER": "D:\\Projects\\burrow\\.local\\131-final\\relocated devkit\\w64devkit\\bin\\gcc.exe",
+    "CMAKE_CXX_COMPILER": "D:\\Projects\\burrow\\.local\\131-final\\relocated devkit\\w64devkit\\bin\\g++.exe",
+    "cc1": "D:\\Projects\\burrow\\.local\\131-final\\relocated devkit\\w64devkit\\libexec\\gcc\\x86_64-w64-mingw32\\16.2.0\\cc1.exe",
+    "cc1plus": "D:\\Projects\\burrow\\.local\\131-final\\relocated devkit\\w64devkit\\libexec\\gcc\\x86_64-w64-mingw32\\16.2.0\\cc1plus.exe"
+  },
+  "compileCommands": [
+    {
+      "directory": "D:/Projects/burrow/.local/131-final/caller/build",
+      "command": "\"D:\\Projects\\burrow\\.local\\131-final\\relocated devkit\\w64devkit\\bin\\gcc.exe\"    -o CMakeFiles\\c_probe.dir\\probe.c.obj -c D:\\Projects\\burrow\\.local\\131-final\\caller\\probe\\probe.c",
+      "file": "D:/Projects/burrow/.local/131-final/caller/probe/probe.c",
+      "output": "CMakeFiles/c_probe.dir/probe.c.obj"
+    },
+    {
+      "directory": "D:/Projects/burrow/.local/131-final/caller/build",
+      "command": "\"D:\\Projects\\burrow\\.local\\131-final\\relocated devkit\\w64devkit\\bin\\g++.exe\"   -std=gnu++23 -o CMakeFiles\\cxx_probe.dir\\probe.cpp.obj -c D:\\Projects\\burrow\\.local\\131-final\\caller\\probe\\probe.cpp",
+      "file": "D:/Projects/burrow/.local/131-final/caller/probe/probe.cpp",
+      "output": "CMakeFiles/cxx_probe.dir/probe.cpp.obj"
+    }
+  ],
+  "targetTriple": "x86_64-w64-mingw32",
+  "versions": {
+    "gcc": "16.2.0",
+    "g++": "16.2.0",
+    "cmake": "cmake version 4.4.4"
+  },
+  "programs": {
+    "c_probe": {
+      "stdout": "C: 42",
+      "sha256": "b370bd65d58255cf8bc455431400cdbe1bfcf250feca8727eecd3b92f97e218a"
+    },
+    "cxx_probe": {
+      "stdout": "C++: 42",
+      "sha256": "02cc5de2f498bdf873485c16e986b6bc01b803c4c56761c8ba71900922ea0a6c"
+    }
+  },
+  "networkAfterBuild": {
+    "appContainer": true,
+    "networkCapabilities": [],
+    "tcpProbes": [
+      {
+        "address": "192.0.2.1",
+        "port": 443,
+        "winError": 10013
+      },
+      {
+        "address": "2001:db8::1",
+        "port": 443,
+        "winError": 10013
+      }
+    ]
+  },
+  "status": "passed"
+}

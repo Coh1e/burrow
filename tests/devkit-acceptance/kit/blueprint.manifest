@@ -1,0 +1,12 @@
+brw-blueprint-v1
+entry	main.mjs
+platform	windows
+arch	x86_64
+requires	host
+requires	tool
+requires	run
+requires	copy
+module	main.mjs	b4be3aba3234259a8670168f392de8c8b5c0c14c7312607c367b3c8a4b6f0c9e
+module	toolchain.mjs	b494c5018cad9e138a2d166d9180324d826c987a6199bda6cd2b7e2029ef2c90
+module	session.mjs	345316f791bddac516f5a31a6a1716ecc96ee02f090877a941cf7f7504717a0a
+payload	devkit.cmd	58c241d914a1870a1ff266fbe25fbd0ef1515f8492f582eb3d5e8988dcaf449e

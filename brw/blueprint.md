@@ -228,6 +228,8 @@ with a dependency search path.
 
 ## Build and test
 
+The [Windows MinGW-w64 devkit example](../docs/windows-devkit.md) installs a preseeded toolchain offline and runs C and C++ programs after relocating the session entry and tools together.
+
 On Windows, prepare the pinned sources with `scripts/fetch-deps.ps1`. The MinGW-w64 build enables Blueprints by default.
 
 On Linux and macOS, run the following commands from the repository root with a native C compiler, CMake 3.19 or newer, curl and tar. The preparation script verifies the pinned QuickJS, libgit2, libarchive and zlib archives in `.local/deps/sources` and downloads any missing archives. With the archives present, preparation, build and tests run offline.
