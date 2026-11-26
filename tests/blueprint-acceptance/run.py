@@ -17,6 +17,14 @@ import scenarios
 
 
 REPO = Path(__file__).resolve().parents[2]
+BOUNDARY_CASES = {
+    "1/missing-capability", "1/missing-input", "1/reference-cycle",
+    "2/missing-output", "2/skipped-producer", "3/deferred-state",
+    "4/cache-reuse", "4/explicit-update", "4/installed-dependency",
+    "4/lock-conflict", "4/pinned-version", "5/default-switch", "5/scoped-version",
+    "6/repair-fails", "6/repair-succeeds", "6/unmet-host",
+    "7/check-launch-fails", "7/interpreter-pipe", "7/literal-pipe", "7/recheck-unmet",
+}
 
 
 def digest(path):
@@ -66,7 +74,7 @@ class Case:
         write_json(self.evidence / (name + ".json"), value)
 
     def snapshot(self):
-        roots = {"workspace": self.work, "bin": self.bin}
+        roots = {"workspace": self.work, "bin": self.bin, "blueprint": self.kit}
         roots.update({kind: Path(self.env[f"XDG_{kind}_HOME"]) for kind in
                       ("DATA", "CONFIG", "CACHE", "STATE")})
         result = {}
@@ -114,7 +122,7 @@ def run(build, evidence, scratch):
                     cmake=command_text(cmake, "--version").splitlines()[0],
                     revision=command_text("git", "rev-parse", "HEAD"),
                     brwTree=command_text("git", "rev-parse", "HEAD:brw"),
-                    worktreeChanges=command_text("git", "status", "--short"),
+                    worktreeChanges=command_text("git", "--no-optional-locks", "status", "--short"),
                     executableSha256=digest(brw))
     if sys.platform == "linux":
         release = Path("/etc/os-release")
@@ -145,12 +153,24 @@ def run(build, evidence, scratch):
     try:
         boundary.run("boundary", [cmake.with_name("ctest" + suffix), "--test-dir", build, "-R",
                                   "^blueprint_cli$", "--no-tests=error", "--output-on-failure"])
-        groups = (boundary.evidence / "passed.txt").read_text(encoding="utf-8").splitlines()
-        if {line.split("/")[0] for line in groups} != set("1234567"):
-            raise AssertionError(f"Incomplete boundary evidence: {groups}")
+        passed = set((boundary.evidence / "passed.txt").read_text(encoding="utf-8").splitlines())
+        if BOUNDARY_CASES - passed:
+            raise AssertionError(f"Missing boundary cases: {sorted(BOUNDARY_CASES - passed)}")
         outcome = "passed"
     except Exception:
         outcome = traceback.format_exc()
+        completed = boundary.evidence / "passed.txt"
+        passed = set(completed.read_text(encoding="utf-8").splitlines()) if completed.exists() else set()
+        transcript = boundary.evidence / "boundary-cli.txt"
+        lines = transcript.read_text(encoding="utf-8").splitlines() if transcript.exists() else []
+        started = [line[1:].split("]", 1)[0] for line in lines
+                   if line.startswith("[") and line.endswith("] begin")]
+        boundary.record("incomplete", {
+            "passed": sorted(passed),
+            "startedWithoutCompletion": [case for case in started if case not in passed],
+            "notRun": sorted(BOUNDARY_CASES - set(started)),
+            "reason": outcome,
+        })
     summary["results"]["boundary"] = outcome
     print(f"boundary: {outcome}", flush=True)
     write_json(evidence / "summary.json", summary)

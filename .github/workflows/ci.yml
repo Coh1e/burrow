@@ -24,10 +24,12 @@ jobs:
         run: |
           sh scripts/fetch-blueprint-deps.sh
           cmake -S brw -B .local/brw-blueprint -DBRW_BLUEPRINT=ON -DBUILD_TESTING=ON
-          cmake --build .local/brw-blueprint --target brw --parallel
+          cmake --build .local/brw-blueprint --parallel
           shasum -a 256 .local/brw-blueprint/brw
       - name: Run the shared Blueprint acceptance checklist
         run: python3 tests/blueprint-acceptance/run.py --build-dir .local/brw-blueprint --evidence .local/blueprint-evidence
+      - name: Run the remaining native core tests
+        run: ctest --test-dir .local/brw-blueprint -E '^blueprint_cli$' --no-tests=error --output-on-failure
       - name: Keep the macOS acceptance reports
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@v4

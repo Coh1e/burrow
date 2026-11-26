@@ -109,7 +109,7 @@ def main(case):
     preview = read_only(case, "preview", "preview")
     check_plan(case, preview, "planned", "unmet", 3)
     equal(default_entry(case, "preview-default"), default)
-    order = ["prepare", "Debug", "Release", "test"]
+    order = ["prepare", "Debug", "Release", "test-start", "test"]
     for label, status, expected in (("apply", "changed", order), ("rerun", "satisfied", order + order[1:])):
         applied = case.blueprint(label, "apply")
         check_plan(case, applied, "applied", status, 0)
@@ -153,7 +153,7 @@ def check_error(case):
     check_plan(case, control, "planned", "unmet", 3)
     control = case.blueprint("control-apply", "apply")
     check_plan(case, control, "applied", "changed", 0)
-    observations(case, "after-control", ["prepare", "Debug", "Release", "test"], MODES)
+    observations(case, "after-control", ["prepare", "Debug", "Release", "test-start", "test"], MODES)
     equal(default_entry(case, "final-default"), default)
 
 
@@ -175,5 +175,5 @@ def release_failure(case):
     recovered = case.blueprint("repair-apply", "apply")
     check_plan(case, recovered, "applied", "satisfied", 0)
     equal(recovered["completed"], 6)
-    observations(case, "after-repair", order + ["Debug", "Release", "test"], MODES)
+    observations(case, "after-repair", order + ["Debug", "Release", "test-start", "test"], MODES)
     equal(default_entry(case, "final-default"), default)
