@@ -293,7 +293,8 @@ static int spawn_command(pid_t *child, const struct bp_step *s,
     return rc;
 }
 
-static const char *launch_command(const struct bp_step *s, const char *workspace, char *script, unsigned long *exit_code)
+static const char *launch_command(const struct bp_step *s, const char *workspace, char *script,
+                                  unsigned long *exit_code, bool *started)
 {
     char *argv[BP_MAX_ARGS + 2] = {s->program};
     for (size_t i = 0; i < s->argc; ++i)
@@ -306,6 +307,7 @@ static const char *launch_command(const struct bp_step *s, const char *workspace
     if (!rc) rc = spawn_command(&child, s, &actions, argv);
     posix_spawn_file_actions_destroy(&actions);
     if (rc) return "child-launch";
+    if (started) *started = true;
     int status;
     while (waitpid(child, &status, 0) < 0)
         if (errno != EINTR) return "child-wait";
@@ -315,12 +317,13 @@ static const char *launch_command(const struct bp_step *s, const char *workspace
 }
 
 const char *bp_run_command(const char *workspace, const struct bp_step *s, bool apply,
-                           unsigned long *exit_code)
+                           unsigned long *exit_code, bool *started)
 {
+    if (started) *started = false;
     struct stat st;
     if (stat(workspace, &st) || !S_ISDIR(st.st_mode)) return "invalid-workspace";
     if (!apply) return NULL;
-    if (!s->payload) return launch_command(s, workspace, NULL, exit_code);
+    if (!s->payload) return launch_command(s, workspace, NULL, exit_code, started);
     char dir[] = "/tmp/brw-command-XXXXXX", script[BP_DETAIL_CAP];
     if (!mkdtemp(dir)) return "payload-stage";
     const char *base = strrchr(s->payload->path, '/');
@@ -329,7 +332,7 @@ const char *bp_run_command(const char *workspace, const struct bp_step *s, bool 
     const char *error = "payload-stage";
     if (file) {
         bool written = fwrite(s->payload->data, 1, s->payload->size, file) == s->payload->size;
-        if (!fclose(file) && written) error = launch_command(s, workspace, script, exit_code);
+        if (!fclose(file) && written) error = launch_command(s, workspace, script, exit_code, started);
         if (unlink(script) && !error) error = "cleanup-stage";
     }
     if (rmdir(dir) && !error) error = "cleanup-stage";
@@ -342,7 +345,7 @@ static const char *operation(const char *workspace, const struct bp_step *s, boo
     switch (s->op) {
     case BP_COPY:
     case BP_REPLACE: return file_op(workspace, s, apply);
-    case BP_RUN: return bp_run_command(workspace, s, apply, NULL);
+    case BP_RUN: return bp_run_command(workspace, s, apply, NULL, NULL);
     case BP_ENV:
         if (!bp_env_name(s->name) || !s->value) return "invalid-environment";
         return apply && setenv(s->name, s->value, 1) ? "environment-write" : NULL;

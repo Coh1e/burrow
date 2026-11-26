@@ -84,11 +84,15 @@ const struct bp_file *bp_find(const struct bp_bundle *bundle, const char *path);
 const char *bp_build(const struct bp_bundle *bundle, struct bp_plan *out, char detail[BP_DETAIL_CAP]);
 void bp_plan_free(struct bp_plan *plan);
 
-/* Runs a successfully built plan against the selected platform backend.
-   completed counts successful operations, excluding skipped steps. On error
-   failure_source borrows the failing step or producer position from plan. */
+struct bp_run_result {
+    size_t completed; /* Successful operations, excluding skipped steps. */
+    const char *failure_source; /* Failing step or producer position, borrowed from the plan. */
+    bool command_started; /* The external command that failed actually started. */
+};
+
+/* Runs a successfully built plan and initializes the result, including on failure. */
 const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, bool preview,
-                                size_t *completed, const char **failure_source);
+                                struct bp_run_result *result);
 
 /* Create takes a zero-initialized file. Success owns a UTF-8 path and read
    stream until remove closes the stream, deletes the file and frees the path. */
@@ -108,9 +112,10 @@ const char *bp_validate_text_plan(const char *workspace, const struct bp_plan *p
 const char *bp_apply_step(const char *workspace, const struct bp_step *step);
 /* With apply false, validate without launching or writing exit_code. With apply
    true, execute the command. If exit_code is supplied, normal exits (including
-   nonzero) store the child status. Launch, wait and staging failures return errors. */
+   nonzero) store the child status. Launch, wait and staging failures return errors.
+   If supplied, started receives whether this invocation created a child process. */
 const char *bp_run_command(const char *workspace, const struct bp_step *s, bool apply,
-                           unsigned long *exit_code);
+                           unsigned long *exit_code, bool *started);
 const char *bp_op_name(enum bp_op op);
 
 #endif
