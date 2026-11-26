@@ -10,6 +10,7 @@
 
 #include "blueprint_files_windows.h"
 #include "command_line_windows.h"
+#include "shim_script_windows.h"
 #include <bcrypt.h>
 
 bool bp_create_output_file(struct bp_output_file *file)
@@ -301,19 +302,26 @@ static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, w
         args[i + 1] = s->payload && i == s->script_arg ? script : wide(s->args[i]);
         if (!args[i + 1]) error = "invalid-command";
     }
-    wchar_t command[32768];
+    wchar_t command[32768], entry_command[32768], host[MAX_PATH];
+    wchar_t *line = command;
+    const wchar_t *application = NULL;
     if (!error) error = encode_command_line(command, s->argc + 1, (const wchar_t *const *)args);
-    for (size_t i = 0; i <= s->argc; ++i)
-        if (args[i] != script) free(args[i]);
-    if (error || !apply) return error;
+    if (!error && s->tool) {
+        error = brw_entry_command(args[0], cwd, s->argc + 1, (const wchar_t *const *)args,
+                                  brw_command_tail(command), entry_command, host, &application);
+        line = entry_command;
+    }
     STARTUPINFOW start = {0};
     start.cb = sizeof start;
     start.dwFlags = STARTF_USESTDHANDLES;
     start.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     start.hStdOutput = start.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION child;
-    if (!CreateProcessW(NULL, command, NULL, NULL, TRUE, 0, NULL, cwd, &start, &child))
-        return "child-launch";
+    if (!error && apply && !CreateProcessW(application, line, NULL, NULL, TRUE, 0, NULL, cwd, &start, &child))
+        error = "child-launch";
+    for (size_t i = 0; i <= s->argc; ++i)
+        if (args[i] != script) free(args[i]);
+    if (error || !apply) return error;
     CloseHandle(child.hThread);
     DWORD code = 0;
     bool ok = WaitForSingleObject(child.hProcess, INFINITE) == WAIT_OBJECT_0 &&

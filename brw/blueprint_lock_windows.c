@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "blueprint_lock.h"
+#include "install_windows.h"
 #include "paths_windows.h"
 #include "source_windows.h"
 
@@ -121,4 +122,42 @@ const char *bp_fetch_artifact(const char *location, FILE *file)
     const char *error = path ? brw_download(path, file) : "invalid-location";
     free(path);
     return error;
+}
+
+char *bp_default_entry(const struct bp_package *p)
+{
+    wchar_t bin[BRW_PATH_CAP], path[BRW_PATH_CAP];
+    wchar_t *package = wide_path(p->name);
+    char *result = package && !brw_path(BRW_BIN, bin, false) &&
+        brw_command_entry_path(bin, package, path) ? utf8(path) : NULL;
+    free(package);
+    return result;
+}
+
+static const char *use_package(const struct bp_package *p, const char *cache, char **program)
+{
+    wchar_t *name = wide_path(p->name), *version = wide_path(p->version), *path = wide_path(cache);
+    wchar_t *digest = wide_path(p->digest), *entry = wide_path(p->entry), *depends = wide_path(p->depends);
+    struct local_package pkg = {name, version, path, digest, entry};
+    wchar_t target[BRW_PATH_CAP];
+    const char *error = name && version && path && digest && entry && depends ?
+        brw_use_locked_package(&pkg, !strcmp(p->kind, "exe"), depends, !program, target) : "invalid-package";
+    if (!error && program && !(*program = utf8(target))) error = "out-of-memory";
+    free(name);
+    free(version);
+    free(path);
+    free(digest);
+    free(entry);
+    free(depends);
+    return error;
+}
+
+const char *bp_materialize_tool(const struct bp_package *p, const char *cache, char **program)
+{
+    return use_package(p, cache, program);
+}
+
+const char *bp_set_default(const struct bp_package *p, const char *cache)
+{
+    return use_package(p, cache, NULL);
 }

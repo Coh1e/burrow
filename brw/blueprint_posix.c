@@ -274,7 +274,10 @@ static const char *launch_command(const struct bp_step *s, const char *workspace
     int rc = posix_spawn_file_actions_addchdir_np(&actions, workspace);
     if (!rc) rc = posix_spawn_file_actions_adddup2(&actions, STDERR_FILENO, STDOUT_FILENO);
     pid_t child;
-    if (!rc) rc = posix_spawnp(&child, s->program, &actions, NULL, argv, environ);
+    if (!rc) {
+        if (s->tool) rc = posix_spawn(&child, s->program, &actions, NULL, argv, environ);
+        else rc = posix_spawnp(&child, s->program, &actions, NULL, argv, environ);
+    }
     posix_spawn_file_actions_destroy(&actions);
     if (rc) return "child-launch";
     int status;

@@ -2,6 +2,7 @@
 #define BRW_INSTALL_WINDOWS_H
 
 #include "digby.h"
+#include "shim_windows.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <wchar.h>
@@ -26,6 +27,8 @@ const char *brw_run_lifecycle(enum digby_action action, const struct local_packa
                              const struct digby_plan *plan, size_t *failed_step);
 
 bool brw_package_component(const wchar_t *name);
+/* Resolves a validated package's public command path in the supplied bin root. */
+bool brw_command_entry_path(const wchar_t *bin, const wchar_t *name, wchar_t path[BRW_PATH_CAP]);
 const char *brw_validate_source_package(const struct local_package *package, bool executable);
 int brw_list_installed(bool json);
 int brw_recover(bool json, bool preview);
@@ -51,6 +54,12 @@ const char *brw_install_with_dependencies(const struct local_package *package, b
 /* Consumes an open binary payload positioned at offset zero. Caller holds the
    package mutation lock and has validated the package as a source package. */
 const char *brw_install_stream(const struct local_package *package, bool executable, FILE *payload);
+/* Validates and materializes a pinned artifact under the package mutation lock.
+   Inputs are borrowed. On success target receives its absolute version entry.
+   Making it the default is a separate, explicitly requested publication. */
+const char *brw_use_locked_package(const struct local_package *package, bool executable,
+                                   const wchar_t *dependencies, bool make_default,
+                                   wchar_t target[BRW_PATH_CAP]);
 int brw_report_plan(bool json, bool preview, const char *status,
                     const struct digby_plan *plan, const char *error, size_t step);
 

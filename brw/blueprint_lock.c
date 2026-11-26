@@ -300,7 +300,7 @@ static const char *write_lock(FILE *file, void *context)
     return NULL;
 }
 
-static bool matches_file(FILE *file, const char *expected)
+bool bp_matches_digest(FILE *file, const char *expected)
 {
     SHA256Context ctx;
     if (SHA256Reset(&ctx)) return false;
@@ -329,7 +329,7 @@ static bool verified_path(const char *path, const struct bp_package *p)
 {
     FILE *file = path ? bp_open_read(path) : NULL;
     if (!file) return false;
-    bool match = matches_file(file, p->digest);
+    bool match = bp_matches_digest(file, p->digest);
     fclose(file);
     return match;
 }
@@ -385,7 +385,7 @@ static const char *fetch_verified(FILE *file, void *context)
 {
     struct fetch *f = context;
     const char *error = bp_fetch_artifact(f->location, file);
-    if (!error && (fflush(file) || fseek(file, 0, SEEK_SET) || !matches_file(file, f->p->digest)))
+    if (!error && (fflush(file) || fseek(file, 0, SEEK_SET) || !bp_matches_digest(file, f->p->digest)))
         error = "digest-mismatch";
     return error;
 }
@@ -414,13 +414,72 @@ const char *bp_apply_packages(struct bp_lock *lock, size_t step)
     return NULL;
 }
 
-const char *bp_prepare_lock(const struct bp_plan *plan, const struct bp_bundle *bundle,
+const char *bp_use_tool(const struct bp_step *step, char **program)
+{
+    char *cache = cache_path(step->package, false);
+    if (!cache) return "cache-directory";
+    const char *error;
+    if (step->op == BP_DEFAULT) {
+        /* An earlier environment step must not redirect writes to an entry
+           different from the one named in the plan. */
+        char *entry = bp_default_entry(step->package);
+        error = entry && !strcmp(entry, step->entry) ? bp_set_default(step->package, cache)
+                                                     : "entry-directory";
+        free(entry);
+    } else {
+        error = bp_materialize_tool(step->package, cache, program);
+    }
+    free(cache);
+    return error;
+}
+
+static const char *bind_tool(struct bp_step *consumer, const struct bp_plan *plan,
+                             size_t position, char detail[BP_DETAIL_CAP])
+{
+    if (!consumer->tool) return NULL;
+    for (size_t i = 0; i < position; ++i) {
+        const struct bp_step *declaration = &plan->steps[i];
+        if (declaration->op == BP_TOOL && equal(declaration->name, consumer->tool)) {
+            consumer->package = declaration->package;
+            if (consumer->op == BP_DEFAULT) {
+                consumer->entry = bp_default_entry(consumer->package);
+                if (!consumer->entry) {
+                    snprintf(detail, BP_DETAIL_CAP, "%s", consumer->source);
+                    return "entry-directory";
+                }
+            }
+            return NULL;
+        }
+    }
+    snprintf(detail, BP_DETAIL_CAP, "%s: %s", consumer->source, consumer->tool);
+    return "undeclared-tool";
+}
+
+static const char *bind_tools(struct bp_plan *plan, const struct bp_lock *lock,
+                              char detail[BP_DETAIL_CAP])
+{
+    for (size_t i = 0; i < plan->count; ++i) {
+        struct bp_step *s = &plan->steps[i];
+        if (s->op == BP_TOOL) {
+            for (size_t j = 0; j < lock->count; ++j)
+                if (equal(s->name, lock->rows[j].name)) { s->package = &lock->rows[j]; break; }
+        } else {
+            const char *error = bind_tool(s, plan, i, detail);
+            if (!error && s->state) error = bind_tool(&s->state->check, plan, i, detail);
+            if (!error && s->state) error = bind_tool(&s->state->change, plan, i, detail);
+            if (error) return error;
+        }
+    }
+    return NULL;
+}
+
+const char *bp_prepare_lock(struct bp_plan *plan, const struct bp_bundle *bundle,
                             const char *directory, const char *target, bool generate,
                             struct bp_lock *lock, char detail[BP_DETAIL_CAP])
 {
     size_t first = 0;
     while (first < plan->count && plan->steps[first].op != BP_TOOL) ++first;
-    if (first == plan->count) return NULL;
+    if (first == plan->count) return bind_tools(plan, lock, detail);
     struct resolution r = {.plan = plan, .platform = target, .detail = detail, .generate = generate};
     char name[128], header[128];
     snprintf(name, sizeof name, "blueprint.%s.lock", target);
@@ -449,7 +508,6 @@ const char *bp_prepare_lock(const struct bp_plan *plan, const struct bp_bundle *
         lock->rows = calloc(r.count, sizeof *lock->rows);
         if (!lock->rows) error = "out-of-memory";
     }
-    if (!error && generate) error = bp_atomic_write(path, write_lock, &r);
     if (!error) {
         for (size_t i = 0; i < r.count; ++i) {
             lock->rows[i] = *r.order[i];
@@ -463,6 +521,8 @@ const char *bp_prepare_lock(const struct bp_plan *plan, const struct bp_bundle *
             }
         }
         lock->count = r.count;
+        error = bind_tools(plan, lock, detail);
+        if (!error && generate) error = bp_atomic_write(path, write_lock, &r);
     }
     for (size_t i = 0; i < r.candidates.count; ++i) free(r.candidates.rows[i].storage);
     free(r.candidates.rows);

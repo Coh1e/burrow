@@ -185,6 +185,7 @@ static void free_command(struct bp_step *s)
     free(s->bindings);
     free(s->args);
     free(s->program);
+    free(s->tool);
 }
 
 void bp_plan_free(struct bp_plan *plan)
@@ -280,11 +281,18 @@ static void bind_output(struct planner *p, struct bp_binding *binding, const cha
 static const char *parse_command(JSContext *ctx, JSValueConst obj, struct planner *p,
                                  const char *module, struct bp_step *s)
 {
-    s->program = field(ctx, obj, "program");
+    JSValue program = JS_GetPropertyStr(ctx, obj, "program");
+    JSValue tool = JS_GetPropertyStr(ctx, obj, "tool");
+    s->program = copy_string(ctx, program);
+    s->tool = copy_string(ctx, tool);
+    bool valid_program = JS_IsUndefined(tool) && s->program && *s->program && !strchr(s->program, '"');
+    bool valid_tool = JS_IsUndefined(program) && s->tool && *s->tool;
+    JS_FreeValue(ctx, tool);
+    JS_FreeValue(ctx, program);
     JSValue args = JS_GetPropertyStr(ctx, obj, "args");
     const char *error = "invalid-command";
     size_t length;
-    if (!s->program || !*s->program || strchr(s->program, '"') || JS_IsArray(ctx, args) != 1 ||
+    if ((!valid_program && !valid_tool) || JS_IsArray(ctx, args) != 1 ||
         !integer_field(ctx, args, "length", &length) || length > BP_MAX_ARGS) goto done;
     s->args = calloc(length + 1, sizeof *s->args);
     s->bindings = calloc(length + 1, sizeof *s->bindings);
@@ -392,6 +400,10 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }
     switch (s->op) {
+    case BP_DEFAULT:
+        s->tool = field(ctx, obj, "tool");
+        if (!s->tool || !*s->tool) fail(p, "invalid-tool", location);
+        break;
     case BP_TOOL: {
         JSValue registry = JS_GetPropertyStr(ctx, obj, "registry");
         s->registry = copy_string(ctx, registry);

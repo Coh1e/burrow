@@ -235,14 +235,20 @@ static const char *package_roots(struct installation *install, bool create)
     return NULL;
 }
 
+bool brw_command_entry_path(const wchar_t *bin, const wchar_t *name, wchar_t path[BRW_PATH_CAP])
+{
+    wchar_t alias[NAME_CAP + 4];
+    if (!bin || !name || !path || !brw_package_component(name)) return false;
+    swprintf(alias, NAME_CAP + 4, L"%ls.exe", name);
+    return join(path, bin, alias);
+}
+
 static bool package_paths(struct installation *install)
 {
-    wchar_t alias[NAME_CAP + 12];
-    swprintf(alias, NAME_CAP + 12, L"%ls.exe", install->package->name);
     if (!join(install->package_dir, install->packages, install->package->name) ||
         (install->package->version &&
          !join(install->version, install->package_dir, install->package->version)) ||
-        !join(install->shim, install->bin, alias))
+        !brw_command_entry_path(install->bin, install->package->name, install->shim))
         return false;
     wcscpy(install->sidecar, install->shim);
     return brw_append_shim_suffix(install->sidecar, wcslen(install->shim));
@@ -660,16 +666,8 @@ static const char *stage_executable(struct installation *install, FILE *inventor
     return fprintf(inventory, "%ls\n", install->package->entry) < 0 ? "version-record" : NULL;
 }
 
-static const char *extract(struct installation *install)
+static const char *stage_payload(struct installation *install)
 {
-    const char *prepare_error = prepare(install);
-    if (prepare_error)
-        return prepare_error;
-    if (GetFileAttributesW(install->version) != INVALID_FILE_ATTRIBUTES ||
-        (install->action == DIGBY_INSTALL &&
-         (GetFileAttributesW(install->shim) != INVALID_FILE_ATTRIBUTES ||
-          GetFileAttributesW(install->sidecar) != INVALID_FILE_ATTRIBUTES)))
-        return "destination-exists";
     if (!stage_directory(install->packages, install->stage))
         return "stage-directory";
     wchar_t inventory[PATH_CAP];
@@ -741,6 +739,19 @@ static const char *extract(struct installation *install)
     if (fclose(files) && !error)
         error = "version-record";
     return error;
+}
+
+static const char *extract(struct installation *install)
+{
+    const char *error = prepare(install);
+    if (error)
+        return error;
+    if (GetFileAttributesW(install->version) != INVALID_FILE_ATTRIBUTES ||
+        (install->action == DIGBY_INSTALL &&
+         (GetFileAttributesW(install->shim) != INVALID_FILE_ATTRIBUTES ||
+          GetFileAttributesW(install->sidecar) != INVALID_FILE_ATTRIBUTES)))
+        return "destination-exists";
+    return stage_payload(install);
 }
 
 static bool dots(const wchar_t *name)
@@ -1225,19 +1236,15 @@ int brw_recover(bool json, bool preview)
     return error ? 1 : 0;
 }
 
-static const char *publish(struct installation *install)
+static const char *stage_records(struct installation *install, struct launcher_image *image)
 {
-    wchar_t target[PATH_CAP], record[PATH_CAP];
-    if (!join(target, install->version, install->package->entry) ||
-        brw_path(BRW_BIN, install->bin, true))
-        return "entry-directory";
+    wchar_t record[PATH_CAP];
     if (!join(record, install->stage, L".brw-entry") ||
         !write_record(install->stage, record, install->package->entry, false))
         return "version-record";
-    bool update = install->action == DIGBY_UPDATE;
     wchar_t inherited[BRW_DEPENDENCIES_CAP];
     const wchar_t *dependencies = install->dependencies;
-    if (update) {
+    if (install->action == DIGBY_UPDATE) {
         if (!read_dependencies(install, install->active_version, inherited))
             return "dependency-state";
         dependencies = inherited;
@@ -1246,31 +1253,68 @@ static const char *publish(struct installation *install)
         (!join(record, install->stage, L".brw-depends") ||
          !write_record(install->stage, record, dependencies, false)))
         return "version-record";
-    struct launcher_image image;
-    if (!select_launcher(install->stage, install->package->entry, &image) ||
+    if (!select_launcher(install->stage, install->package->entry, image) ||
         !join(record, install->stage, L".brw-shim") ||
-        !write_record(install->stage, record, image.digest, false))
+        !write_record(install->stage, record, image->digest, false))
         return "version-record";
+    return NULL;
+}
+
+static const char *preserve_active_records(struct installation *install)
+{
+    wchar_t directory[PATH_CAP], entry[ENTRY_CAP], record[PATH_CAP];
+    if (!version_entry(install, install->active_version, entry) ||
+        wcscmp(entry, install->active_entry) ||
+        !join(directory, install->package_dir, install->active_version) ||
+        !join(record, directory, L".brw-entry"))
+        return "entry-conflict";
+    if (GetFileAttributesW(record) == INVALID_FILE_ATTRIBUTES &&
+        !write_record(directory, record, entry, false))
+        return "version-record";
+    if (!join(record, directory, L".brw-shim") ||
+        (GetFileAttributesW(record) == INVALID_FILE_ATTRIBUTES &&
+         !write_record(directory, record, install->shim_hash, false)))
+        return "version-record";
+    return NULL;
+}
+
+static const char *publish(struct installation *install)
+{
+    wchar_t target[PATH_CAP];
+    if (!join(target, install->version, install->package->entry) ||
+        brw_path(BRW_BIN, install->bin, true))
+        return "entry-directory";
+    struct launcher_image image;
+    const char *error = stage_records(install, &image);
+    if (error) return error;
+    bool update = install->action == DIGBY_UPDATE;
     if (update) {
-        wchar_t directory[PATH_CAP], entry[ENTRY_CAP];
-        if (!version_entry(install, install->active_version, entry) ||
-            wcscmp(entry, install->active_entry) ||
-            !join(directory, install->package_dir, install->active_version) ||
-            !join(record, directory, L".brw-entry"))
-            return "entry-conflict";
-        if (GetFileAttributesW(record) == INVALID_FILE_ATTRIBUTES &&
-            !write_record(directory, record, entry, false))
-            return "version-record";
-        if (!join(record, directory, L".brw-shim") ||
-            (GetFileAttributesW(record) == INVALID_FILE_ATTRIBUTES &&
-             !write_record(directory, record, install->shim_hash, false)))
-            return "version-record";
+        error = preserve_active_records(install);
+        if (error) return error;
     }
     /* Cancellation and publication compete for the same transition. */
     if (install->source &&
         InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
         return "cancelled";
     return publish_transaction(install, target, &image, update);
+}
+
+static const char *publish_retained_entry(struct installation *install, const wchar_t *entry,
+                                          const wchar_t *target, bool replace)
+{
+    struct launcher_image image;
+    wchar_t record[PATH_CAP], recorded[65];
+    if (!select_launcher(install->version, entry, &image) ||
+        !join(record, install->version, L".brw-shim"))
+        return "version-record";
+    /* A retained version may have been published by an older launcher build. */
+    if (!read_record(record, recorded, 65) || wcscmp(recorded, image.digest)) {
+        if (!wcscmp(install->active_version, install->package->version))
+            return NULL;
+        if (!write_record(install->version, record, image.digest, true))
+            return "version-record";
+    }
+    return publish_transaction(install, target, &image, replace);
 }
 
 static const char *activate(struct installation *install)
@@ -1290,19 +1334,7 @@ static const char *activate(struct installation *install)
         if (!brw_is_installed(dependency))
             return "dependency-not-installed";
     }
-    struct launcher_image image;
-    wchar_t record[PATH_CAP], recorded[65];
-    if (!select_launcher(install->version, entry, &image) ||
-        !join(record, install->version, L".brw-shim"))
-        return "version-record";
-    /* A retained version may have been published by an older launcher build. */
-    if (!read_record(record, recorded, 65) || wcscmp(recorded, image.digest)) {
-        if (!wcscmp(install->active_version, install->package->version))
-            return NULL;
-        if (!write_record(install->version, record, image.digest, true))
-            return "version-record";
-    }
-    return publish_transaction(install, target, &image, true);
+    return publish_retained_entry(install, entry, target, true);
 }
 
 static bool listed_path(FILE *files, const wchar_t *name, bool folder)
@@ -1535,6 +1567,91 @@ const char *brw_install_stream(const struct local_package *package, bool executa
     if (!payload) return "archive-open";
     const struct digby_plan plan = digby_install_plan();
     return run_lifecycle(DIGBY_INSTALL, package, &plan, NULL, true, executable, NULL, payload);
+}
+
+/* A stage and an installed directory have different file identities. Compare
+   the entire payload, including libraries next to the entry, before reuse. */
+static const char *materialize_version(struct installation *install)
+{
+    const char *error = stage_payload(install);
+    if (error) return error;
+    if (GetFileAttributesW(install->version) != INVALID_FILE_ATTRIBUTES) {
+        struct brw_evidence expected, found;
+        if (!ordinary_path(install->version, true) ||
+            !brw_payload_evidence(install->stage, &expected) ||
+            !brw_payload_evidence(install->version, &found) ||
+            memcmp(&expected, &found, sizeof expected))
+            return "version-conflict";
+        if (!remove_stage(install->stage)) return "cleanup-stage";
+    } else {
+        struct launcher_image image;
+        error = stage_records(install, &image);
+        if (error) return error;
+        if (InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
+            return "cancelled";
+        if (!MoveFileExW(install->stage, install->version, MOVEFILE_WRITE_THROUGH))
+            return "publish-version";
+    }
+    install->stage[0] = 0;
+    return NULL;
+}
+
+static const char *record_locked_version(struct installation *install)
+{
+    wchar_t path[PATH_CAP], value[PATH_CAP];
+    if (!install_record_path(install, install->package->version, path)) return "install-record";
+    if (read_record(path, value, PATH_CAP) && !_wcsicmp(value, install->version)) return NULL;
+    return write_record(install->state, path, install->version, false) ? NULL : "install-record";
+}
+
+static const char *default_locked_version(struct installation *install, const wchar_t *target)
+{
+    const char *error = brw_path(BRW_BIN, install->bin, true);
+    if (error || !ordinary_path(install->bin, true)) return "entry-directory";
+    bool replace = GetFileAttributesW(install->shim) != INVALID_FILE_ATTRIBUTES ||
+                   GetFileAttributesW(install->sidecar) != INVALID_FILE_ATTRIBUTES;
+    if (replace) {
+        error = read_active(install);
+        if (error) return error;
+        if (!_wcsicmp(install->active_version, install->package->version) &&
+            !_wcsicmp(install->active_entry, install->package->entry)) return NULL;
+        error = preserve_active_records(install);
+        if (error) return error;
+    }
+    wchar_t entry[ENTRY_CAP];
+    if (!version_entry(install, install->package->version, entry) ||
+        wcscmp(entry, install->package->entry)) return "entry-conflict";
+    return publish_retained_entry(install, entry, target, replace);
+}
+
+const char *brw_use_locked_package(const struct local_package *package, bool executable,
+                                   const wchar_t *dependencies, bool make_default,
+                                   wchar_t target[BRW_PATH_CAP])
+{
+    if (!package || !package->name || !package->version || !package->entry ||
+        !package->archive || !package->digest || !target) return "invalid-package";
+    struct installation install = {.package = package, .action = DIGBY_INSTALL, .source = true,
+                                   .executable = executable, .dependencies = dependencies};
+    const char *error = brw_validate_source_package(package, executable);
+    if (!error && !brw_dependency_names(dependencies)) error = "dependency-state";
+    if (!error) error = brw_begin_package_changes();
+    if (error) return error;
+    if (!brw_begin_source_install()) { brw_end_package_changes(); return "cancel-handler"; }
+    error = verify(&install);
+    if (!error) error = prepare(&install);
+    if (!error && !join(target, install.version, package->entry)) error = "invalid-entry";
+    if (!error) error = materialize_version(&install);
+    if (!error && InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
+        error = "cancelled";
+    if (!error) error = record_locked_version(&install);
+    if (!error && make_default) error = default_locked_version(&install, target);
+    if (install.archive) fclose(install.archive);
+    if (*install.stage && !remove_stage(install.stage) && !error) error = "cleanup-stage";
+    if (install.lock && install.lock != INVALID_HANDLE_VALUE) CloseHandle(install.lock);
+    InterlockedAnd(&publish_state, ~PUBLISHING);
+    brw_end_source_install();
+    brw_end_package_changes();
+    return error;
 }
 
 int brw_list_installed(bool json)

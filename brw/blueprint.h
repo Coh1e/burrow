@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_OP_COUNT };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
 
 struct bp_file {
@@ -42,6 +42,8 @@ struct bp_step {
     char *source; /* Call path including the position within this module. */
     char *path, *from, *to, *name, *version, *entry, *value;
     char *program, **args; /* Owned strings. The staged payload occupies script_arg. */
+    char *tool; /* Owned name of the previously declared tool used by this step. */
+    const struct bp_package *package; /* Borrowed from the resolved host lock. */
     size_t argc, script_arg;
     size_t count;
     const struct bp_file *payload; /* Borrowed from the verified bundle. */

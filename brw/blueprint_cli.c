@@ -38,6 +38,8 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
     field("value", s->value);
     field("version", s->version);
     field("registry", s->registry);
+    field("tool", s->tool);
+    if (s->tool && s->package) field("version", s->package->version);
     field("entry", s->entry);
     if (!s->skip_op && s->op == BP_RUN) {
         field("program", s->program);
@@ -159,7 +161,8 @@ int brw_blueprint_command(int argc, const char *const *argv)
     struct bp_plan plan = {0};
     char detail[BP_DETAIL_CAP] = "";
     const char *location = detail;
-    unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) | (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL);
+    unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) |
+        (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL) | (1u << BP_DEFAULT);
 #ifdef BRW_BP_NATIVE_INSTALL
     capabilities |= 1u << BP_INSTALL;
 #endif

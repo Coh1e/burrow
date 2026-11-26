@@ -46,7 +46,23 @@ static const char *command(const char *workspace, const struct bp_step *step,
             args[i] = binding.writer ? output->file.path : output->value;
         }
     }
-    return bp_run_command(workspace, &command, true, exit_code);
+    char *program = NULL;
+    const char *error = NULL;
+    if (step->tool) {
+        error = bp_use_tool(step, &program);
+        command.program = program;
+    }
+    if (!error) error = bp_run_command(workspace, &command, true, exit_code);
+    free(program);
+    return error;
+}
+
+static const char *validate_step(const char *workspace, const struct bp_step *step)
+{
+    if (!step->tool) return bp_validate_step(workspace, step);
+    struct bp_step command = *step;
+    command.program = step->tool;
+    return bp_validate_step(workspace, &command);
 }
 
 static bool needs_output(const struct bp_step *command)
@@ -111,15 +127,15 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
     bool follows_state = false;
     for (size_t i = 0; i < plan->count; ++i) {
         const struct bp_step *s = &plan->steps[i];
-        if (s->skip_op || s->op == BP_TOOL) continue;
+        if (s->skip_op || s->op == BP_TOOL || s->op == BP_DEFAULT) continue;
         const char *error;
         if (s->state) {
             follows_state = true;
-            error = bp_validate_step(workspace, &s->state->check);
-            if (!error) error = bp_validate_step(workspace, &s->state->change);
+            error = validate_step(workspace, &s->state->check);
+            if (!error) error = validate_step(workspace, &s->state->change);
         } else if (follows_state && (s->op == BP_COPY || s->op == BP_REPLACE)) {
             error = bp_validate_file_operands(s);
-        } else error = bp_validate_step(workspace, s);
+        } else error = validate_step(workspace, s);
         if (error) {
             *failure_source = s->source;
             return error;
@@ -165,6 +181,10 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
             earlier_effect = true;
             if (preview) continue;
             error = bp_apply_packages(plan->lock, i);
+        } else if (step->op == BP_DEFAULT) {
+            earlier_effect = true;
+            if (preview) continue;
+            error = bp_use_tool(step, NULL);
         } else if (step->state) {
             if (preview && (earlier_effect || needs_output(&step->state->check))) {
                 earlier_effect = true;
