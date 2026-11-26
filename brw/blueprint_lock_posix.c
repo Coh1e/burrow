@@ -52,6 +52,18 @@ char *bp_data_dir(void)
     return xdg("XDG_DATA_HOME", ".local/share", "burrow", false);
 }
 
+/* Package and source identities are ASCII and case-insensitive. Use one
+   spelling on disk even when catalog versions spell the same name differently. */
+char *bp_package_child(const char *parent, const char *name)
+{
+    char *path = bp_join(parent, name);
+    if (path) {
+        char *leaf = strrchr(path, '/') + 1;
+        for (; *leaf; ++leaf) *leaf = (char)tolower((unsigned char)*leaf);
+    }
+    return path;
+}
+
 /* Catalog entry names and staged archive paths have already been validated.
    The private staging tree contains only the directories and files made here. */
 static int create_member(const char *stage, const char *name, bool executable)
@@ -219,15 +231,28 @@ static bool package_directory(const char *path)
     return !lstat(path, &st) && S_ISDIR(st.st_mode);
 }
 
+static char *package_base(const struct bp_package *p, bool create)
+{
+    char *data = bp_data_dir(), *packages = bp_join(data, "packages");
+    char *base = bp_package_child(packages, p->name);
+    if (create && base && (!ensure_dirs(data) || !package_directory(packages) ||
+                           !package_directory(base))) {
+        free(base);
+        base = NULL;
+    }
+    free(packages);
+    free(data);
+    return base;
+}
+
 const char *bp_materialize_tool(const struct bp_package *p, const char *cache, char **program)
 {
     *program = NULL;
-    char *data = bp_data_dir();
-    char *packages = bp_join(data, "packages"), *base = bp_join(packages, p->name);
+    char *base = package_base(p, true);
     char *version = bp_join(base, p->version), *entry = bp_join(version, p->entry);
     char *stage = bp_join(base, ".brw-tool-XXXXXX");
     const char *error = "data-directory";
-    if (entry && stage && ensure_dirs(data) && package_directory(packages) && package_directory(base)) {
+    if (entry && stage) {
         error = "stage-create";
         if (mkdtemp(stage)) {
             error = stage_tool(p, cache, stage);
@@ -251,22 +276,28 @@ const char *bp_materialize_tool(const struct bp_package *p, const char *cache, c
     free(stage);
     free(version);
     free(base);
-    free(packages);
-    free(data);
     return error;
 }
 
-static char *bin_directory(void)
+const char bp_home_key[] = "HOME";
+
+bool bp_env_key_equal(const char *name, const char *key)
 {
-    const char *bin = getenv("BRW_BIN_DIR"), *home = getenv("HOME");
+    return !strcmp(name, key);
+}
+
+static char *bin_directory(const char *bin, const char *home)
+{
+    if (!bin) bin = getenv("BRW_BIN_DIR");
     if (bin && *bin == '/') return strdup(bin);
+    if (!home) home = getenv(bp_home_key);
     return home && *home == '/' ? bp_join(home, ".local/bin") : NULL;
 }
 
-char *bp_default_entry(const struct bp_package *p)
+char *bp_default_entry(const struct bp_package *p, const char *bin_override, const char *home_override)
 {
-    char *bin = bin_directory();
-    char *entry = bp_join(bin, p->name);
+    char *bin = bin_directory(bin_override, home_override);
+    char *entry = bp_package_child(bin, p->name);
     free(bin);
     return entry;
 }
@@ -290,29 +321,59 @@ static bool package_link(char *target, const char *base)
     }
 }
 
-static const char *switch_link(const char *bin, const char *entry, const char *base, const char *program)
+enum link_state { LINK_ABSENT, LINK_OTHER_VERSION, LINK_SELECTED };
+
+static const char *inspect_link(const char *entry, const char *base, const char *program,
+                                enum link_state *state)
 {
+    *state = LINK_ABSENT;
     /* No valid installed link exceeds the package prefix, version, and entry limits. */
     size_t cap = strlen(base) + 1 + 128 + 1 + 260 + 1;
     char *target = malloc(cap);
     if (!target) return "out-of-memory";
     ssize_t n = readlink(entry, target, cap);
-    if (n < 0) {
-        bool available = errno == ENOENT;
-        free(target);
-        if (!available) return "entry-conflict";
-        return symlink(program, entry) ? "entry-publish" : NULL;
-    }
     const char *error = "entry-conflict";
-    bool switch_required = false;
-    if ((size_t)n < cap) {
+    if (n < 0 && errno == ENOENT) error = NULL;
+    else if (n >= 0 && (size_t)n < cap) {
         target[n] = 0;
-        if (!strcmp(target, program)) error = NULL;
-        else switch_required = package_link(target, base);
+        if (!strcmp(target, program)) {
+            *state = LINK_SELECTED;
+            error = NULL;
+        } else if (package_link(target, base)) {
+            *state = LINK_OTHER_VERSION;
+            error = NULL;
+        }
     }
     free(target);
-    if (!switch_required) return error;
+    return error;
+}
 
+const char *bp_default_matches(const struct bp_package *p, bool *matches)
+{
+    char *entry = bp_default_entry(p, NULL, NULL), *program = bp_version_entry(p), *base = package_base(p, false);
+    enum link_state state = LINK_ABSENT;
+    const char *error = entry && program && base ? inspect_link(entry, base, program, &state)
+                                                 : "entry-directory";
+    struct stat info;
+    *matches = !error && state == LINK_SELECTED && !lstat(program, &info) &&
+               S_ISREG(info.st_mode) && access(program, X_OK) == 0;
+    free(base);
+    free(program);
+    free(entry);
+    return error;
+}
+
+static const char *switch_link(const char *bin, const char *entry, const char *base,
+                               const char *program, bool *changed)
+{
+    enum link_state state;
+    const char *error = inspect_link(entry, base, program, &state);
+    if (error || state == LINK_SELECTED) return error;
+    if (state == LINK_ABSENT) {
+        if (symlink(program, entry)) return "entry-publish";
+        *changed = true;
+        return NULL;
+    }
     char *stage = bp_join(bin, ".brw-entry-XXXXXX");
     error = "stage-create";
     if (stage && mkdtemp(stage)) {
@@ -320,6 +381,7 @@ static const char *switch_link(const char *bin, const char *entry, const char *b
         if (link && !symlink(program, link)) {
             error = rename(link, entry) ? "entry-publish" : NULL;
             if (error) unlink(link);
+            else *changed = true;
         }
         free(link);
         if (rmdir(stage) && !error) error = "cleanup-stage";
@@ -328,26 +390,25 @@ static const char *switch_link(const char *bin, const char *entry, const char *b
     return error;
 }
 
-const char *bp_set_default(const struct bp_package *p, const char *cache)
+const char *bp_set_default(const struct bp_package *p, const char *cache, bool *changed)
 {
+    *changed = false;
     char *program = NULL;
     const char *error = bp_materialize_tool(p, cache, &program);
     if (error) return error;
-    char *data = bp_data_dir(), *packages = bp_join(data, "packages"), *base = bp_join(packages, p->name);
-    char *bin = bin_directory(), *entry = bp_join(bin, p->name);
+    char *base = package_base(p, false);
+    char *bin = bin_directory(NULL, NULL), *entry = bp_package_child(bin, p->name);
     int dir = base && entry && ensure_dirs(bin) ? open(bin, O_RDONLY | O_DIRECTORY | O_CLOEXEC) : -1;
     error = "bin-directory";
     if (dir >= 0) {
         int rc;
         do { rc = flock(dir, LOCK_EX); } while (rc && errno == EINTR);
-        error = rc ? "entry-lock" : switch_link(bin, entry, base, program);
+        error = rc ? "entry-lock" : switch_link(bin, entry, base, program, changed);
         close(dir);
     }
     free(entry);
     free(bin);
     free(base);
-    free(packages);
-    free(data);
     free(program);
     return error;
 }
@@ -405,11 +466,7 @@ int bp_source_add(const char *name, const char *input)
     char *root = NULL, *record = NULL;
     if (!error) {
         root = xdg("XDG_CONFIG_HOME", ".config", "burrow/sources", true);
-        record = bp_join(root, name);
-        if (record) {
-            char *base = strrchr(record, '/') + 1;
-            for (; *base; ++base) *base = (char)tolower((unsigned char)*base);
-        }
+        record = bp_package_child(root, name);
         error = record ? publish(record, write_registration, catalog, false) : "source-directory";
     }
     free(record);

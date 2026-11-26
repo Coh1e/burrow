@@ -23,6 +23,13 @@ static void field(const char *key, const char *value)
     }
 }
 
+static void print_state_status(enum bp_state_status status)
+{
+    static const char *const names[] = {NULL, "satisfied", "unmet", "changed", "check-at-execution"};
+    field("status", names[status]);
+    if (status == BP_DEFERRED) field("reason", "earlier-step-may-change-state");
+}
+
 static void print_step(const struct bp_plan *plan, const struct bp_step *s)
 {
     printf("{\"op\":");
@@ -41,6 +48,7 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
     field("tool", s->tool);
     if (s->tool && s->package) field("version", s->package->version);
     field("entry", s->entry);
+    if (s->op == BP_DEFAULT) print_state_status(s->entry_status);
     if (!s->skip_op && s->op == BP_RUN) {
         field("program", s->program);
         printf(",\"args\":[");
@@ -77,10 +85,7 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
         print_step(plan, &s->state->check);
         printf(",\"change\":");
         print_step(plan, &s->state->change);
-        static const char *const statuses[] = {NULL, "satisfied", "unmet", "changed", "check-at-execution"};
-        field("status", statuses[s->state->status]);
-        if (s->state->status == BP_DEFERRED)
-            field("reason", "earlier-step-may-change-state");
+        print_state_status(s->state->status);
         if (s->state->has_exit_code) printf(",\"exitCode\":%lu", s->state->exit_code);
     }
     if (s->payload) {

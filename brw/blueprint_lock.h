@@ -26,9 +26,13 @@ const char *bp_apply_packages(struct bp_lock *lock, size_t step);
 bool bp_package_id(const char *text);
 /* Reads the remainder of the borrowed stream, starting at its current position. */
 bool bp_matches_digest(FILE *file, const char *expected);
-/* For a bound command, return the owned absolute executable path in *program.
-   For a default step, pass NULL to switch the planned command entry. */
-const char *bp_use_tool(const struct bp_step *step, char **program);
+/* Caller owns the absolute path derived from the locked version and entry. */
+char *bp_version_entry(const struct bp_package *p);
+/* Materialize the selected package and its locked dependencies. On success, the
+   caller owns the executable and an optional PATH prefix for this child only. */
+const char *bp_use_tool(const struct bp_lock *lock, const struct bp_step *step,
+                        char **program, char **child_path);
+const char *bp_use_default(const struct bp_lock *lock, const struct bp_step *step, bool *changed);
 
 /* Platform adapters. All strings are UTF-8. Visitor arguments are borrowed.
    Path results are caller-owned. A failed atomic write preserves the old file. */
@@ -42,11 +46,18 @@ typedef const char *(*bp_write_file)(FILE *file, void *context);
 const char *bp_atomic_write(const char *path, bp_write_file write, void *context);
 const char *bp_fetch_artifact(const char *location, FILE *file);
 char *bp_join(const char *dir, const char *name);
+extern const char bp_path_separator;
+/* Join a package identity to its parent using this platform's on-disk spelling. */
+char *bp_package_child(const char *parent, const char *name);
 /* Materialize the verified version without publishing a user command entry.
    On success the caller owns *program. Diagnostic codes are static. */
 const char *bp_materialize_tool(const struct bp_package *p, const char *cache, char **program);
-/* Return the owned absolute command-entry path without creating it. */
-char *bp_default_entry(const struct bp_package *p);
-/* Switch the managed user entry, preserving an unrelated existing command. */
-const char *bp_set_default(const struct bp_package *p, const char *cache);
+/* Return the owned absolute entry path without writing. Overrides are earlier
+   env declarations; NULL selects the corresponding process environment value. */
+extern const char bp_home_key[];
+bool bp_env_key_equal(const char *name, const char *key);
+char *bp_default_entry(const struct bp_package *p, const char *bin_override, const char *home_override);
+/* Inspect or switch the managed entry, preserving unrelated user commands. */
+const char *bp_default_matches(const struct bp_package *p, bool *matches);
+const char *bp_set_default(const struct bp_package *p, const char *cache, bool *changed);
 #endif

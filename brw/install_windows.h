@@ -56,10 +56,14 @@ const char *brw_install_with_dependencies(const struct local_package *package, b
 const char *brw_install_stream(const struct local_package *package, bool executable, FILE *payload);
 /* Validates and materializes a pinned artifact under the package mutation lock.
    Inputs are borrowed. On success target receives its absolute version entry.
-   Making it the default is a separate, explicitly requested publication. */
+   A non-NULL default_changed requests default publication and receives true
+   only when it succeeds in changing the public entry. */
 const char *brw_use_locked_package(const struct local_package *package, bool executable,
-                                   const wchar_t *dependencies, bool make_default,
+                                   const wchar_t *dependencies, bool *default_changed,
                                    wchar_t target[BRW_PATH_CAP]);
+/* Read-only check of the public shim and its recorded version and entry. */
+const char *brw_default_matches(const wchar_t *name, const wchar_t *version,
+                                const wchar_t *entry, bool *matches);
 int brw_report_plan(bool json, bool preview, const char *status,
                     const struct digby_plan *plan, const char *error, size_t step);
 

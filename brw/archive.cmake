@@ -32,3 +32,7 @@ set(WITHOUT_ZLIB_DLL_WITH_LIB zlibstatic CACHE STRING "" FORCE)
 add_subdirectory("${archive_source}" archive EXCLUDE_FROM_ALL)
 unset(CMAKE_DISABLE_FIND_PACKAGE_ZLIB)
 set_target_properties(archive_static PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES)
+if(UNIX AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+  # Newer libc headers preserve the const qualification of bsearch's input.
+  target_compile_options(archive_static PRIVATE -Wno-error=discarded-qualifiers)
+endif()

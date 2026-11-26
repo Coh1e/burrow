@@ -82,8 +82,18 @@ static bool check_directories(wchar_t *path, bool create, bool writable)
     }
 }
 
+static size_t path_variable(const wchar_t *name, const wchar_t *override,
+                            wchar_t *value, DWORD capacity)
+{
+    if (!override) return GetEnvironmentVariableW(name, value, capacity);
+    size_t length = wcslen(override);
+    if (length < capacity) wmemcpy(value, override, length + 1);
+    return length;
+}
+
 static const char *resolve_path(enum brw_path_kind kind, wchar_t path[BRW_PATH_CAP],
-                                bool create, bool writable)
+                                bool create, bool writable, const wchar_t *override,
+                                const wchar_t *home)
 {
     static const struct {
         const wchar_t *variable;
@@ -100,12 +110,12 @@ static const char *resolve_path(enum brw_path_kind kind, wchar_t path[BRW_PATH_C
         return "invalid-directory";
     enum { ENVIRONMENT_CAP = 32768 };
     wchar_t base[ENVIRONMENT_CAP], full[BRW_PATH_CAP];
-    DWORD length = GetEnvironmentVariableW(definitions[kind].variable, base, ENVIRONMENT_CAP);
+    size_t length = path_variable(definitions[kind].variable, override, base, ENVIRONMENT_CAP);
     if (length >= ENVIRONMENT_CAP)
         return definitions[kind].error;
     const wchar_t *suffix = kind == BRW_BIN ? L"" : L"burrow";
     if (!length || !absolute_path(base)) {
-        length = GetEnvironmentVariableW(L"USERPROFILE", base, BRW_PATH_CAP);
+        length = path_variable(L"USERPROFILE", home, base, BRW_PATH_CAP);
         if (!length || length >= BRW_PATH_CAP || !absolute_path(base))
             return definitions[kind].error;
         suffix = definitions[kind].fallback;
@@ -139,10 +149,15 @@ static const char *resolve_path(enum brw_path_kind kind, wchar_t path[BRW_PATH_C
 
 const char *brw_path(enum brw_path_kind kind, wchar_t path[BRW_PATH_CAP], bool create)
 {
-    return resolve_path(kind, path, create, false);
+    return resolve_path(kind, path, create, false, NULL, NULL);
+}
+
+const char *brw_planned_bin(wchar_t path[BRW_PATH_CAP], const wchar_t *bin, const wchar_t *home)
+{
+    return resolve_path(BRW_BIN, path, false, false, bin, home);
 }
 
 const char *brw_writable_path(enum brw_path_kind kind, wchar_t path[BRW_PATH_CAP])
 {
-    return resolve_path(kind, path, false, true);
+    return resolve_path(kind, path, false, true, NULL, NULL);
 }

@@ -30,7 +30,7 @@ static const char *read_output(struct runtime_output *output)
     return NULL;
 }
 
-static const char *command(const char *workspace, const struct bp_step *step,
+static const char *command(const struct bp_lock *lock, const char *workspace, const struct bp_step *step,
                            struct runtime_output *outputs, unsigned long *exit_code)
 {
     struct bp_step command = *step;
@@ -46,13 +46,15 @@ static const char *command(const char *workspace, const struct bp_step *step,
             args[i] = binding.writer ? output->file.path : output->value;
         }
     }
-    char *program = NULL;
+    char *program = NULL, *child_path = NULL;
     const char *error = NULL;
     if (step->tool) {
-        error = bp_use_tool(step, &program);
+        error = bp_use_tool(lock, step, &program, &child_path);
         command.program = program;
+        command.child_path = child_path;
     }
     if (!error) error = bp_run_command(workspace, &command, true, exit_code);
+    free(child_path);
     free(program);
     return error;
 }
@@ -61,8 +63,11 @@ static const char *validate_step(const char *workspace, const struct bp_step *st
 {
     if (!step->tool) return bp_validate_step(workspace, step);
     struct bp_step command = *step;
-    command.program = step->tool;
-    return bp_validate_step(workspace, &command);
+    command.program = bp_version_entry(step->package);
+    if (!command.program) return "data-directory";
+    const char *error = bp_validate_step(workspace, &command);
+    free(command.program);
+    return error;
 }
 
 static bool needs_output(const struct bp_step *command)
@@ -72,12 +77,12 @@ static bool needs_output(const struct bp_step *command)
     return false;
 }
 
-static const char *check_state(const char *workspace, struct bp_state *state,
+static const char *check_state(const struct bp_lock *lock, const char *workspace, struct bp_state *state,
                                struct runtime_output *outputs, bool preview)
 {
     for (unsigned attempt = 0; attempt < 2; ++attempt) {
         unsigned long code = 0;
-        const char *error = command(workspace, &state->check, outputs, &code);
+        const char *error = command(lock, workspace, &state->check, outputs, &code);
         if (error) return error;
         state->exit_code = code;
         state->has_exit_code = true;
@@ -89,7 +94,7 @@ static const char *check_state(const char *workspace, struct bp_state *state,
         state->status = BP_UNMET;
         if (attempt) return "recheck-unmet";
         if (preview) return NULL;
-        error = command(workspace, &state->change, outputs, NULL);
+        error = command(lock, workspace, &state->change, outputs, NULL);
         if (error) return error;
     }
     return NULL;
@@ -113,11 +118,12 @@ static const char *validate_segment(const char *workspace, const struct bp_plan 
     return bp_validate_text_range(workspace, plan, start, end, failed);
 }
 
-const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspace, bool preview,
+const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, bool preview,
                                 size_t *completed, const char **failure_source)
 {
     *completed = 0;
     for (size_t i = 0; i < plan->count; ++i) {
+        plan->steps[i].entry_status = BP_UNCHECKED;
         struct bp_state *state = plan->steps[i].state;
         if (state) {
             state->status = BP_UNCHECKED;
@@ -143,7 +149,7 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
     }
     size_t segment_end = 0;
     const char *error = NULL;
-    bool earlier_effect = false;
+    bool earlier_effect = false, earlier_entry_effect = false;
     struct runtime_output outputs[BP_MAX_STEPS] = {0};
     size_t check = 0;
     for (size_t i = 0; !error && i <= plan->count; ++i) {
@@ -162,7 +168,7 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
             }
         }
         if (error || i == plan->count) break;
-        const struct bp_step *step = &plan->steps[i];
+        struct bp_step *step = &plan->steps[i];
         if (i >= segment_end && !step->state) {
             /* A state change may create or edit the input of a later text operation. */
             segment_end = i + 1;
@@ -182,21 +188,29 @@ const char *digby_run_blueprint(const struct bp_plan *plan, const char *workspac
             if (preview) continue;
             error = bp_apply_packages(plan->lock, i);
         } else if (step->op == BP_DEFAULT) {
-            earlier_effect = true;
-            if (preview) continue;
-            error = bp_use_tool(step, NULL);
+            bool matches = false, changed = false;
+            if (preview && earlier_entry_effect) {
+                step->entry_status = BP_DEFERRED;
+            } else if (preview) {
+                error = bp_default_matches(step->package, &matches);
+                if (!error) step->entry_status = matches ? BP_SATISFIED : BP_UNMET;
+            } else {
+                error = bp_use_default(plan->lock, step, &changed);
+                if (!error) step->entry_status = changed ? BP_CHANGED : BP_SATISFIED;
+            }
+            if (step->entry_status != BP_SATISFIED) earlier_effect = earlier_entry_effect = true;
         } else if (step->state) {
             if (preview && (earlier_effect || needs_output(&step->state->check))) {
-                earlier_effect = true;
+                earlier_effect = earlier_entry_effect = true;
                 step->state->status = BP_DEFERRED;
                 continue;
             }
-            error = check_state(workspace, step->state, outputs, preview);
-            if (!error && step->state->status != BP_SATISFIED) earlier_effect = true;
+            error = check_state(plan->lock, workspace, step->state, outputs, preview);
+            if (!error && step->state->status != BP_SATISFIED) earlier_effect = earlier_entry_effect = true;
         } else {
-            earlier_effect = true;
+            earlier_effect = earlier_entry_effect = true;
             if (preview) continue;
-            error = step->op == BP_RUN ? command(workspace, step, outputs, NULL)
+            error = step->op == BP_RUN ? command(plan->lock, workspace, step, outputs, NULL)
                                        : bp_apply_step(workspace, step);
         }
         if (error) *failure_source = step->source;

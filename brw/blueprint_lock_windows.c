@@ -59,6 +59,11 @@ char *bp_data_dir(void)
     return brw_path(BRW_DATA, path, false) ? NULL : utf8(path);
 }
 
+char *bp_package_child(const char *parent, const char *name)
+{
+    return bp_join(parent, name);
+}
+
 static FILE *stream(HANDLE h, int flags, const char *mode)
 {
     if (h == INVALID_HANDLE_VALUE) return NULL;
@@ -124,24 +129,46 @@ const char *bp_fetch_artifact(const char *location, FILE *file)
     return error;
 }
 
-char *bp_default_entry(const struct bp_package *p)
+const char bp_home_key[] = "USERPROFILE";
+
+bool bp_env_key_equal(const char *name, const char *key)
+{
+    return _stricmp(name, key) == 0;
+}
+
+char *bp_default_entry(const struct bp_package *p, const char *bin_override, const char *home_override)
 {
     wchar_t bin[BRW_PATH_CAP], path[BRW_PATH_CAP];
     wchar_t *package = wide_path(p->name);
-    char *result = package && !brw_path(BRW_BIN, bin, false) &&
+    wchar_t *planned_bin = bin_override ? wide_path(bin_override) : NULL;
+    wchar_t *planned_home = home_override ? wide_path(home_override) : NULL;
+    char *result = package && (!bin_override || planned_bin) && (!home_override || planned_home) &&
+        !brw_planned_bin(bin, planned_bin, planned_home) &&
         brw_command_entry_path(bin, package, path) ? utf8(path) : NULL;
+    free(planned_bin);
+    free(planned_home);
     free(package);
     return result;
 }
 
-static const char *use_package(const struct bp_package *p, const char *cache, char **program)
+const char *bp_default_matches(const struct bp_package *p, bool *matches)
+{
+    wchar_t *name = wide_path(p->name), *version = wide_path(p->version), *entry = wide_path(p->entry);
+    const char *error = brw_default_matches(name, version, entry, matches);
+    free(name);
+    free(version);
+    free(entry);
+    return error;
+}
+
+static const char *use_package(const struct bp_package *p, const char *cache, char **program, bool *changed)
 {
     wchar_t *name = wide_path(p->name), *version = wide_path(p->version), *path = wide_path(cache);
     wchar_t *digest = wide_path(p->digest), *entry = wide_path(p->entry), *depends = wide_path(p->depends);
     struct local_package pkg = {name, version, path, digest, entry};
     wchar_t target[BRW_PATH_CAP];
     const char *error = name && version && path && digest && entry && depends ?
-        brw_use_locked_package(&pkg, !strcmp(p->kind, "exe"), depends, !program, target) : "invalid-package";
+        brw_use_locked_package(&pkg, !strcmp(p->kind, "exe"), depends, changed, target) : "invalid-package";
     if (!error && program && !(*program = utf8(target))) error = "out-of-memory";
     free(name);
     free(version);
@@ -154,10 +181,10 @@ static const char *use_package(const struct bp_package *p, const char *cache, ch
 
 const char *bp_materialize_tool(const struct bp_package *p, const char *cache, char **program)
 {
-    return use_package(p, cache, program);
+    return use_package(p, cache, program, NULL);
 }
 
-const char *bp_set_default(const struct bp_package *p, const char *cache)
+const char *bp_set_default(const struct bp_package *p, const char *cache, bool *changed)
 {
-    return use_package(p, cache, NULL);
+    return use_package(p, cache, NULL, changed);
 }

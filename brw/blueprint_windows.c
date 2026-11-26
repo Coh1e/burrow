@@ -286,6 +286,46 @@ static const char *install(const struct bp_step *s, bool apply)
     return error;
 }
 
+const char bp_path_separator = ';';
+
+/* Preserve the Unicode environment, including hidden drive-directory variables,
+   and insert or replace PATH in its case-insensitively sorted position. */
+static wchar_t *child_environment(const char *prefix)
+{
+    wchar_t *wide_prefix = wide(prefix);
+    wchar_t *block = GetEnvironmentStringsW();
+    wchar_t *result = NULL;
+    if (wide_prefix && block) {
+        const wchar_t *end = block, *position = NULL, *original = NULL;
+        while (*end) {
+            int order = _wcsnicmp(end, L"PATH=", 5);
+            if (!position && order >= 0) position = end;
+            if (!order) { original = end; position = end; }
+            end += wcslen(end) + 1;
+        }
+        if (!position) position = end;
+        size_t before = (size_t)(position - block), n = wcslen(wide_prefix);
+        size_t capacity = (size_t)(end - block) + n + 8;
+        result = malloc(capacity * sizeof *result);
+        if (result) {
+            wmemcpy(result, block, before);
+            wchar_t *out = wmemcpy(result + before, L"PATH=", 5) + 5;
+            out = wmemcpy(out, wide_prefix, n) + n;
+            if (original) {
+                *out++ = L';';
+                size_t length = wcslen(original + 5);
+                out = wmemcpy(out, original + 5, length) + length;
+                position = original + 5 + length + 1;
+            }
+            *out++ = 0;
+            wmemcpy(out, position, (size_t)(end - position) + 1);
+        }
+    }
+    if (block) FreeEnvironmentStringsW(block);
+    free(wide_prefix);
+    return result;
+}
+
 static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, wchar_t *script, bool apply, unsigned long *exit_code)
 {
     wchar_t *args[BP_MAX_ARGS + 1] = {wide(s->program)};
@@ -317,8 +357,13 @@ static const char *launch_command(const struct bp_step *s, const wchar_t *cwd, w
     start.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     start.hStdOutput = start.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION child;
-    if (!error && apply && !CreateProcessW(application, line, NULL, NULL, TRUE, 0, NULL, cwd, &start, &child))
+    wchar_t *environment = NULL;
+    if (!error && apply && s->child_path && !(environment = child_environment(s->child_path)))
+        error = "child-environment";
+    if (!error && apply && !CreateProcessW(application, line, NULL, NULL, TRUE,
+        CREATE_UNICODE_ENVIRONMENT, environment, cwd, &start, &child))
         error = "child-launch";
+    free(environment);
     for (size_t i = 0; i <= s->argc; ++i)
         if (args[i] != script) free(args[i]);
     if (error || !apply) return error;

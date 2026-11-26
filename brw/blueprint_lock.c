@@ -243,6 +243,18 @@ static bool allowed(const struct bp_plan *plan, const struct bp_package *row)
     return true;
 }
 
+/* Catalog and lock parsing have already validated every dependency name. */
+static bool next_dependency(const char **rest, char name[ID_CAP])
+{
+    if (!**rest) return false;
+    size_t n = strcspn(*rest, ",");
+    memcpy(name, *rest, n);
+    name[n] = 0;
+    *rest += n;
+    if (**rest) ++*rest;
+    return true;
+}
+
 static const char *resolve(struct resolution *r, const char *name, size_t step, size_t depth)
 {
     for (size_t i = 0; i < r->count; ++i)
@@ -271,15 +283,10 @@ static const char *resolve(struct resolution *r, const char *name, size_t step, 
     }
     r->chain[depth] = best->name;
     const char *deps = best->depends;
-    while (*deps) {
-        char dep[ID_CAP];
-        size_t n = strcspn(deps, ",");
-        memcpy(dep, deps, n);
-        dep[n] = 0;
+    char dep[ID_CAP];
+    while (next_dependency(&deps, dep)) {
         const char *error = resolve(r, dep, step, depth + 1);
         if (error) return error;
-        deps += n;
-        if (*deps) ++deps;
     }
     if (r->count == BP_MAX_STEPS) return "lock-limit";
     best->first_step = step;
@@ -342,19 +349,40 @@ static bool cached(const struct bp_package *p)
     return match;
 }
 
+static char *version_entry(const struct bp_package *p, bool canonical)
+{
+    char relative[ID_CAP + 260];
+    int n = snprintf(relative, sizeof relative, "%s/%s", p->version, p->entry);
+    if (n < 0 || (size_t)n >= sizeof relative) return NULL;
+    char *data = bp_data_dir();
+    char *packages = bp_join(data, "packages");
+    char *package = canonical ? bp_package_child(packages, p->name) : bp_join(packages, p->name);
+    char *path = bp_join(package, relative);
+    free(package);
+    free(packages);
+    free(data);
+    return path;
+}
+
+char *bp_version_entry(const struct bp_package *p)
+{
+    return version_entry(p, true);
+}
+
 /* Only a single-file package can be verified from its installed entry.
    An extracted archive cannot reproduce the digest of its original bytes. */
 static char *installed_artifact(const struct bp_package *p)
 {
     if (strcmp(p->kind, "exe")) return NULL;
-    char relative[2 * ID_CAP + 280];
-    int n = snprintf(relative, sizeof relative, "packages/%s/%s/%s", p->name, p->version, p->entry);
-    if (n < 0 || (size_t)n >= sizeof relative) return NULL;
-    char *data = bp_data_dir();
-    char *path = bp_join(data, relative);
-    free(data);
-    if (!verified_path(path, p)) { free(path); return NULL; }
-    return path;
+    char *path = bp_version_entry(p);
+    if (verified_path(path, p)) return path;
+    /* Older POSIX installs may retain the catalog's original name casing. */
+    char *legacy = version_entry(p, false);
+    bool match = path && legacy && strcmp(path, legacy) && verified_path(legacy, p);
+    free(path);
+    if (match) return legacy;
+    free(legacy);
+    return NULL;
 }
 
 struct fetch {
@@ -414,21 +442,86 @@ const char *bp_apply_packages(struct bp_lock *lock, size_t step)
     return NULL;
 }
 
-const char *bp_use_tool(const struct bp_step *step, char **program)
+static const char *materialize(const struct bp_package *package, char **program)
 {
-    char *cache = cache_path(step->package, false);
+    char *cache = cache_path(package, false);
     if (!cache) return "cache-directory";
-    const char *error;
-    if (step->op == BP_DEFAULT) {
-        /* An earlier environment step must not redirect writes to an entry
-           different from the one named in the plan. */
-        char *entry = bp_default_entry(step->package);
-        error = entry && !strcmp(entry, step->entry) ? bp_set_default(step->package, cache)
-                                                     : "entry-directory";
-        free(entry);
-    } else {
-        error = bp_materialize_tool(step->package, cache, program);
+    const char *error = bp_materialize_tool(package, cache, program);
+    free(cache);
+    return error;
+}
+
+static const char *prepend_entry_directory(char **path, const char *program, const char *entry)
+{
+    const char *slash = strrchr(entry, '/');
+    size_t n = strlen(program) - strlen(slash ? slash + 1 : entry) - 1;
+    if (memchr(program, bp_path_separator, n)) return "dependency-path";
+    char *prefix = malloc(n + (*path ? strlen(*path) + 1 : 0) + 1);
+    if (!prefix) return "out-of-memory";
+    memcpy(prefix, program, n);
+    prefix[n] = 0;
+    if (*path) {
+        prefix[n] = bp_path_separator;
+        strcpy(prefix + n + 1, *path);
+        free(*path);
     }
+    *path = prefix;
+    return NULL;
+}
+
+static const char *prepare_dependencies(const struct bp_lock *lock, const struct bp_package *package,
+                                        char **path)
+{
+    size_t root = (size_t)(package - lock->rows);
+    bool selected[BP_MAX_STEPS] = {false};
+    selected[root] = true;
+    /* Lock rows follow their dependencies. Walk back to select just this closure. */
+    for (size_t i = root + 1; i-- > 0;) {
+        if (!selected[i]) continue;
+        const char *deps = lock->rows[i].depends;
+        char name[ID_CAP];
+        while (next_dependency(&deps, name)) {
+            size_t j = 0;
+            while (j < i && !equal(name, lock->rows[j].name)) ++j;
+            if (j == i) return "unresolved-tool";
+            selected[j] = true;
+        }
+    }
+    for (size_t i = 0; i < root; ++i) {
+        if (!selected[i]) continue;
+        char *program = NULL;
+        const char *error = materialize(&lock->rows[i], &program);
+        if (!error && path) error = prepend_entry_directory(path, program, lock->rows[i].entry);
+        free(program);
+        if (error) return error;
+    }
+    return NULL;
+}
+
+const char *bp_use_tool(const struct bp_lock *lock, const struct bp_step *step,
+                        char **program, char **child_path)
+{
+    *program = NULL;
+    *child_path = NULL;
+    char *path = NULL;
+    const char *error = prepare_dependencies(lock, step->package, &path);
+    if (!error) error = materialize(step->package, program);
+    if (error) free(path);
+    else *child_path = path;
+    return error;
+}
+
+const char *bp_use_default(const struct bp_lock *lock, const struct bp_step *step, bool *changed)
+{
+    /* An earlier environment step must not redirect publication away from the planned entry. */
+    char *entry = bp_default_entry(step->package, NULL, NULL);
+    bool same = entry && !strcmp(entry, step->entry);
+    free(entry);
+    if (!same) return "entry-directory";
+    const char *error = prepare_dependencies(lock, step->package, NULL);
+    if (error) return error;
+    char *cache = cache_path(step->package, false);
+    error = cache ? bp_set_default(step->package, cache, changed) : "cache-directory";
     free(cache);
     return error;
 }
@@ -441,13 +534,6 @@ static const char *bind_tool(struct bp_step *consumer, const struct bp_plan *pla
         const struct bp_step *declaration = &plan->steps[i];
         if (declaration->op == BP_TOOL && equal(declaration->name, consumer->tool)) {
             consumer->package = declaration->package;
-            if (consumer->op == BP_DEFAULT) {
-                consumer->entry = bp_default_entry(consumer->package);
-                if (!consumer->entry) {
-                    snprintf(detail, BP_DETAIL_CAP, "%s", consumer->source);
-                    return "entry-directory";
-                }
-            }
             return NULL;
         }
     }
@@ -458,9 +544,13 @@ static const char *bind_tool(struct bp_step *consumer, const struct bp_plan *pla
 static const char *bind_tools(struct bp_plan *plan, const struct bp_lock *lock,
                               char detail[BP_DETAIL_CAP])
 {
+    const char *bin = NULL, *home = NULL;
     for (size_t i = 0; i < plan->count; ++i) {
         struct bp_step *s = &plan->steps[i];
-        if (s->op == BP_TOOL) {
+        if (s->op == BP_ENV) {
+            if (bp_env_key_equal(s->name, "BRW_BIN_DIR")) bin = s->value;
+            if (bp_env_key_equal(s->name, bp_home_key)) home = s->value;
+        } else if (s->op == BP_TOOL) {
             for (size_t j = 0; j < lock->count; ++j)
                 if (equal(s->name, lock->rows[j].name)) { s->package = &lock->rows[j]; break; }
         } else {
@@ -468,6 +558,13 @@ static const char *bind_tools(struct bp_plan *plan, const struct bp_lock *lock,
             if (!error && s->state) error = bind_tool(&s->state->check, plan, i, detail);
             if (!error && s->state) error = bind_tool(&s->state->change, plan, i, detail);
             if (error) return error;
+            if (s->op == BP_DEFAULT) {
+                s->entry = bp_default_entry(s->package, bin, home);
+                if (!s->entry) {
+                    snprintf(detail, BP_DETAIL_CAP, "%s", s->source);
+                    return "entry-directory";
+                }
+            }
         }
     }
     return NULL;

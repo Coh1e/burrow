@@ -150,6 +150,8 @@ The action runs the entry from the locked version's package directory.
 Other versions can coexist. For example, if the user's `builder` command
 points to version 1, it still launches version 1 after this action.
 For an archive, the entry runs alongside the files shipped with it.
+For the duration of the action, its child process can find the locked direct
+and transitive dependencies by their executable names on `PATH`.
 
 ### Switch the user's default command
 
@@ -164,7 +166,9 @@ export default () => [
 ```
 
 Preview shows the locked version and the full user command path in the
-step's `entry` field. Apply creates or switches that entry. The path is
+step's `entry` field. It reports whether the entry is already selected, or
+defers the check if an earlier action could change it. Apply creates or
+switches that entry. The path is
 `builder.exe` on Windows or `builder` on Linux and macOS under
 `BRW_BIN_DIR`, which defaults to the user's `.local/bin` directory.
 Applying the same selection again keeps the entry pointed at that version.

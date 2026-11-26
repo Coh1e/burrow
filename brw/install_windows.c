@@ -28,6 +28,7 @@ struct installation {
     FILE *archive;
     bool source;
     bool executable;
+    bool scoped; /* Only the version directory is needed by a locked action. */
     wchar_t download_stage[PATH_CAP];
     HANDLE lock;
     wchar_t packages[PATH_CAP];
@@ -224,7 +225,7 @@ static bool directory(const wchar_t *path)
 static const char *package_roots(struct installation *install, bool create)
 {
     wchar_t data[PATH_CAP];
-    const char *error = brw_path(BRW_BIN, install->bin, false);
+    const char *error = install->scoped ? NULL : brw_path(BRW_BIN, install->bin, false);
     if (!error)
         error = brw_path(BRW_DATA, data, create);
     if (error)
@@ -247,9 +248,10 @@ static bool package_paths(struct installation *install)
 {
     if (!join(install->package_dir, install->packages, install->package->name) ||
         (install->package->version &&
-         !join(install->version, install->package_dir, install->package->version)) ||
-        !brw_command_entry_path(install->bin, install->package->name, install->shim))
+         !join(install->version, install->package_dir, install->package->version)))
         return false;
+    if (install->scoped) return true;
+    if (!brw_command_entry_path(install->bin, install->package->name, install->shim)) return false;
     wcscpy(install->sidecar, install->shim);
     return brw_append_shim_suffix(install->sidecar, wcslen(install->shim));
 }
@@ -739,19 +741,6 @@ static const char *stage_payload(struct installation *install)
     if (fclose(files) && !error)
         error = "version-record";
     return error;
-}
-
-static const char *extract(struct installation *install)
-{
-    const char *error = prepare(install);
-    if (error)
-        return error;
-    if (GetFileAttributesW(install->version) != INVALID_FILE_ATTRIBUTES ||
-        (install->action == DIGBY_INSTALL &&
-         (GetFileAttributesW(install->shim) != INVALID_FILE_ATTRIBUTES ||
-          GetFileAttributesW(install->sidecar) != INVALID_FILE_ATTRIBUTES)))
-        return "destination-exists";
-    return stage_payload(install);
 }
 
 static bool dots(const wchar_t *name)
@@ -1278,12 +1267,20 @@ static const char *preserve_active_records(struct installation *install)
     return NULL;
 }
 
+static const char *publish_retained_entry(struct installation *install, const wchar_t *entry,
+                                          const wchar_t *target, bool replace);
+
 static const char *publish(struct installation *install)
 {
     wchar_t target[PATH_CAP];
     if (!join(target, install->version, install->package->entry) ||
         brw_path(BRW_BIN, install->bin, true))
         return "entry-directory";
+    if (!*install->stage) {
+        if (install->source && InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
+            return "cancelled";
+        return publish_retained_entry(install, install->package->entry, target, false);
+    }
     struct launcher_image image;
     const char *error = stage_records(install, &image);
     if (error) return error;
@@ -1335,6 +1332,49 @@ static const char *activate(struct installation *install)
             return "dependency-not-installed";
     }
     return publish_retained_entry(install, entry, target, true);
+}
+
+static bool same_payload(const wchar_t *first, const wchar_t *second)
+{
+    struct brw_evidence expected, found;
+    return brw_payload_evidence(first, &expected) && brw_payload_evidence(second, &found) &&
+           !memcmp(&expected, &found, sizeof expected);
+}
+
+/* Existing directories can be exposed by install only when the installed
+   receipt, entry, dependencies, inventory and verified payload all agree. */
+static bool owned_inactive_version(const struct installation *install)
+{
+    wchar_t receipt[PATH_CAP], recorded[PATH_CAP], entry[ENTRY_CAP], dependencies[BRW_DEPENDENCIES_CAP];
+    return ordinary_path(install->version, true) &&
+           install_record_path(install, install->package->version, receipt) &&
+           read_record(receipt, recorded, PATH_CAP) && !_wcsicmp(recorded, install->version) &&
+           version_entry(install, install->package->version, entry) && !wcscmp(entry, install->package->entry) &&
+           read_dependencies(install, install->package->version, dependencies) &&
+           !_wcsicmp(dependencies, install->dependencies ? install->dependencies : L"");
+}
+
+static const char *extract(struct installation *install)
+{
+    const char *error = prepare(install);
+    if (error) return error;
+    if (install->action == DIGBY_INSTALL &&
+        (GetFileAttributesW(install->shim) != INVALID_FILE_ATTRIBUTES ||
+         GetFileAttributesW(install->sidecar) != INVALID_FILE_ATTRIBUTES))
+        return "destination-exists";
+    if (GetFileAttributesW(install->version) == INVALID_FILE_ATTRIBUTES)
+        return stage_payload(install);
+    if (install->action != DIGBY_INSTALL || !owned_inactive_version(install))
+        return "destination-exists";
+    error = stage_payload(install);
+    if (error) return error;
+    wchar_t files[PATH_CAP], inventory[PATH_CAP];
+    if (!join(files, install->stage, L".brw-files") || !join(inventory, install->version, L".brw-files") ||
+        !same_payload(files, inventory) || !same_payload(install->stage, install->version))
+        return "version-conflict";
+    if (!remove_stage(install->stage)) return "cleanup-stage";
+    install->stage[0] = 0;
+    return NULL;
 }
 
 static bool listed_path(FILE *files, const wchar_t *name, bool folder)
@@ -1576,11 +1616,8 @@ static const char *materialize_version(struct installation *install)
     const char *error = stage_payload(install);
     if (error) return error;
     if (GetFileAttributesW(install->version) != INVALID_FILE_ATTRIBUTES) {
-        struct brw_evidence expected, found;
         if (!ordinary_path(install->version, true) ||
-            !brw_payload_evidence(install->stage, &expected) ||
-            !brw_payload_evidence(install->version, &found) ||
-            memcmp(&expected, &found, sizeof expected))
+            !same_payload(install->stage, install->version))
             return "version-conflict";
         if (!remove_stage(install->stage)) return "cleanup-stage";
     } else {
@@ -1604,33 +1641,65 @@ static const char *record_locked_version(struct installation *install)
     return write_record(install->state, path, install->version, false) ? NULL : "install-record";
 }
 
-static const char *default_locked_version(struct installation *install, const wchar_t *target)
+static bool missing_path(const wchar_t *path)
 {
-    const char *error = brw_path(BRW_BIN, install->bin, true);
+    if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return false;
+    DWORD error = GetLastError();
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+}
+
+static const char *read_default(struct installation *install, bool *matches)
+{
+    *matches = false;
+    if (missing_path(install->shim) && missing_path(install->sidecar)) return NULL;
+    const char *error = read_active(install);
+    if (!error) *matches = !_wcsicmp(install->active_version, install->package->version) &&
+                           !_wcsicmp(install->active_entry, install->package->entry);
+    return error;
+}
+
+const char *brw_default_matches(const wchar_t *name, const wchar_t *version,
+                                const wchar_t *entry, bool *matches)
+{
+    if (!name || !brw_package_component(name) || !version || !brw_package_component(version) ||
+        !entry || !relative_path(entry) || !matches) return "invalid-package";
+    struct local_package package = {.name = name, .version = version, .entry = entry};
+    struct installation install = {.package = &package};
+    const char *error = package_roots(&install, false);
+    if (!error && !package_paths(&install)) error = "install-directory";
+    return error ? error : read_default(&install, matches);
+}
+
+static const char *default_locked_version(struct installation *install, const wchar_t *target,
+                                          bool *changed)
+{
+    bool matches;
+    const char *error = read_default(install, &matches);
+    if (error || matches) return error;
+    error = brw_path(BRW_BIN, install->bin, true);
     if (error || !ordinary_path(install->bin, true)) return "entry-directory";
-    bool replace = GetFileAttributesW(install->shim) != INVALID_FILE_ATTRIBUTES ||
-                   GetFileAttributesW(install->sidecar) != INVALID_FILE_ATTRIBUTES;
+    bool replace = *install->active_version != 0;
     if (replace) {
-        error = read_active(install);
-        if (error) return error;
-        if (!_wcsicmp(install->active_version, install->package->version) &&
-            !_wcsicmp(install->active_entry, install->package->entry)) return NULL;
         error = preserve_active_records(install);
         if (error) return error;
     }
     wchar_t entry[ENTRY_CAP];
     if (!version_entry(install, install->package->version, entry) ||
         wcscmp(entry, install->package->entry)) return "entry-conflict";
-    return publish_retained_entry(install, entry, target, replace);
+    error = publish_retained_entry(install, entry, target, replace);
+    if (!error) *changed = true;
+    return error;
 }
 
 const char *brw_use_locked_package(const struct local_package *package, bool executable,
-                                   const wchar_t *dependencies, bool make_default,
+                                   const wchar_t *dependencies, bool *default_changed,
                                    wchar_t target[BRW_PATH_CAP])
 {
     if (!package || !package->name || !package->version || !package->entry ||
         !package->archive || !package->digest || !target) return "invalid-package";
+    if (default_changed) *default_changed = false;
     struct installation install = {.package = package, .action = DIGBY_INSTALL, .source = true,
+                                   .scoped = !default_changed,
                                    .executable = executable, .dependencies = dependencies};
     const char *error = brw_validate_source_package(package, executable);
     if (!error && !brw_dependency_names(dependencies)) error = "dependency-state";
@@ -1644,7 +1713,7 @@ const char *brw_use_locked_package(const struct local_package *package, bool exe
     if (!error && InterlockedCompareExchange(&publish_state, PUBLISHING, RUNNING) == CANCELLED)
         error = "cancelled";
     if (!error) error = record_locked_version(&install);
-    if (!error && make_default) error = default_locked_version(&install, target);
+    if (!error && default_changed) error = default_locked_version(&install, target, default_changed);
     if (install.archive) fclose(install.archive);
     if (*install.stage && !remove_stage(install.stage) && !error) error = "cleanup-stage";
     if (install.lock && install.lock != INVALID_HANDLE_VALUE) CloseHandle(install.lock);
