@@ -88,8 +88,16 @@ static char *replace_memory(const struct bp_step *step, const char *input, size_
 
 const char *bp_validate_text_plan(const char *workspace, const struct bp_plan *plan, size_t *failed_step)
 {
-    if (!workspace || !plan || plan->count > BP_MAX_STEPS || !failed_step) return "invalid-plan";
-    for (size_t i = 0; i < plan->count; ++i) {
+    if (!plan) return "invalid-plan";
+    return bp_validate_text_range(workspace, plan, 0, plan->count, failed_step);
+}
+
+const char *bp_validate_text_range(const char *workspace, const struct bp_plan *plan,
+                                   size_t start, size_t end, size_t *failed_step)
+{
+    if (!workspace || !plan || plan->count > BP_MAX_STEPS || !failed_step ||
+        start > end || end > plan->count) return "invalid-plan";
+    for (size_t i = start; i < end; ++i) {
         const struct bp_step *step = &plan->steps[i];
         if (step->op == BP_COPY || step->op == BP_REPLACE) {
             const char *error = bp_validate_file_operands(step);
@@ -98,8 +106,8 @@ const char *bp_validate_text_plan(const char *workspace, const struct bp_plan *p
     }
     bool checked[BP_MAX_STEPS] = {false};
     const char *first_error = NULL;
-    size_t stop = plan->count;
-    for (size_t i = 0; i < stop; ++i) {
+    size_t stop = end;
+    for (size_t i = start; i < stop; ++i) {
         const struct bp_step *first = &plan->steps[i];
         if (checked[i] || (first->op != BP_COPY && first->op != BP_REPLACE)) continue;
         char *owned = NULL;

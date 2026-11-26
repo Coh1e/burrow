@@ -264,7 +264,7 @@ static const char *file_op(const char *workspace, const struct bp_step *s, bool 
     return error;
 }
 
-static const char *launch_command(const struct bp_step *s, const char *workspace, char *script)
+static const char *launch_command(const struct bp_step *s, const char *workspace, char *script, unsigned long *exit_code)
 {
     char *argv[BP_MAX_ARGS + 2] = {s->program};
     for (size_t i = 0; i < s->argc; ++i)
@@ -280,15 +280,18 @@ static const char *launch_command(const struct bp_step *s, const char *workspace
     int status;
     while (waitpid(child, &status, 0) < 0)
         if (errno != EINTR) return "child-wait";
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? NULL : "child-failed";
+    if (!WIFEXITED(status)) return "child-failed";
+    if (exit_code) *exit_code = (unsigned long)WEXITSTATUS(status);
+    return WEXITSTATUS(status) && !exit_code ? "child-failed" : NULL;
 }
 
-static const char *run_command(const char *workspace, const struct bp_step *s, bool apply)
+const char *bp_run_command(const char *workspace, const struct bp_step *s, bool apply,
+                           unsigned long *exit_code)
 {
     struct stat st;
     if (stat(workspace, &st) || !S_ISDIR(st.st_mode)) return "invalid-workspace";
     if (!apply) return NULL;
-    if (!s->payload) return launch_command(s, workspace, NULL);
+    if (!s->payload) return launch_command(s, workspace, NULL, exit_code);
     char dir[] = "/tmp/brw-command-XXXXXX", script[BP_DETAIL_CAP];
     if (!mkdtemp(dir)) return "payload-stage";
     const char *base = strrchr(s->payload->path, '/');
@@ -297,7 +300,7 @@ static const char *run_command(const char *workspace, const struct bp_step *s, b
     const char *error = "payload-stage";
     if (file) {
         bool written = fwrite(s->payload->data, 1, s->payload->size, file) == s->payload->size;
-        if (!fclose(file) && written) error = launch_command(s, workspace, script);
+        if (!fclose(file) && written) error = launch_command(s, workspace, script, exit_code);
         if (unlink(script) && !error) error = "cleanup-stage";
     }
     if (rmdir(dir) && !error) error = "cleanup-stage";
@@ -310,7 +313,7 @@ static const char *operation(const char *workspace, const struct bp_step *s, boo
     switch (s->op) {
     case BP_COPY:
     case BP_REPLACE: return file_op(workspace, s, apply);
-    case BP_RUN: return run_command(workspace, s, apply);
+    case BP_RUN: return bp_run_command(workspace, s, apply, NULL);
     case BP_ENV:
         if (!bp_env_name(s->name) || !s->value) return "invalid-environment";
         return apply && setenv(s->name, s->value, 1) ? "environment-write" : NULL;

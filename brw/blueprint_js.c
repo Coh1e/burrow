@@ -133,13 +133,19 @@ static char *field(JSContext *ctx, JSValueConst obj, const char *key)
     return copy;
 }
 
-static bool integer_field(JSContext *ctx, JSValueConst obj, const char *key, size_t *out)
+static bool unsigned_integer(JSContext *ctx, JSValueConst value, size_t *out)
 {
-    JSValue value = JS_GetPropertyStr(ctx, obj, key);
     double n;
     bool ok = JS_IsNumber(value) && !JS_ToFloat64(ctx, &n, value) &&
               n >= 0 && n <= UINT32_MAX && (double)(uint32_t)n == n;
     if (ok) *out = (size_t)n;
+    return ok;
+}
+
+static bool integer_field(JSContext *ctx, JSValueConst obj, const char *key, size_t *out)
+{
+    JSValue value = JS_GetPropertyStr(ctx, obj, key);
+    bool ok = unsigned_integer(ctx, value, out);
     JS_FreeValue(ctx, value);
     return ok;
 }
@@ -173,17 +179,27 @@ static void evaluation_error(JSContext *ctx, struct planner *p, JSValue exceptio
     fail(p, code, detail);
 }
 
+static void free_command(struct bp_step *s)
+{
+    for (size_t j = 0; j < s->argc; ++j) free(s->args[j]);
+    free(s->bindings);
+    free(s->args);
+    free(s->program);
+}
+
 void bp_plan_free(struct bp_plan *plan)
 {
     if (!plan) return;
     for (size_t i = 0; i < plan->count; ++i) {
         struct bp_step *s = &plan->steps[i];
-        for (size_t j = 0; j < s->argc; ++j) free(s->args[j]);
-        free(s->bindings);
+        free_command(s);
+        if (s->state) {
+            free_command(&s->state->check);
+            free_command(&s->state->change);
+            free(s->state);
+        }
         free(s->skip_platform);
         free(s->skip_op);
-        free(s->args);
-        free(s->program);
         free(s->source); free(s->path); free(s->from); free(s->to);
         free(s->name); free(s->version); free(s->entry); free(s->value);
     }
@@ -311,6 +327,39 @@ done:
     return error;
 }
 
+static const char *parse_state(JSContext *ctx, JSValueConst obj, struct planner *p,
+                               const char *module, struct bp_step *s)
+{
+    struct bp_state *state = s->state = calloc(1, sizeof *state);
+    if (!state) return "out-of-memory";
+    JSValue list = JS_GetPropertyStr(ctx, obj, "unmet");
+    size_t length;
+    bool valid = JS_IsArray(ctx, list) == 1 && integer_field(ctx, list, "length", &length) &&
+                 length <= 255;
+    for (size_t i = 0; valid && i < length; ++i) {
+        JSValue item = JS_GetPropertyUint32(ctx, list, (uint32_t)i);
+        size_t code;
+        valid = unsigned_integer(ctx, item, &code) && code && code <= 255 && !state->unmet[code];
+        JS_FreeValue(ctx, item);
+        if (valid) state->unmet[code] = 1;
+    }
+    JS_FreeValue(ctx, list);
+    if (!valid) return "invalid-unmet-codes";
+    for (unsigned i = 0; i < 2; ++i) {
+        struct bp_step *command = i ? &state->change : &state->check;
+        command->op = BP_RUN;
+        command->source = s->source;
+        JSValue value = JS_GetPropertyStr(ctx, obj, i ? "change" : "check");
+        const char *error = JS_IsObject(value) ? parse_command(ctx, value, p, module, command)
+                                               : "invalid-command";
+        JS_FreeValue(ctx, value);
+        if (error) return error;
+        for (size_t j = 0; j < command->argc; ++j)
+            if (command->bindings[j].writer) return "invalid-output-reference";
+    }
+    return NULL;
+}
+
 static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const char *op,
                      const struct bp_file *module, const char *location)
 {
@@ -342,6 +391,11 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }
     switch (s->op) {
+    case BP_STATE: {
+        const char *error = parse_state(ctx, obj, p, module->path, s);
+        if (error) fail(p, error, location);
+        break;
+    }
     case BP_RUN: {
         const char *error = parse_command(ctx, obj, p, module->path, s);
         if (error) fail(p, error, location);

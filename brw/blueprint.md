@@ -95,6 +95,23 @@ export default () => [
 
 Set a step or include's `platform` to `windows`, `linux`, `macos` or `any`. On a mismatch the plan reports the skipped position and reason. A selected command referencing a skipped producer fails during planning. Use an `optional` manifest field (for example, `optional<TAB>install`) for a capability only some platforms need. Selecting a step that needs an unavailable capability fails during planning.
 
+## External desired states
+
+Declare the `state` capability in the manifest to pair a read-only check with its change.
+
+```js
+export default () => [{
+  op: "state",
+  check: {program: "project-tool", args: ["check-config"]},
+  unmet: [3],
+  change: {program: "project-tool", args: ["configure"]}
+}];
+```
+
+Both commands use the same working directory, argument passing and verified script payloads as `run`. They can consume earlier named outputs. Declare output producers in an unconditional `run` step. Supply a list of distinct unmet exit codes from 1 through 255. Exit 0 means satisfied. Any other unmapped exit code or launch failure stops the blueprint at this step.
+
+Preview and dry-run may execute the check, so its author must ensure it is read-only. After an earlier action or planned change, preview reports `check-at-execution` with the reason `earlier-step-may-change-state`. Apply checks at the step's position, runs the change only for an unmet result, then repeats the check. A state counts as completed once confirmed satisfied. File operations following a state change validate their inputs against the resulting workspace. The report includes the state status and check exit code when available.
+
 ## Build and test
 
 On Windows, prepare the pinned sources with `scripts/fetch-deps.ps1`. The MinGW-w64 build enables Blueprints by default.
