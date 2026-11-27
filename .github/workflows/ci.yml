@@ -10,37 +10,96 @@ on:
   pull_request:
 
 jobs:
-  blueprint-apfs:
-    runs-on: macos-15
-    timeout-minutes: 20
+  digby:
+    name: Digby (${{ matrix.host }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, cc: gcc, cxx: g++, host: linux}
+          - {os: macos-15, cc: clang, cxx: clang++, host: macos}
+          - {os: windows-2025, cc: gcc, cxx: g++, host: windows}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     permissions:
       contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      CC: ${{ matrix.cc }}
+      CMAKE_GENERATOR: Ninja
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Build brw with the pinned Blueprint dependencies
-        id: build
+      - name: Prepare pinned sources
+        run: sh scripts/fetch-blueprint-deps.sh
+      - name: Prepare the Windows MinGW-w64 toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          sh scripts/fetch-blueprint-deps.sh
-          cmake -S brw -B .local/brw-blueprint -DBRW_BLUEPRINT=ON -DBUILD_TESTING=ON
+          $package = (Get-Content tests/devkit-acceptance/catalog)[1].Split("`t")
+          $archive = Join-Path $env:RUNNER_TEMP $package[3]
+          curl.exe -fL --retry 2 -o $archive "https://github.com/skeeto/w64devkit/releases/download/v$($package[1])/$($package[3])"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $package[4]) { throw 'devkit digest mismatch' }
+          7z x "-o$env:RUNNER_TEMP" -y $archive | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Join-Path $env:RUNNER_TEMP 'w64devkit/bin' >> $env:GITHUB_PATH
+      - name: Build brw without a C++ compiler
+        id: build
+        env:
+          CXX: nonexistent-brw-cxx
+        run: |
+          git rev-parse HEAD
+          uname -sm
+          "$CC" --version
+          cmake --version
+          git_option=()
+          if [[ "$RUNNER_OS" != Windows ]]; then git_option=(-DBRW_TEST_GIT=ON); fi
+          cmake -S brw -B .local/brw-blueprint -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            -DBRW_BLUEPRINT=ON -DBRW_ENABLE_CPP_MODULE=OFF "${git_option[@]}"
+          if grep -q '^CMAKE_CXX_COMPILER:' .local/brw-blueprint/CMakeCache.txt; then
+            echo "The C-only build selected a C++ compiler" >&2
+            exit 1
+          fi
           cmake --build .local/brw-blueprint --parallel
-          shasum -a 256 .local/brw-blueprint/brw
+      - name: Run native CTest contracts
+        run: |
+          # The acceptance checklist runs blueprint_cli and saves its transcript.
+          covered=blueprint_cli
+          for contract in digby_plan digby_literal blueprint_plan git_worktree; do
+            ctest --test-dir .local/brw-blueprint -R "^${contract}$" --no-tests=error --output-on-failure
+            covered="$covered|$contract"
+          done
+          ctest --test-dir .local/brw-blueprint -E "^($covered)$" --no-tests=ignore --output-on-failure
       - name: Run the shared Blueprint acceptance checklist
+        id: checklist
         run: python3 tests/blueprint-acceptance/run.py --build-dir .local/brw-blueprint --evidence .local/blueprint-evidence
-      - name: Run the remaining native core tests
-        run: ctest --test-dir .local/brw-blueprint -E '^blueprint_cli$' --no-tests=error --output-on-failure
-      - name: Keep the macOS acceptance reports
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      - name: Exercise the optional C++23 module from C
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: |
+          "$CXX" --version
+          cmake -S brw -B .local/digby-cpp -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            -DBRW_BLUEPRINT=OFF -DBRW_ENABLE_CPP_MODULE=ON
+          cmake --build .local/digby-cpp --parallel --target literal_test literal_offset_test
+          for contract in digby_literal digby_cpp_abi; do
+            ctest --test-dir .local/digby-cpp -R "^${contract}$" --no-tests=error --output-on-failure
+          done
+      - name: Keep the host acceptance reports
+        if: ${{ !cancelled() && (steps.checklist.outcome == 'success' || steps.checklist.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
         with:
-          name: blueprint-acceptance-macos
+          name: blueprint-acceptance-${{ matrix.host }}
           path: .local/blueprint-evidence
           if-no-files-found: error
       - name: Verify Blueprint on case-insensitive APFS
+        if: runner.os == 'macOS'
         run: sh brw/blueprint_apfs_test.sh APFS "$GITHUB_WORKSPACE/.local/brw-blueprint/brw"
       - name: Verify Blueprint on case-sensitive APFS
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && runner.os == 'macOS' && steps.build.outcome == 'success' }}
         run: sh brw/blueprint_apfs_test.sh APFSX "$GITHUB_WORKSPACE/.local/brw-blueprint/brw"
 
   build-and-test:

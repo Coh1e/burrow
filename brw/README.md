@@ -9,6 +9,55 @@ cmake --build .local/brw-build --parallel
 ctest --test-dir .local/brw-build --output-on-failure
 ~~~
 
+### Shared Digby tests
+
+The [CI workflow](../.github/workflows/ci.yml) builds the same C99 core on Windows
+with MinGW-w64, Linux with GCC and macOS with Apple Clang. The C-only build sets
+`CXX` to a nonexistent compiler and checks that CMake selected no C++ compiler.
+Enable `BRW_BLUEPRINT` and `BUILD_TESTING` on all hosts and `BRW_TEST_GIT` on
+POSIX to run the following CTest contracts.
+
+| CTest name | Observable behavior |
+| --- | --- |
+| `digby_plan`, `blueprint_plan` | Plan order, completed steps, failure location and missing capabilities before writes |
+| `digby_literal`, `blueprint_cli` | UTF-8 byte offsets, file copy and text replacement, archived tool and sibling contents, and preservation of the previous command when an archive lacks its declared entry |
+| `git_worktree` | Actual commits after clone and fast-forward, refusal of dirty or diverged worktrees |
+
+In a separate build directory, configure with `-DBRW_ENABLE_CPP_MODULE=ON`,
+CMake 3.25 or newer and a C++23 compiler. The optional module formats literal search offsets into
+caller-owned storage. Run `ctest --test-dir <build> -R "^digby_(literal|cpp_abi)$" --output-on-failure`
+after building `literal_test` and `literal_offset_test`. Both tests use C
+callers. They check search output, exact capacity, an undersized or null
+buffer, and the largest representable offset. [C ABI contract](literal_offset.h)
+
+#### Verification on native hosts
+
+The earlier Blueprint and Git worktree runs covered separate revisions.
+The Linux C ABI prototype predated the optional module in this build.
+[Blueprint checklist](../docs/blueprint-acceptance.md) · [Git worktree runs](https://github.com/Coh1e/burrow/issues/129#issuecomment-7149019218) · [Linux C ABI prototype](https://github.com/Coh1e/burrow/issues/115#issuecomment-7100338609)
+
+The 2026-11-27 CI run used source revision `ec11dd2` for both Release
+configurations. Each host built with Ninja, ran the shared contracts with
+the module disabled, then ran `digby_literal` and `digby_cpp_abi` with
+the module enabled in a fresh build directory. The job logs contain the
+configure, build and test commands. [CI run](https://github.com/Coh1e/burrow/actions/runs/45936327468)
+
+| Host | Native compilers | Execution record |
+| --- | --- | --- |
+| Windows Server 2025 x64 | MinGW-w64 GCC/G++ 16.2 | [Windows job](https://github.com/Coh1e/burrow/actions/runs/45936327468/job/140300264003) |
+| Ubuntu 24.04 x86-64 | GCC/G++ 13.3 | [Linux job](https://github.com/Coh1e/burrow/actions/runs/45936327468/job/140300263946) |
+| macOS 15 arm64 | Apple Clang 17 | [macOS job and APFS checks](https://github.com/Coh1e/burrow/actions/runs/45936327468/job/140300263973) |
+
+Two local runs supplement the hosted checks for the same source revision.
+On Windows 11 x64, MinGW-w64 GCC/G++ 16.2 built the Release Blueprint with
+the module enabled. `ctest --test-dir .local/133-win-on --output-on-failure`
+passed all 16 tests, including cross-volume recovery. [Windows transcript](../docs/history/digby-133/windows-ctest.txt)
+
+The hosted Ubuntu runner skipped the private ramfs mount and 9p case-metadata
+tests. On Ubuntu 26.04 under WSL2, both ran and passed with
+`ctest --test-dir .local/133-linux-c -V -R "^blueprint_cli_(ramfs|unknown_case)$"`.
+[WSL filesystem transcript](../docs/history/digby-133/wsl-filesystems.txt)
+
 ## Register and use a source
 
 For verified offline bundles that combine package installation with file, text and session environment operations, see [Offline Blueprints](blueprint.md).

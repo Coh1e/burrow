@@ -1,0 +1,32 @@
+UpdateCTestConfiguration  from :/mnt/d/Projects/burrow/.local/133-linux-c/DartConfiguration.tcl
+Parse Config file:/mnt/d/Projects/burrow/.local/133-linux-c/DartConfiguration.tcl
+Test project /mnt/d/Projects/burrow/.local/133-linux-c
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 5
+    Start 5: blueprint_cli_ramfs
+
+5: Test command: /usr/bin/sh "/mnt/d/Projects/burrow/brw/blueprint_ramfs_test.sh" "/usr/bin/cmake" "-DBRW=/mnt/d/Projects/burrow/.local/133-linux-c/brw" "-DBLUEPRINT_COPY_CASE_ONLY=ON" "-P" "/mnt/d/Projects/burrow/brw/blueprint_test.cmake"
+5: Working Directory: /mnt/d/Projects/burrow/.local/133-linux-c
+5: Test timeout computed to be: 1500
+5: -- Blueprint case fixture: case-insensitive=FALSE
+1/2 Test #5: blueprint_cli_ramfs ..............   Passed    0.10 sec
+test 6
+    Start 6: blueprint_cli_unknown_case
+
+6: Test command: /usr/bin/sh "/mnt/d/Projects/burrow/brw/blueprint_unknown_case_test.sh" "/usr/bin/cmake" "-DBRW=/mnt/d/Projects/burrow/.local/133-linux-c/brw" "-DBLUEPRINT_UNKNOWN_CASE_ONLY=ON" "-P" "/mnt/d/Projects/burrow/brw/blueprint_test.cmake"
+6: Working Directory: /mnt/d/Projects/burrow/.local/133-linux-c
+6: Test timeout computed to be: 1500
+2/2 Test #6: blueprint_cli_unknown_case .......   Passed    0.37 sec
+
+The following tests passed:
+	blueprint_cli_ramfs
+	blueprint_cli_unknown_case
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.60 sec

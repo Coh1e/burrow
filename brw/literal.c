@@ -1,5 +1,19 @@
 #include "literal.h"
 #include <string.h>
+#ifdef BRW_ENABLE_CPP_MODULE
+#include "literal_offset.h"
+#include <limits.h>
+#endif
+
+static int write_offset(FILE *output, size_t offset)
+{
+#ifdef BRW_ENABLE_CPP_MODULE
+    char text[sizeof offset * CHAR_BIT + 1];
+    return brw_format_offset(offset, text, sizeof text) || fprintf(output, "%s\n", text) < 0;
+#else
+    return fprintf(output, "%zu\n", offset) < 0;
+#endif
+}
 
 int brw_literal(FILE *output, const char *text, const char *needle,
                 const char *replacement, const size_t *expected)
@@ -14,7 +28,7 @@ int brw_literal(FILE *output, const char *text, const char *needle,
             size_t prefix = (size_t)(match - cursor);
             if (fwrite(cursor, 1, prefix, output) != prefix || fputs(replacement, output) < 0)
                 return 1;
-        } else if (fprintf(output, "%zu\n", (size_t)(match - text)) < 0) {
+        } else if (write_offset(output, (size_t)(match - text))) {
             return 1;
         }
         cursor = match + length;
