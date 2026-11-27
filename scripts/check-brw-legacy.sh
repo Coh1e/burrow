@@ -34,6 +34,7 @@ ctest --output-on-failure
 if grep -q '^CMAKE_CXX_COMPILER:' CMakeCache.txt; then exit 1; fi
 readelf -lW brw > segments
 readelf -dW brw > dynamic
+cat segments dynamic
 if grep INTERP segments || grep NEEDED dynamic; then exit 1; fi
 bytes=$(wc -c <brw)
 echo "$bytes bytes"

@@ -9,17 +9,22 @@
 
 enum { PATH_CAP = BRW_PATH_CAP, LINE_CAP = PATH_CAP + 512 };
 
-enum catalog_field {
-    PACKAGE_NAME, PACKAGE_VERSION, PAYLOAD_KIND, PAYLOAD_LOCATION, PAYLOAD_SHA256,
-    PACKAGE_ENTRY, PACKAGE_DEPENDS, CATALOG_FIELDS
+enum native_payload_kind { NATIVE_EXECUTABLE, NATIVE_ARCHIVE };
+
+struct native_package {
+    const wchar_t *source;
+    const wchar_t *name;
+    const wchar_t *version;
+    enum native_payload_kind kind;
+    const wchar_t *location;
+    const wchar_t *sha256;
+    const wchar_t *entry;
+    const wchar_t *depends_text;   /* Original spelling for CLI and package receipts. */
+    const wchar_t *dependencies;  /* NUL-separated direct names, ended by an empty name. */
 };
 
-struct catalog_row {
-    wchar_t text[LINE_CAP];
-    wchar_t *field[CATALOG_FIELDS];
-};
-
-typedef bool (*visit_package)(const wchar_t *source, const struct catalog_row *row, void *context);
+struct selection;
+static bool collect(struct selection *selection, const struct native_package *package, size_t row_chars);
 
 static bool path_join(wchar_t out[PATH_CAP], const wchar_t *base, const wchar_t *name)
 {
@@ -77,49 +82,65 @@ static int read_line(FILE *file, wchar_t line[LINE_CAP])
     return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes, -1, line, LINE_CAP) ? 1 : -1;
 }
 
-static bool parse_row(struct catalog_row *row)
+static wchar_t *take_field(wchar_t **cursor)
 {
-    wchar_t *field = row->text;
-    for (size_t i = 0; i < PACKAGE_DEPENDS; ++i) {
-        row->field[i] = field;
-        wchar_t *tab = wcschr(field, L'\t');
-        if (!tab && i + 1 < PACKAGE_DEPENDS)
-            return false;
-        if (tab)
-            *tab = 0;
-        if (!*field)
-            return false;
-        field = tab ? tab + 1 : field + wcslen(field);
-    }
-    row->field[PACKAGE_DEPENDS] = field;
-    struct local_package package = {row->field[PACKAGE_NAME], row->field[PACKAGE_VERSION], row->field[PAYLOAD_LOCATION],
-                                    row->field[PAYLOAD_SHA256], row->field[PACKAGE_ENTRY]};
-    const wchar_t *location = row->field[PAYLOAD_LOCATION];
-    bool executable = !wcscmp(row->field[PAYLOAD_KIND], L"exe");
-    return (executable || !wcscmp(row->field[PAYLOAD_KIND], L"archive")) &&
-           !brw_validate_source_package(&package, executable) &&
-           (brw_http_location(location) || brw_package_component(location)) &&
-           brw_dependency_names(field);
+    wchar_t *field = *cursor;
+    wchar_t *end = field + wcscspn(field, L"\t");
+    *cursor = *end ? end + 1 : end;
+    *end = 0;
+    return field;
+}
+
+/* The description borrows the source, decoded line and dependency buffer until the next read. */
+static bool parse_package(const wchar_t *source, wchar_t *line, struct native_package *package,
+                          wchar_t names[BRW_DEPENDENCIES_CAP + 1])
+{
+    package->source = source;
+    package->name = take_field(&line);
+    package->version = take_field(&line);
+    const wchar_t *kind = take_field(&line);
+    if (!wcscmp(kind, L"exe")) package->kind = NATIVE_EXECUTABLE;
+    else if (!wcscmp(kind, L"archive")) package->kind = NATIVE_ARCHIVE;
+    else return false;
+    package->location = take_field(&line);
+    package->sha256 = take_field(&line);
+    package->entry = take_field(&line);
+    package->depends_text = line;
+    struct local_package payload = {package->name, package->version, package->location,
+                                    package->sha256, package->entry};
+    if (brw_validate_source_package(&payload, package->kind == NATIVE_EXECUTABLE) ||
+        !(brw_http_location(package->location) || brw_package_component(package->location)) ||
+        !brw_dependency_names(line))
+        return false;
+    size_t length = wcslen(line);
+    wmemcpy(names, line, length + 1);
+    names[length + 1] = 0;
+    for (size_t i = 0; i < length; ++i)
+        if (names[i] == L',') names[i] = 0;
+    package->dependencies = names;
+    return true;
 }
 
 static const char *read_catalog(const wchar_t *path, const wchar_t *source,
-                                visit_package visit, void *context)
+                                struct selection *selection)
 {
     FILE *file = _wfsopen(path, L"rb", _SH_DENYWR);
     if (!file)
         return "catalog-open";
-    struct catalog_row row;
+    wchar_t line[LINE_CAP], names[BRW_DEPENDENCIES_CAP + 1];
     const char *error = NULL;
-    if (read_line(file, row.text) != 1 || wcscmp(row.text, L"brw-catalog-v1")) {
+    if (read_line(file, line) != 1 || wcscmp(line, L"brw-catalog-v1")) {
         error = "catalog-format";
     } else {
         int status;
-        while ((status = read_line(file, row.text)) == 1) {
-            if (!parse_row(&row)) {
+        while ((status = read_line(file, line)) == 1) {
+            size_t row_chars = wcslen(line) + 1;
+            struct native_package package;
+            if (!parse_package(source, line, &package, names)) {
                 error = "catalog-format";
                 break;
             }
-            if (visit && !visit(source, &row, context)) {
+            if (selection && !collect(selection, &package, row_chars)) {
                 error = "catalog-memory";
                 break;
             }
@@ -167,7 +188,7 @@ static const char *add_source(const wchar_t *name, const wchar_t *input, bool pr
     DWORD size = GetFullPathNameW(input, PATH_CAP, catalog, NULL);
     if (!size || size >= PATH_CAP)
         return "catalog-path";
-    const char *error = read_catalog(catalog, name, NULL, NULL);
+    const char *error = read_catalog(catalog, name, NULL);
     if (error || preview)
         return error;
     error = source_root(root, true);
@@ -200,9 +221,8 @@ struct match {
     struct match *next;
     struct match *install_next;
     enum { UNVISITED, VISITING, PLANNED } visit;
-    const wchar_t *source;
+    struct native_package package;
     const wchar_t *catalog;
-    const wchar_t *field[CATALOG_FIELDS];
     wchar_t strings[];
 };
 
@@ -227,20 +247,24 @@ static bool contains(const wchar_t *text, const wchar_t *query)
     return false;
 }
 
-static bool collect(const wchar_t *source, const struct catalog_row *row, void *context)
+static wchar_t *copy_string(wchar_t **storage, const wchar_t *value)
 {
-    struct selection *selection = context;
-    if (selection->search ? !contains(row->field[PACKAGE_NAME], selection->query)
-                          : _wcsicmp(row->field[PACKAGE_NAME], selection->query) != 0)
+    size_t count = wcslen(value) + 1;
+    wchar_t *copy = wmemcpy(*storage, value, count);
+    *storage += count;
+    return copy;
+}
+
+static bool collect(struct selection *selection, const struct native_package *package, size_t row_chars)
+{
+    if (selection->search ? !contains(package->name, selection->query)
+                          : _wcsicmp(package->name, selection->query) != 0)
         return true;
-    size_t source_length = wcslen(source) + 1;
-    size_t catalog_length = wcslen(selection->catalog) + 1;
-    size_t field_length[CATALOG_FIELDS];
-    size_t characters = source_length + catalog_length;
-    for (size_t i = 0; i < CATALOG_FIELDS; ++i) {
-        field_length[i] = wcslen(row->field[i]) + 1;
-        characters += field_length[i];
-    }
+    /* The original line covers the retained field strings, including their terminators.
+       Also retain the source, catalog path and the separately decoded dependency names. */
+    size_t names_chars = wcslen(package->depends_text) + 2;
+    size_t characters = row_chars + (wcslen(package->source) + 1) +
+                        (wcslen(selection->catalog) + 1) + names_chars;
     struct match *match = malloc(sizeof *match + characters * sizeof *match->strings);
     if (!match)
         return false;
@@ -248,14 +272,16 @@ static bool collect(const wchar_t *source, const struct catalog_row *row, void *
     match->install_next = NULL;
     match->visit = UNVISITED;
     wchar_t *next = match->strings;
-    match->source = wmemcpy(next, source, source_length);
-    next += source_length;
-    match->catalog = wmemcpy(next, selection->catalog, catalog_length);
-    next += catalog_length;
-    for (size_t i = 0; i < CATALOG_FIELDS; ++i) {
-        match->field[i] = wmemcpy(next, row->field[i], field_length[i]);
-        next += field_length[i];
-    }
+    match->catalog = copy_string(&next, selection->catalog);
+    match->package.source = copy_string(&next, package->source);
+    match->package.name = copy_string(&next, package->name);
+    match->package.version = copy_string(&next, package->version);
+    match->package.kind = package->kind;
+    match->package.location = copy_string(&next, package->location);
+    match->package.sha256 = copy_string(&next, package->sha256);
+    match->package.entry = copy_string(&next, package->entry);
+    match->package.depends_text = copy_string(&next, package->depends_text);
+    match->package.dependencies = wmemcpy(next, package->dependencies, names_chars);
     *selection->tail = match;
     selection->tail = &match->next;
     return true;
@@ -267,27 +293,30 @@ static void print_field(const char *key, const wchar_t *value)
     brw_json_string(value);
 }
 
-static void print_package(const struct match *match, bool json)
+static void print_package(const struct native_package *package, bool json)
 {
-    const wchar_t *const *field = match->field;
+    const wchar_t *kind = package->kind == NATIVE_EXECUTABLE ? L"exe" : L"archive";
     if (!json) {
-        printf("%ls/%ls %ls %ls %ls %ls %ls", match->source, field[PACKAGE_NAME], field[PACKAGE_VERSION],
-               field[PAYLOAD_KIND], field[PAYLOAD_LOCATION], field[PAYLOAD_SHA256], field[PACKAGE_ENTRY]);
-        if (*field[PACKAGE_DEPENDS])
-            printf(" depends=%ls", field[PACKAGE_DEPENDS]);
+        printf("%ls/%ls %ls %ls %ls %ls %ls", package->source, package->name, package->version,
+               kind, package->location, package->sha256, package->entry);
+        if (*package->depends_text)
+            printf(" depends=%ls", package->depends_text);
         putchar('\n');
         return;
     }
-    static const char *keys[] = {"name", "version", "kind", "location", "sha256", "entry"};
+    const struct { const char *key; const wchar_t *value; } fields[] = {
+        {"source", package->source}, {"name", package->name}, {"version", package->version},
+        {"kind", kind}, {"location", package->location}, {"sha256", package->sha256},
+        {"entry", package->entry}
+    };
     putchar('{');
-    print_field("source", match->source);
-    for (size_t i = 0; i < PACKAGE_DEPENDS; ++i) {
-        putchar(',');
-        print_field(keys[i], field[i]);
+    for (size_t i = 0; i < sizeof fields / sizeof *fields; ++i) {
+        if (i) putchar(',');
+        print_field(fields[i].key, fields[i].value);
     }
-    if (*field[PACKAGE_DEPENDS]) {
+    if (*package->depends_text) {
         putchar(',');
-        print_field("depends", field[PACKAGE_DEPENDS]);
+        print_field("depends", package->depends_text);
     }
     putchar('}');
 }
@@ -321,7 +350,7 @@ static const char *scan_sources(const wchar_t *root, struct selection *selection
                 if (error) break;
             } else if (selection) {
                 selection->catalog = catalog;
-                error = read_catalog(catalog, data.cFileName, collect, selection);
+                error = read_catalog(catalog, data.cFileName, selection);
                 selection->catalog = NULL;
                 if (error)
                     break;
@@ -356,8 +385,8 @@ static const char *scan_sources(const wchar_t *root, struct selection *selection
 static const char *run_match(const struct match *match, const struct digby_plan *plan, size_t *step)
 {
     wchar_t location[PATH_CAP], base[PATH_CAP];
-    const wchar_t *const *field = match->field;
-    const wchar_t *input = field[PAYLOAD_LOCATION];
+    const struct native_package *native = &match->package;
+    const wchar_t *input = native->location;
     if (brw_package_component(input)) {
         wcscpy(base, match->catalog);
         wchar_t *separator = wcsrchr(base, L'\\');
@@ -368,9 +397,9 @@ static const char *run_match(const struct match *match, const struct digby_plan 
             return "download-path";
         input = location;
     }
-    struct local_package package = {field[PACKAGE_NAME], field[PACKAGE_VERSION], input, field[PAYLOAD_SHA256], field[PACKAGE_ENTRY]};
-    const char *error = brw_install_with_dependencies(&package, !wcscmp(field[PAYLOAD_KIND], L"exe"),
-                                                       field[PACKAGE_DEPENDS], plan, step);
+    struct local_package package = {native->name, native->version, input, native->sha256, native->entry};
+    const char *error = brw_install_with_dependencies(&package, native->kind == NATIVE_EXECUTABLE,
+                                                       native->depends_text, plan, step);
     if (error)
         ++*step;
     return error;
@@ -386,6 +415,7 @@ static void free_matches(struct match *match)
 }
 
 struct dependency_plan {
+    struct digby_plan operations;
     const wchar_t *root;
     struct match *target;
     struct selection catalog;
@@ -400,14 +430,12 @@ static const char *resolve_dependencies(struct dependency_plan *plan, struct mat
     if (match->visit == PLANNED)
         return NULL;
     if (match->visit == VISITING || depth == 256) {
-        wcscpy(plan->problem, match->field[PACKAGE_NAME]);
+        wcscpy(plan->problem, match->package.name);
         return match->visit == VISITING ? "dependency-cycle" : "dependency-depth";
     }
     match->visit = VISITING;
-    const wchar_t *cursor = match->field[PACKAGE_DEPENDS];
-    wchar_t name[BRW_PACKAGE_NAME_CAP];
-    while (brw_next_dependency(&cursor, name)) {
-        if (!_wcsicmp(name, plan->target->field[PACKAGE_NAME])) {
+    for (const wchar_t *name = match->package.dependencies; *name; name += wcslen(name) + 1) {
+        if (!_wcsicmp(name, plan->target->package.name)) {
             wcscpy(plan->problem, name);
             return "dependency-cycle";
         }
@@ -423,7 +451,7 @@ static const char *resolve_dependencies(struct dependency_plan *plan, struct mat
         }
         struct match *dependency = NULL;
         for (struct match *item = plan->catalog.first; item; item = item->next) {
-            if (_wcsicmp(name, item->field[PACKAGE_NAME]))
+            if (_wcsicmp(name, item->package.name))
                 continue;
             if (dependency) {
                 wcscpy(plan->problem, name);
@@ -453,38 +481,20 @@ const char *brw_visit_catalogs(brw_catalog_visitor visitor, void *context)
     return error ? error : scan_sources(root, &selection, false);
 }
 
-static void reset_dependency_order(struct dependency_plan *plan)
-{
-    plan->order = NULL;
-    plan->tail = &plan->order;
-    plan->target->visit = UNVISITED;
-    plan->target->install_next = NULL;
-    for (struct match *item = plan->catalog.first; item; item = item->next) {
-        item->visit = UNVISITED;
-        item->install_next = NULL;
-    }
-}
-
 static int install_match(const wchar_t *root, struct match *target, bool json, bool preview)
 {
-    struct dependency_plan plan = {0};
-    plan.root = root;
-    plan.target = target;
+    struct dependency_plan plan = {.root = root, .target = target, .operations = digby_source_install_plan()};
     plan.tail = &plan.order;
-    const char *error = resolve_dependencies(&plan, target, 0);
-    bool locked = false;
+    /* An install resolves the current package order while holding the mutation lock. */
+    const char *error = preview ? NULL : brw_begin_package_changes();
+    bool locked = !preview && !error;
+    if (!error)
+        error = resolve_dependencies(&plan, target, 0);
     size_t step = 0;
-    const struct digby_plan operations = digby_source_install_plan();
-    bool has_dependencies = *target->field[PACKAGE_DEPENDS] != 0;
+    bool has_dependencies = *target->package.dependencies != 0;
     if (!error && !preview) {
-        error = brw_begin_package_changes();
-        locked = !error;
-        if (!error && has_dependencies) {
-            reset_dependency_order(&plan);
-            error = resolve_dependencies(&plan, target, 0);
-        }
         /* An existing main package must not trigger writes to its dependencies. */
-        if (!error && has_dependencies && brw_is_installed(target->field[PACKAGE_NAME]))
+        if (has_dependencies && brw_is_installed(target->package.name))
             error = "destination-exists";
         bool cancellable = false;
         if (!error) {
@@ -493,9 +503,9 @@ static int install_match(const wchar_t *root, struct match *target, bool json, b
                 error = "cancel-handler";
         }
         for (struct match *item = plan.order; !error && item; item = item->install_next) {
-            error = run_match(item, &operations, &step);
+            error = run_match(item, &plan.operations, &step);
             if (error)
-                wcscpy(plan.problem, item->field[PACKAGE_NAME]);
+                wcscpy(plan.problem, item->package.name);
         }
         if (cancellable)
             brw_end_source_install();
@@ -504,30 +514,31 @@ static int install_match(const wchar_t *root, struct match *target, bool json, b
         brw_end_package_changes();
     if (!has_dependencies || (!error && !preview)) {
         free_matches(plan.catalog.first);
-        return brw_report_plan(json, preview, "installed", &operations, error, step);
+        return brw_report_plan(json, preview, "installed", &plan.operations, error, step);
     }
     if (error) {
         if (json) {
             printf("{\"status\":\"failed\",\"error\":\"%s\",\"step\":%zu,\"package\":", error, step);
-            brw_json_string(*plan.problem ? plan.problem : target->field[PACKAGE_NAME]);
+            brw_json_string(*plan.problem ? plan.problem : target->package.name);
             puts("}");
         } else {
             fprintf(stderr, "brw: %s (%ls)\n", error,
-                    *plan.problem ? plan.problem : target->field[PACKAGE_NAME]);
+                    *plan.problem ? plan.problem : target->package.name);
         }
     } else if (json) {
-        fputs("{\"status\":\"planned\",\"operations\":[\"download\",\"verify\",\"extract\",\"publish\"],"
-              "\"pending\":[\"payload-availability\",\"sha256-verification\"],\"packages\":[", stdout);
+        fputs("{\"status\":\"planned\",", stdout);
+        brw_print_plan_operations(&plan.operations, true, true);
+        fputs(",\"packages\":[", stdout);
         for (struct match *item = plan.order; item; item = item->install_next) {
             if (item != plan.order)
                 putchar(',');
-            brw_json_string(item->field[PACKAGE_NAME]);
+            brw_json_string(item->package.name);
         }
         puts("]}");
     } else {
         for (struct match *item = plan.order; item; item = item->install_next)
-            printf("Install %ls\n", item->field[PACKAGE_NAME]);
-        brw_report_plan(false, true, "installed", &operations, NULL, 0);
+            printf("Install %ls\n", item->package.name);
+        brw_print_plan_operations(&plan.operations, false, true);
     }
     free_matches(plan.catalog.first);
     return error ? 1 : 0;
@@ -569,7 +580,7 @@ static int package_query(const wchar_t *verb, const wchar_t *root, const wchar_t
         for (struct match *match = first; match; match = match->next) {
             if (json && match != first)
                 putchar(',');
-            print_package(match, json);
+            print_package(&match->package, json);
         }
         if (json)
             puts(selection.search ? "]}" : "}");

@@ -30,6 +30,7 @@ $key = 'HKCU\Software\Burrow\Settings'
 function Run([int] $code, [string[]] $arguments) {
     $output = & $Brw @arguments --json
     if ($LASTEXITCODE -ne $code) { throw "Unexpected exit $LASTEXITCODE for $arguments ($output)" }
+    Write-Host "brw $($arguments[0]) exit=$code $output"
     if ($output) { $output | ConvertFrom-Json }
 }
 function Check($condition, [string] $why) { if (!$condition) { throw $why } }
@@ -67,6 +68,7 @@ if ($UserRegistry) {
     try {
         Check ($actual.GetValueKind('Enabled') -eq 'DWord' -and $actual.GetValue('Enabled') -eq -1) 'Raw DWORD differs'
         Check ($actual.GetValueKind('Profile') -eq 'String' -and $actual.GetValue('Profile') -ceq 'one') 'Raw string differs'
+        Write-Host "HKCU test subtree: Enabled=$($actual.GetValue('Enabled')) Profile=$($actual.GetValue('Profile'))"
     } finally { $actual.Close() }
 }
 Check ((Run 0 @('registry','get',$key,'Enabled','REG_DWORD')).value -eq 4294967295) 'DWORD did not round-trip'
@@ -112,6 +114,7 @@ $child = @('--',$env:ComSpec,'/d','/c','set BRW_SETTINGS_TEST')
 $output = & $Brw env session set BRW_SETTINGS_TEST child @child
 Check ($LASTEXITCODE -eq 0 -and $output -ceq 'BRW_SETTINGS_TEST=child') 'Child did not inherit session value'
 Check ($env:BRW_SETTINGS_TEST -ceq 'parent') 'Parent inherited session change'
+Write-Host "session parent=$env:BRW_SETTINGS_TEST child=$output"
 $marker = Join-Path $root 'child-ran'
 $env:BRW_CHILD_MARKER = $marker
 $markScript = Join-Path $root 'mark.ps1'

@@ -66,6 +66,8 @@ const char *brw_use_locked_package(const struct local_package *package, bool exe
 const char *brw_check_locked_package(const struct local_package *package, bool executable,
                                      const wchar_t *dependencies, const wchar_t *child_path,
                                      bool check_default, bool *matches);
+/* Emits the JSON fields or text lines for the supplied plan to stdout. */
+void brw_print_plan_operations(const struct digby_plan *plan, bool json, bool preview);
 int brw_report_plan(bool json, bool preview, const char *status,
                     const struct digby_plan *plan, const char *error, size_t step);
 

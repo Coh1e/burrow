@@ -114,6 +114,7 @@ Assert ($again.Code -ne 0 -and $again.Result.error -eq 'destination-exists') 'Ex
 function Invoke-Lifecycle([string[]] $arguments) {
     $output = & $Brw @arguments --json
     $code = $LASTEXITCODE
+    Write-Host "brw $($arguments[0]) $($arguments[1]) exit=$code $output"
     [pscustomobject]@{ Code = $code; Result = ($output | ConvertFrom-Json) }
 }
 
@@ -124,6 +125,7 @@ function Assert-Active([string] $entry) {
     $target = [Text.Encoding]::Unicode.GetString($bytes).TrimEnd([char]0)
     Assert ($target -eq (Join-Path $packages "local-tool/$entry")) 'Unexpected active version or entry'
     Assert ((Get-Content -LiteralPath $data) -eq 'keep this') 'Persistent data changed'
+    Write-Host "active entry=$entry childExit=37 output=$output persistent=keep this"
 }
 
 $dataDir = Join-Path $profile '.local/share/burrow/persist/local-tool'

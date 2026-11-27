@@ -1,5 +1,5 @@
 # Red when: planning writes, dependencies run out of order, or a required package can be removed.
-param([string] $Brw, [string] $Fixture, [string] $Scratch)
+param([string] $Brw, [string] $Fixture, [string] $Scratch, [string] $RecordingBrw)
 $ErrorActionPreference = 'Stop'
 
 function Invoke-Brw([int] $Expected, [string[]] $Arguments) {
@@ -10,6 +10,46 @@ function Invoke-Brw([int] $Expected, [string[]] $Arguments) {
 }
 function Assert($condition, [string] $message) {
     if (!$condition) { throw $message }
+}
+
+function Get-InstallPreview([string] $Name) {
+    $plan = Invoke-Brw 0 @('install', $Name, '--dry-run')
+    $lines = & $Brw install $Name --dry-run
+    Assert ($LASTEXITCODE -eq 0) "Text preview failed for $Name"
+    $expected = @(
+        foreach ($package in $plan.packages) { "Install $package" }
+        $plan.operations
+        'Pending checks include payload availability and SHA-256 verification.'
+    )
+    Assert (($lines -join ';') -ceq ($expected -join ';')) "Text and JSON differ for $Name"
+    Assert (($plan.pending -join ',') -ceq 'payload-availability,sha256-verification') 'Missing pending checks'
+    return $plan
+}
+
+function Test-InstallTrace([string] $Name, $Plan, [int] $ExpectedExit = 0) {
+    $packages = if ($Plan.packages) { $Plan.packages } else { @($Name) }
+    $expected = foreach ($package in $packages) {
+        foreach ($operation in $Plan.operations) { "$package $operation" }
+    }
+    $env:BRW_TEST_INSTALL_TRACE = Join-Path $root ([guid]::NewGuid().ToString('N') + '.trace')
+    try {
+        $output = & $RecordingBrw install $Name --json
+        Assert ($LASTEXITCODE -eq $ExpectedExit) "Unexpected install exit for $Name ($LASTEXITCODE)"
+        $report = $output | ConvertFrom-Json
+        if ($ExpectedExit) {
+            Assert ($report.error -eq 'digest-mismatch' -and $report.package -eq 'broken' -and
+                $report.step -eq 2) 'Wrong verification failure or package-local step'
+            $failure = [array]::IndexOf($expected, 'broken verify')
+            Assert ($failure -ge 0) 'The failing package and operation were absent from the preview'
+            $expected = $expected[0..$failure]
+        }
+        Assert (Test-Path -LiteralPath $env:BRW_TEST_INSTALL_TRACE) 'No backend steps were observed'
+        $actual = Get-Content -LiteralPath $env:BRW_TEST_INSTALL_TRACE
+        Assert (($actual -join ';') -ceq ($expected -join ';')) "Execution differed from preview for ${Name}: $actual"
+        Write-Host "Backend steps for $Name (exit $ExpectedExit): $($actual -join '; ')"
+    } finally {
+        Remove-Item Env:BRW_TEST_INSTALL_TRACE
+    }
 }
 
 $root = Join-Path $Scratch ([guid]::NewGuid().ToString('N').Substring(0, 12))
@@ -49,20 +89,43 @@ try {
     $ambiguous = Invoke-Brw 1 @('install', 'app')
     Assert ($ambiguous.error -eq 'dependency-ambiguous' -and $ambiguous.package -eq 'base') 'Ambiguous dependency was accepted'
     Invoke-Brw 0 @('source', 'remove', 'other') | Out-Null
-    $preview = Invoke-Brw 0 @('install', 'app', '--dry-run')
+    $listener = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    try {
+        $port = $listener.LocalEndpoint.Port
+        $rows -replace '^(base\s+1\s+exe\s+)payload\.exe', ('${1}http://127.0.0.1:' + $port + '/base') |
+            Set-Content -LiteralPath $catalog -Encoding ASCII
+        $catalogBefore = [IO.File]::ReadAllText($catalog)
+        Assert ((Invoke-Brw 0 @('show', 'base')).package.location -eq "http://127.0.0.1:$port/base") 'HTTP dependency fixture missing'
+        $preview = Get-InstallPreview 'app'
+        Assert (!$listener.Pending()) 'Preview contacted a dependency payload server'
+        Assert ([IO.File]::ReadAllText($catalog) -ceq $catalogBefore) 'Preview modified the catalog'
+        Assert (!(Test-Path (Join-Path $root '.cache'))) 'Preview wrote a cache'
+    } finally {
+        $listener.Stop()
+    }
+    $rows | Set-Content -LiteralPath $catalog -Encoding ASCII
     Assert (($preview.packages -join ',') -eq 'base,mid,app') 'Dependency order or deduplication failed'
     Assert (!(Test-Path (Join-Path $root '.local'))) 'Planning modified the installation root'
 
-    Invoke-Brw 0 @('install', 'base') | Out-Null
-    $preview = Invoke-Brw 0 @('install', 'app', '--dry-run')
+    $single = Get-InstallPreview 'base'
+    Test-InstallTrace 'base' $single
+    $preview = Get-InstallPreview 'app'
     Assert (($preview.packages -join ',') -eq 'mid,app') 'Installed dependency was not reused'
-    Invoke-Brw 0 @('install', 'app') | Out-Null
+    Test-InstallTrace 'app' $preview
+    $chain = Get-InstallPreview 'chain'
+    Assert (($chain.packages -join ',') -eq 'extra,broken,later,chain') 'Dependency plan lost its failure prefix or suffix'
+    Test-InstallTrace 'chain' $chain 1
     $failed = Invoke-Brw 1 @('install', 'broken')
     Assert ($failed.error -eq 'digest-mismatch' -and $failed.package -eq 'broken') 'Main package failure was not attributed'
-    $failed = Invoke-Brw 1 @('install', 'chain')
-    Assert ($failed.error -eq 'digest-mismatch' -and $failed.package -eq 'broken') 'Dependency failure was not attributed'
     $state = Invoke-Brw 0 @('list')
     Assert ((($state.packages.name | Sort-Object) -join ',') -eq 'app,base,extra,mid') 'Committed dependency was lost'
+    $beforeChange = Get-InstallPreview 'chain'
+    Assert (($beforeChange.packages -join ',') -ceq 'broken,later,chain') 'Unexpected original dependency set'
+    $rows -replace 'broken,later$', 'later' | Set-Content -LiteralPath $catalog -Encoding ASCII
+    Invoke-Brw 0 @('install', 'chain') | Out-Null
+    $state = Invoke-Brw 0 @('list')
+    Assert ((($state.packages.name | Sort-Object) -join ',') -ceq 'app,base,chain,extra,later,mid') 'Execution reused stale dependencies'
     Invoke-Brw 0 @('source', 'remove', 'fixture') | Out-Null
     $tar = Join-Path $env:SystemRoot 'System32/tar.exe'
     $archive = Join-Path $root 'update.tar'
@@ -80,7 +143,7 @@ try {
     $entry = Join-Path $root '.local/bin/mid.exe'
     & $entry protected
     Assert ($LASTEXITCODE -eq 37) 'Protected entry was changed'
-    foreach ($name in 'app', 'mid', 'base', 'extra') {
+    foreach ($name in 'app', 'mid', 'base', 'extra', 'chain', 'later') {
         Invoke-Brw 0 @('uninstall', $name) | Out-Null
     }
     Assert (!(Invoke-Brw 0 @('list')).packages.Count) 'Uninstall left packages behind'
