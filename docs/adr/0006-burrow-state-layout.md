@@ -1,5 +1,7 @@
 # ADR 0006：Burrow 私有状态放在 `%USERPROFILE%\.burrow`
 
+> 历史决定，适用于已退役的 Scoop 兼容版 `burrow.exe`。
+
 状态：已接受（2026-10-31 实现并验证，见 issue #89）
 日期：2026-10-30
 

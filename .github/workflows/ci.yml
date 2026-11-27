@@ -1,9 +1,5 @@
 name: CI
 
-# The local guardrails (pre-commit hook, scripts/build.ps1) only run when someone remembers to run
-# them. This workflow is the net that does not depend on memory: every push and pull request builds
-# the project and runs the full CTest suite on a clean machine.
-
 on:
   push:
     branches: ['**']
@@ -58,8 +54,8 @@ jobs:
           cmake --version
           git_option=()
           if [[ "$RUNNER_OS" != Windows ]]; then git_option=(-DBRW_TEST_GIT=ON); fi
-          cmake -S brw -B .local/brw-blueprint -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
-            -DBRW_BLUEPRINT=ON -DBRW_ENABLE_CPP_MODULE=OFF "${git_option[@]}"
+          cmake -S . -B .local/brw-blueprint -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            -DBRW_ENABLE_CPP_MODULE=OFF "${git_option[@]}"
           if grep -q '^CMAKE_CXX_COMPILER:' .local/brw-blueprint/CMakeCache.txt; then
             echo "The C-only build selected a C++ compiler" >&2
             exit 1
@@ -101,49 +97,27 @@ jobs:
       - name: Verify Blueprint on case-sensitive APFS
         if: ${{ !cancelled() && runner.os == 'macOS' && steps.build.outcome == 'success' }}
         run: sh brw/blueprint_apfs_test.sh APFSX "$GITHUB_WORKSPACE/.local/brw-blueprint/brw"
+      - name: Build and test the minimal Linux CLI
+        if: runner.os == 'Linux'
+        env:
+          CXX: nonexistent-brw-cxx
+        run: |
+          cmake -S . -B .local/brw-minimal -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_TESTING=ON -DBRW_MINIMAL=ON
+          cmake --build .local/brw-minimal --parallel
+          ctest --test-dir .local/brw-minimal --no-tests=error --output-on-failure
 
-  build-and-test:
-    runs-on: windows-latest
-    timeout-minutes: 45
+  repository-checks:
+    name: Source hygiene and documentation
+    runs-on: windows-2025
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-
-      - name: Fetch pinned dependencies
-        shell: pwsh
-        run: ./scripts/fetch-deps.ps1
-
-      - name: Source hygiene
-        shell: pwsh
+        with:
+          persist-credentials: false
+      - name: Check source hygiene
+        shell: powershell
         run: ./scripts/check-source-hygiene.ps1
-
-      # Facts that the tests depend on. Printed before the suite so a failure can be read against the
-      # machine it happened on instead of guessed at.
-      - name: Environment facts
-        shell: pwsh
-        run: |
-          Write-Output "corpus jq sha256: $((Get-FileHash tests/corpus/main/jq.json -Algorithm SHA256).Hash.ToLower())"
-          $bytes = [IO.File]::ReadAllBytes('tests/corpus/main/jq.json')
-          $text = [Text.Encoding]::UTF8.GetString($bytes)
-          Write-Output "corpus jq crlf=$(([regex]::Matches($text,"`r`n")).Count) lf=$(([regex]::Matches($text,"(?<!`r)`n")).Count) size=$($bytes.Length)"
-          Write-Output "autocrlf: $(git config --get core.autocrlf)"
-          Write-Output "gitattributes: $(git check-attr text -- tests/corpus/main/jq.json)"
-          Write-Output "JAVA_HOME=$env:JAVA_HOME"
-          Write-Output "python: $((Get-Command python.exe -ErrorAction SilentlyContinue).Source)"
-          Write-Output "tar: $((Get-Command tar.exe -ErrorAction SilentlyContinue).Source)"
-          Write-Output "cmake: $(cmake --version | Select-Object -First 1)"
-          Write-Output "ninja: $(ninja --version)"
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $toolset = Get-ChildItem (Join-Path $vs 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          Write-Output "msvc toolset: $($toolset.Name)"
-
-      - name: Configure, build and test
-        shell: pwsh
-        run: ./scripts/build.ps1 -Action all
-
-      # The installed footprint is the size metric (docs/adr/0005). Run it after the suite so a
-      # regression is reported next to a green test run, and fail the job when it grows past the
-      # limit recorded in the script.
-      - name: Check installed footprint
-        shell: pwsh
-        run: ./scripts/check-size.ps1
+      - name: Check documentation links
+        shell: powershell
+        run: ./scripts/check-doc-links.ps1

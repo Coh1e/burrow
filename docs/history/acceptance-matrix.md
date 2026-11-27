@@ -1,6 +1,6 @@
 # 写命令验收矩阵
 
-> **状态（2026-10-30）**：本页是历史验收快照，命令面、版本与测试数量已继续推进；当前状态与证据入口见 [README](../../README.md)。
+> **状态（2026-10-30）**：本页是已退役的 Scoop 兼容版验收快照。历史命令与配套脚本见[退役前的源码树](https://github.com/Coh1e/burrow/tree/79520b2355d4f2f4666a702365d833168f13d920)。
 >
 
 2026-10-28 建立。用于**复核**写命令的输出与行为：Scoop 与 Burrow 的逐行对照、缓存自愈与离线复用、六类命令的可复现证据。每条结论都绑定命令、退出码与证据位置，并标明是**本轮运行**、**历史结果**还是**未运行**。
@@ -21,7 +21,7 @@
 
 ## 与 Scoop 的逐行对照
 
-Scoop 侧的原文来自 [Scoop 0.6.0 写命令输出实录](../research/scoop-cli-output.md)（历史结果，取自交互终端）；本轮另用 `scripts/scoop-baseline.ps1` 复采了一次，`*>&1` 能拿到 `Write-Host` 的进度行（`Downloading`、`Checking hash`、`Extracting` 都在），产物在 `.local/scoop-baseline/transcript.txt`，所以该列可由脚本重建。Burrow 侧为本轮运行。
+Scoop 侧的原文来自 [Scoop 0.6.0 写命令输出实录](https://github.com/Coh1e/burrow/blob/79520b2355d4f2f4666a702365d833168f13d920/docs/research/scoop-cli-output.md)（历史结果，取自交互终端）；本轮另用 `scripts/scoop-baseline.ps1` 复采了一次，`*>&1` 能拿到 `Write-Host` 的进度行（`Downloading`、`Checking hash`、`Extracting` 都在），产物在 `.local/scoop-baseline/transcript.txt`，所以该列可由脚本重建。Burrow 侧为本轮运行。
 
 | 行 | Scoop（历史） | Burrow（本轮） | 对齐 |
 | --- | --- | --- | --- |

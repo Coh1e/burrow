@@ -1,5 +1,7 @@
 # 以 Windows PowerShell 5.1 为脚本与测试基线
 
+> Windows PowerShell 5.1 仍是原生 Windows 脚本的基线。本页提到的兼容版测试、辅助脚本和数量记录了当时的迁移。
+
 测试与构建脚本长期以 PowerShell 7 为参照；[#91](https://github.com/Coh1e/burrow/issues/91) 把 79 个 CTest 迁移到 Windows PowerShell 5.1。5.1 是每台受支持 Windows 自带的版本，但语义不同：原生命令写 stderr 在 `$ErrorActionPreference='Stop'` 下会成为终止错误；`-AsHashtable`、`ForEach-Object -Parallel`、`[IO.Compression.ZipArchive]`、长路径等需要额外处理。2026-10-31 人类决定“必须迁移 5.1”。
 
 因此基线固定为：Windows PowerShell 5.1 是脚本与测试的必需运行器；CI 通过 `powershell.exe` 跑完整套件；`pwsh 7` 仍可用，但不是验收门禁。所有 `scripts/*.ps1` 与 `tests/*.ps1` 必须能在 5.1 解析并运行；只依赖 PS7/.NET Core 的手动工具（`acceptance-matrix.ps1`、`perf-compare.ps1`、部分 `real-scoop-*`）要么移植，要么在文档中明确标注“仅 pwsh 7”，且不得进入 CI 门禁。
