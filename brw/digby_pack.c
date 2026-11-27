@@ -98,8 +98,8 @@ static const char *pack(const struct digby_pack_plan *plan, bool preview,
     if (!workspace) return "unsafe-parent";
     struct digby_pack_stage *stage = NULL;
     FILE *stream = NULL;
-    if (!preview) error = digby_pack_begin(plan->workspace, plan->destination, &stage, &stream);
-    else if (!defer_destination) error = digby_archive_destination(plan->workspace, plan->destination);
+    if (!preview) error = digby_pack_begin(workspace, plan->destination, &stage, &stream);
+    else if (!defer_destination) error = digby_archive_destination(workspace, plan->destination);
     if (!error) error = write_archive(plan, defer_inputs, workspace, stream);
     bp_directory_close(workspace);
     if (stage) {

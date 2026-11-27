@@ -7,6 +7,9 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+/* Private to the Windows file backends. */
+struct bp_directory { HANDLE handle; };
+
 static wchar_t *wide(const char *s)
 {
     int n = s ? MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0) : 0;

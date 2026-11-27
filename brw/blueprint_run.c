@@ -175,12 +175,12 @@ static const char *check_state(const struct bp_lock *lock, const char *workspace
 
 /* Compare a producer's path to a candidate consumer, including descendants.
    For ASCII case aliases consult the real workspace before assuming a match. */
-enum path_relation { PATH_UNRELATED, PATH_EQUAL, PATH_BELOW };
+enum path_relation { PATH_NO_KNOWN_MATCH, PATH_EQUAL, PATH_BELOW };
 
 static const char *path_relation(const char *workspace, const char *producer, const char *path,
-                                 enum path_relation *relation)
+                                 bool parent_may_change, enum path_relation *relation)
 {
-    *relation = PATH_UNRELATED;
+    *relation = PATH_NO_KNOWN_MATCH;
     size_t n = strlen(producer), length = strlen(path);
     if (n > length || (n < length && path[n] != '/') || !brw_same_ascii(producer, path, n)) return NULL;
     if (strncmp(producer, path, n)) {
@@ -189,6 +189,9 @@ static const char *path_relation(const char *workspace, const char *producer, co
         prefix[n] = 0;
         enum bp_output_match match;
         const char *error = bp_compare_output_case(workspace, producer, prefix, &match);
+        /* The external command may create this parent. The pack will resolve
+           the spelling against its actual directory when it runs. */
+        if (parent_may_change && error && !strcmp(error, "inspect-output")) return NULL;
         if (error) return error;
         if (match == BP_UNKNOWN_CASE) return "path-case-unknown";
         if (match == BP_DISTINCT_OUTPUTS) return NULL;
@@ -200,22 +203,26 @@ static const char *path_relation(const char *workspace, const char *producer, co
 /* An unpack can supply an output directory; a pack can supply a file.
    Exact output collisions can already be diagnosed before publication. */
 static const char *archive_dependency(const char *workspace, const struct bp_plan *plan,
-                                      size_t index, size_t *ready_after)
+                                      size_t pack_known_from, size_t index, size_t *ready_after)
 {
     const struct bp_step *step = &plan->steps[index];
     *ready_after = 0;
     bool archive = step->op == BP_UNPACK || step->op == BP_PACK;
     if (!archive && step->op != BP_COPY && step->op != BP_REPLACE) return NULL;
     if (!bp_safe_path(step->path)) return "unsafe-output-path";
-    for (size_t i = 0; i < index; ++i) {
+    size_t start = step->op == BP_PACK ? pack_known_from : 0;
+    for (size_t i = start; i < index; ++i) {
         const struct bp_step *prior = &plan->steps[i];
         if (prior->op != BP_UNPACK && prior->op != BP_PACK &&
             !(archive && (prior->op == BP_COPY || prior->op == BP_REPLACE))) continue;
         enum path_relation relation;
-        const char *error = path_relation(workspace, prior->path, step->path, &relation);
+        const char *error = path_relation(workspace, prior->path, step->path,
+                                          step->op == BP_PACK && pack_known_from != 0, &relation);
         if (error) return error;
-        if (relation == PATH_UNRELATED) continue;
-        if ((relation == PATH_BELOW && prior->op == BP_UNPACK) ||
+        if (relation == PATH_NO_KNOWN_MATCH) continue;
+        if (prior->op == BP_PACK && i < pack_known_from)
+            *ready_after = pack_known_from;
+        else if ((relation == PATH_BELOW && prior->op == BP_UNPACK) ||
             (relation == PATH_EQUAL && prior->op == BP_PACK && step->op == BP_REPLACE))
             *ready_after = i + 1;
         else return "destination-exists";
@@ -229,28 +236,26 @@ static struct digby_pack_plan pack_plan(const char *workspace, const struct bp_s
         (const char *const *)step->pack->inputs, step->pack->count};
 }
 
-static const char *preflight_pack(const char *workspace, struct bp_plan *plan, size_t index,
+static const char *preflight_pack(const char *workspace, struct bp_plan *plan, size_t start, size_t index,
                                   bool defer_destination, bool preview)
 {
     struct bp_step *step = &plan->steps[index];
     struct digby_pack_plan pack = pack_plan(workspace, step);
     bool future[DIGBY_ARCHIVE_MEMBER_LIMIT] = {false};
+    if (start) {
+        defer_destination = true;
+        for (size_t j = 0; j < pack.count; ++j) future[j] = true;
+    }
     bool pending = defer_destination;
-    for (size_t i = 0; i < index; ++i) {
+    for (size_t i = start; i < index; ++i) {
         const struct bp_step *prior = &plan->steps[i];
-        if (prior->op == BP_RUN || (prior->state && prior->state->has_change)) {
-            /* External commands can create workspace inputs and the output's parent. */
-            for (size_t j = 0; j < pack.count; ++j) future[j] = true;
-            pending = defer_destination = true;
-            break;
-        }
         if (prior->op != BP_COPY && prior->op != BP_REPLACE &&
             prior->op != BP_UNPACK && prior->op != BP_PACK) continue;
         for (size_t j = 0; j < pack.count; ++j) {
             enum path_relation relation;
-            const char *error = path_relation(workspace, prior->path, pack.inputs[j], &relation);
+            const char *error = path_relation(workspace, prior->path, pack.inputs[j], start != 0, &relation);
             if (error) return error;
-            if (relation == PATH_UNRELATED) continue;
+            if (relation == PATH_NO_KNOWN_MATCH) continue;
             if ((prior->op == BP_UNPACK && relation == PATH_EQUAL) ||
                 (prior->op != BP_UNPACK && relation == PATH_BELOW)) return "archive-input-unavailable";
             pending = future[j] = true;
@@ -301,10 +306,11 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
     if (error) return error;
     bool follows_state = false;
     size_t ready_after[BP_MAX_STEPS] = {0};
+    size_t pack_known_from = 0;
     for (size_t i = 0; i < plan->count; ++i) {
         const struct bp_step *s = &plan->steps[i];
         if (s->skip_op || s->op == BP_TOOL || s->op == BP_DEFAULT || s->op == BP_SSH) continue;
-        error = archive_dependency(workspace, plan, i, &ready_after[i]);
+        error = archive_dependency(workspace, plan, pack_known_from, i, &ready_after[i]);
         if (error) {
             result->failure_source = s->source;
             return error;
@@ -313,7 +319,7 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             const struct digby_archive_plan archive = archive_plan(workspace, s);
             error = ready_after[i] ? digby_archive_validate(&archive) : digby_archive_extract(&archive, true);
         } else if (s->op == BP_PACK) {
-            error = preflight_pack(workspace, plan, i, ready_after[i] != 0, preview);
+            error = preflight_pack(workspace, plan, pack_known_from, i, ready_after[i] != 0, preview);
         } else if (s->state) {
             follows_state = true;
             error = validate_step(workspace, &s->state->check);
@@ -325,6 +331,8 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             result->failure_source = s->source;
             return error;
         }
+        /* A command can rearrange pack inputs and previously published archives. */
+        if (s->op == BP_RUN || (s->state && s->state->has_change)) pack_known_from = i + 1;
     }
     size_t segment_end = 0;
     bool earlier_effect = false, earlier_entry_effect = false;

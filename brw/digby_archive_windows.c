@@ -26,12 +26,18 @@ struct digby_pack_stage {
 };
 
 /* On success the caller owns both the pinned parent and the leaf name. */
-static const char *destination(const char *workspace, const char *relative, HANDLE *parent,
+static const char *destination(const struct bp_directory *workspace, const char *relative, HANDLE *parent,
                                wchar_t **name)
 {
     wchar_t *path = wide(relative), *leaf;
     if (!path) return "out-of-memory";
-    HANDLE dir = open_parent(workspace, path, &leaf);
+    HANDLE root;
+    if (!DuplicateHandle(GetCurrentProcess(), workspace->handle, GetCurrentProcess(), &root,
+                         0, FALSE, DUPLICATE_SAME_ACCESS)) {
+        free(path);
+        return "unsafe-parent";
+    }
+    HANDLE dir = descend_parent(root, path, &leaf);
     const char *error = "unsafe-parent";
     if (dir != INVALID_HANDLE_VALUE) {
         HANDLE found = open_child(dir, leaf, FILE_READ_ATTRIBUTES,
@@ -51,7 +57,7 @@ static const char *destination(const char *workspace, const char *relative, HAND
     return error;
 }
 
-const char *digby_archive_destination(const char *workspace, const char *relative)
+const char *digby_archive_destination(const struct bp_directory *workspace, const char *relative)
 {
     HANDLE parent;
     wchar_t *name;
@@ -93,7 +99,7 @@ static FILE *output_stream(HANDLE h)
     return stream;
 }
 
-const char *digby_archive_begin(const char *workspace, const char *relative,
+const char *digby_archive_begin(const struct bp_directory *workspace, const char *relative,
                                 struct digby_archive_stage **out)
 {
     *out = NULL;
@@ -232,7 +238,7 @@ const char *digby_archive_finish(struct digby_archive_stage *stage, bool publish
     return error;
 }
 
-const char *digby_pack_begin(const char *workspace, const char *relative,
+const char *digby_pack_begin(const struct bp_directory *workspace, const char *relative,
                              struct digby_pack_stage **out, FILE **stream)
 {
     *out = NULL;

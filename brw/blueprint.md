@@ -117,6 +117,8 @@ Select `tar`, `tar.gz` or `zip` explicitly. Preview lists `format`, `inputs` and
 
 Paths follow the portable workspace rules. Links, duplicate member names, ASCII case collisions and conflicting file/directory names are rejected. Each input and the completed archive are limited to 64 MiB, with at most 256 MiB of input data and 4,096 members including implied directories.
 
+On Linux and macOS, Digby writes the archive inside a private staging directory beside the destination. Other processes running as the same user can modify private files. If Digby detects a changed stage or cannot remove it, inspect the reported destination and the staging directory before retrying. A cleanup failure after publication leaves the complete archive at the destination.
+
 ## Explicit SSH steps
 
 Declare `requires\tssh` in the manifest (with a tab). This capability uses the Windows system OpenSSH client. A host without that client rejects a required SSH capability before any step runs. In the module, specify the remote user, host and command. The default port is 22 and the default timeout is 30 seconds.

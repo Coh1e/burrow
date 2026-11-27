@@ -4,6 +4,7 @@
 #define _DARWIN_C_SOURCE
 #endif
 #include "digby_archive_io.h"
+#include "blueprint_files_posix.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -39,7 +40,7 @@ struct digby_archive_stage {
 struct digby_pack_stage {
     struct destination dest;
     char temporary[64];
-    int fd;
+    int directory, fd;
     FILE *stream;
 };
 
@@ -61,12 +62,12 @@ static int walk_parent(int fd, char *path, char **leaf)
 }
 
 static const char *open_destination(struct destination *s,
-                                    const char *workspace, const char *relative)
+                                    const struct bp_directory *workspace, const char *relative)
 {
     s->parent = -1;
     s->path = strdup(relative);
     if (!s->path) return "out-of-memory";
-    s->parent = walk_parent(open(workspace, directory_flags), s->path, &s->name);
+    s->parent = walk_parent(fcntl(workspace->fd, F_DUPFD_CLOEXEC, 0), s->path, &s->name);
     if (s->parent < 0) return "unsafe-parent";
     struct stat info;
     if (!fstatat(s->parent, s->name, &info, AT_SYMLINK_NOFOLLOW)) return "destination-exists";
@@ -79,7 +80,7 @@ static void close_destination(struct destination *s)
     free(s->path);
 }
 
-const char *digby_archive_destination(const char *workspace, const char *relative)
+const char *digby_archive_destination(const struct bp_directory *workspace, const char *relative)
 {
     struct destination stage;
     const char *error = open_destination(&stage, workspace, relative);
@@ -87,7 +88,7 @@ const char *digby_archive_destination(const char *workspace, const char *relativ
     return error;
 }
 
-const char *digby_archive_begin(const char *workspace, const char *relative,
+const char *digby_archive_begin(const struct bp_directory *workspace, const char *relative,
                                 struct digby_archive_stage **out)
 {
     *out = NULL;
@@ -209,12 +210,12 @@ static bool stage_owned(int parent, const char *temporary, int fd)
            named.st_dev == opened.st_dev && named.st_ino == opened.st_ino;
 }
 
-static int publish_exclusive(const struct destination *dest, const char *temporary)
+static int publish_exclusive(int source_parent, const char *source, const struct destination *dest)
 {
 #ifdef __APPLE__
-    return renameatx_np(dest->parent, temporary, dest->parent, dest->name, RENAME_EXCL);
+    return renameatx_np(source_parent, source, dest->parent, dest->name, RENAME_EXCL);
 #else
-    return renameat2(dest->parent, temporary, dest->parent, dest->name, RENAME_NOREPLACE);
+    return renameat2(source_parent, source, dest->parent, dest->name, RENAME_NOREPLACE);
 #endif
 }
 
@@ -252,7 +253,7 @@ const char *digby_archive_finish(struct digby_archive_stage *s, bool publish)
     bool owned = stage_owned(s->dest.parent, s->temporary, s->root);
     if (!owned) error = "stage-changed";
     else if (publish) {
-        int status = publish_exclusive(&s->dest, s->temporary);
+        int status = publish_exclusive(s->dest.parent, s->temporary, &s->dest);
         if (status) error = errno == EEXIST || errno == ENOTEMPTY ? "destination-exists" : "publish-directory";
     }
     bool rollback = owned && (!publish || error);
@@ -270,7 +271,7 @@ const char *digby_archive_finish(struct digby_archive_stage *s, bool publish)
     return error;
 }
 
-const char *digby_pack_begin(const char *workspace, const char *relative,
+const char *digby_pack_begin(const struct bp_directory *workspace, const char *relative,
                              struct digby_pack_stage **out, FILE **stream)
 {
     *out = NULL;
@@ -281,12 +282,24 @@ const char *digby_pack_begin(const char *workspace, const char *relative,
     if (!error) {
         error = "create-stage";
         for (unsigned i = 0; i < 128; ++i) {
-            /* '~' keeps the staging file outside the workspace operand grammar. */
+            /* '~' keeps the private directory outside the workspace operand grammar. */
             snprintf(s->temporary, sizeof s->temporary, ".brw-pack-~%ld-%u", (long)getpid(), i);
-            s->fd = openat(s->dest.parent, s->temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-            if (s->fd < 0) {
+            if (mkdirat(s->dest.parent, s->temporary, 0700)) {
                 if (errno == EEXIST) continue;
                 break;
+            }
+            s->directory = openat(s->dest.parent, s->temporary, directory_flags);
+            if (s->directory < 0) { error = "cleanup-stage"; break; }
+            struct stat st;
+            if (fstat(s->directory, &st) || st.st_uid != geteuid() || (st.st_mode & 0077)) {
+                close(s->directory);
+                error = "stage-changed";
+                break;
+            }
+            s->fd = openat(s->directory, "archive", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+            if (s->fd < 0) {
+                error = digby_pack_finish(s, false);
+                return error ? error : "create-stage";
             }
             /* Retain the original fd to verify ownership after fclose. */
             int copy = fcntl(s->fd, F_DUPFD_CLOEXEC, 0);
@@ -309,14 +322,25 @@ const char *digby_pack_finish(struct digby_pack_stage *s, bool publish)
 {
     const char *error = NULL;
     if (s->stream && fclose(s->stream)) error = "close-stage";
-    if (!stage_owned(s->dest.parent, s->temporary, s->fd)) error = "stage-changed";
-    else if (!error && publish && publish_exclusive(&s->dest, s->temporary))
-        error = errno == EEXIST || errno == ENOTEMPTY ? "destination-exists" : "publish-file";
-    if (!publish || error) {
-        if (!stage_owned(s->dest.parent, s->temporary, s->fd)) error = "stage-changed";
-        else if (unlinkat(s->dest.parent, s->temporary, 0)) error = "cleanup-stage";
+    if (!stage_owned(s->dest.parent, s->temporary, s->directory)) goto changed;
+    if (s->fd >= 0) {
+        /* Only the private directory handle is used to resolve the archive. */
+        if (!stage_owned(s->directory, "archive", s->fd)) goto changed;
+        if (!error && publish && publish_exclusive(s->directory, "archive", &s->dest))
+            error = errno == EEXIST || errno == ENOTEMPTY ? "destination-exists" : "publish-file";
+        if (!publish || error) {
+            if (!stage_owned(s->directory, "archive", s->fd)) goto changed;
+            if (unlinkat(s->directory, "archive", 0)) { error = "cleanup-stage"; goto done; }
+        }
     }
-    close(s->fd);
+    if (!stage_owned(s->dest.parent, s->temporary, s->directory)) goto changed;
+    if (unlinkat(s->dest.parent, s->temporary, AT_REMOVEDIR)) error = "cleanup-stage";
+    goto done;
+changed:
+    error = "stage-changed";
+done:
+    if (s->fd >= 0) close(s->fd);
+    close(s->directory);
     close_destination(&s->dest);
     free(s);
     return error;

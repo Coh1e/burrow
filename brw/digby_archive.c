@@ -279,8 +279,11 @@ const char *digby_archive_extract(const struct digby_archive_plan *plan, bool pr
     const char *error = check_operands(plan);
     if (error) return error;
     struct digby_archive_stage *stage = NULL;
-    error = preview ? digby_archive_destination(plan->workspace, plan->destination) :
-                      digby_archive_begin(plan->workspace, plan->destination, &stage);
+    struct bp_directory *workspace = bp_directory_open(plan->workspace);
+    if (!workspace) return "unsafe-parent";
+    error = preview ? digby_archive_destination(workspace, plan->destination) :
+                      digby_archive_begin(workspace, plan->destination, &stage);
+    bp_directory_close(workspace);
     if (error) return error;
     error = scan(plan, stage);
     if (stage) {
