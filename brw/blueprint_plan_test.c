@@ -1,4 +1,5 @@
 #include "blueprint.h"
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -25,6 +26,24 @@ static int check(const char *root, const char *expected)
     return failed;
 }
 
+static int check_ssh(const char *fields, unsigned port, unsigned seconds)
+{
+    char module[512], detail[BP_DETAIL_CAP];
+    snprintf(module, sizeof module, "export default ()=>[{op:'ssh',target:'u@host',command:'whoami',%s}]", fields);
+    struct bp_bundle bundle = {.count = 1, .entry = "root.mjs", .required = 1u << BP_SSH};
+    bundle.files[0] = (struct bp_file){"root.mjs", "", (unsigned char *)module, strlen(module), true};
+    struct bp_plan plan = {0};
+    const char *error = bp_build(&bundle, &plan, detail);
+    const struct bp_ssh *ssh = plan.count ? plan.steps[0].ssh : NULL;
+    bool valid = port ? !error && plan.count == 1 && plan.steps[0].op == BP_SSH && ssh &&
+        !strcmp(ssh->target, "u@host") && !strcmp(ssh->command, "whoami") &&
+        ssh->port == port && ssh->timeout_seconds == seconds :
+        error && !strcmp(error, "invalid-ssh-request") && !strcmp(detail, "root.mjs[1]");
+    if (!valid) fprintf(stderr, "unexpected SSH plan for {%s}: %s (%s)\n", fields, error ? error : "plan", detail);
+    bp_plan_free(&plan);
+    return !valid;
+}
+
 int main(void)
 {
     return check("export default ()=>['debug','release'].map(v=>"
@@ -36,5 +55,13 @@ int main(void)
         check("export default ()=>[{op:'include',module:'./root.mjs',args:{}}]", "blueprint-cycle") ||
         check("export default ()=>{function again(){return again()} return again()}", "blueprint-limit") ||
         check("export default ()=>['x'.repeat(32*1024*1024)]", "blueprint-limit") ||
-        check("export default ()=>{for(;;){}}", "blueprint-limit");
+        check("export default ()=>{for(;;){}}", "blueprint-limit") ||
+        check_ssh("", 22, 30) ||
+        check_ssh("platform:'any',port:65535,timeoutSeconds:4294967295", 65535, UINT_MAX) ||
+        check_ssh("port:'22'", 0, 0) || check_ssh("port:65536", 0, 0) ||
+        check_ssh("timeoutSeconds:1.5", 0, 0) || check_ssh("timeoutSeconds:0", 0, 0) ||
+        check_ssh("timeoutSeconds:4294967296", 0, 0) || check_ssh("command:42", 0, 0) ||
+        check_ssh("target:'u@host\\0rest'", 0, 0) || check_ssh("command:'test\\0rest'", 0, 0) ||
+        check_ssh("allowTarget:'u@host:22'", 0, 0) || check_ssh("identity:'keyfile'", 0, 0) ||
+        check_ssh("knownHosts:'bundle-hosts'", 0, 0);
 }

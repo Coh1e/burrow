@@ -60,6 +60,7 @@ Both modules export a synchronous function returning steps. Relative ES imports 
 | `env` | `name`, `value` | Sets the environment of the current brw process for subsequent actions. The calling shell keeps its own environment. |
 | `run` | `program`, `args` | Runs the program in the caller’s `--workspace` and waits for it to exit. Preview lists its arguments. |
 | `install` | `payload`, `name`, `version`, `entry` | On Windows, installs a verified native executable or supported archive through the package transaction and publishes its command entry. |
+| `ssh` | `target`, `command`, optional `port` and `timeoutSeconds` | On Windows, runs one POSIX shell command on the SSH service authorized for this invocation. |
 
 For example, declare `requires\trun` (with a tab) and list `build.cmake` as a payload beside the child module. This step runs CMake with the verified script and a single argument containing a space.
 
@@ -70,6 +71,24 @@ For example, declare `requires\trun` (with a tab) and list `build.cmake` as a pa
 The argument list accepts up to 128 entries, including at most one script reference. Digby resolves the reference from the declaring module and stages the verified bytes in a temporary file for this invocation. Scripts can use the working directory for project files. The temporary location contains only the standalone script. String arguments pass directly to the program, including empty strings and literal `|`. To execute a pipeline, select an interpreter such as `sh` with `["-c", scriptText]` or `powershell.exe` with `["-NoProfile", "-Command", scriptText]`. Child output goes to stderr so the CLI report remains readable on stdout. A failed launch or nonzero exit stops the plan.
 
 The planning runtime has no filesystem, process or network bindings. A bundle may declare up to 128 files. The reader limits the manifest to 128 KiB, each module to 1 MiB, each payload to 64 MiB and loaded member data to 128 MiB. Nested calls, plan size, JavaScript heap, stack and execution time are also bounded. An unavailable capability, invalid import or exceeded planning limit fails before application.
+
+## Explicit SSH steps
+
+Declare `requires\tssh` in the manifest (with a tab). In the module, specify the remote user, host and command. The default port is 22 and the default timeout is 30 seconds.
+
+```js
+export default () => [
+  { op: "ssh", target: "build@wsl.example", port: 2222, command: "uname -s" }
+];
+```
+
+Supply the authorization, identity file and trusted host key file on the command line. Keep the two operator-managed files outside the Blueprint's output directories. Every selected SSH step must match the authorized user, host and port. A target mismatch stops the plan before any step runs.
+
+```powershell
+brw blueprint preview kit --sha256 $digest --workspace project --allow-target build@wsl.example:2222 --identity C:\keys\build --known-hosts C:\keys\wsl_hosts --json
+```
+
+Preview reports the target, command and pending host verification without opening a connection. To execute the reviewed bundle, use `apply` with the same options. Remote output goes to stderr. Each SSH result identifies the step by its Blueprint call path. A confirmed exit sets `status` to `completed` and records `remoteExit`. A nonzero exit stops the Blueprint. If the connection drops after dispatch and the exit is unconfirmed, the step reports `unknown` and `remoteExit: null`. Digby stops there without retrying. Check the remote state before applying the Blueprint again. [SSH identity and trust files](README.md#run-an-explicit-ssh-operation-on-windows)
 
 ## Passing outputs between calls
 

@@ -74,6 +74,16 @@ static bool valid_file_reference(const char *path)
     return true;
 }
 
+const char *digby_ssh_status_name(enum digby_ssh_status status)
+{
+    switch (status) {
+    case DIGBY_SSH_PLANNED: return "planned";
+    case DIGBY_SSH_COMPLETED: return "completed";
+    case DIGBY_SSH_UNKNOWN: return "unknown";
+    default: return "rejected";
+    }
+}
+
 struct digby_ssh_result digby_ssh_run(const struct digby_ssh_request *request,
                                       const char *allowed_target, bool preview,
                                       const struct digby_ssh_transport *transport, void *context)

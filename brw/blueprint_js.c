@@ -1,5 +1,6 @@
 #include "blueprint.h"
 #include <quickjs.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -201,6 +202,11 @@ void bp_plan_free(struct bp_plan *plan)
             free(s->state->detected);
             free(s->state);
         }
+        if (s->ssh) {
+            free(s->ssh->target);
+            free(s->ssh->command);
+            free(s->ssh);
+        }
         free(s->skip_platform);
         free(s->skip_op);
         free(s->registry);
@@ -387,6 +393,58 @@ static const char *parse_state(JSContext *ctx, JSValueConst obj, struct planner 
     return NULL;
 }
 
+/* SSH operands describe the requested operation. Authorization and trust
+   files enter through the CLI, so reject other operands at the step location. */
+static bool ssh_fields(JSContext *ctx, JSValueConst obj)
+{
+    static const char *const allowed[] = {"op", "platform", "target", "command", "port", "timeoutSeconds"};
+    JSPropertyEnum *keys;
+    uint32_t count;
+    if (JS_GetOwnPropertyNames(ctx, &keys, &count, obj, JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK) < 0)
+        return false;
+    bool valid = true;
+    for (uint32_t i = 0; valid && i < count; ++i) {
+        JSValue name = JS_AtomToValue(ctx, keys[i].atom);
+        char *key = copy_string(ctx, name);
+        JS_FreeValue(ctx, name);
+        valid = false;
+        for (size_t j = 0; key && j < sizeof allowed / sizeof *allowed; ++j) {
+            if (!strcmp(key, allowed[j])) { valid = true; break; }
+        }
+        free(key);
+    }
+    JS_FreePropertyEnum(ctx, keys, count);
+    return valid;
+}
+
+static bool ssh_number(JSContext *ctx, JSValueConst obj, const char *key, unsigned maximum,
+                       unsigned fallback, unsigned *out)
+{
+    JSValue value = JS_GetPropertyStr(ctx, obj, key);
+    size_t number = fallback;
+    bool valid = JS_IsUndefined(value) ||
+        (unsigned_integer(ctx, value, &number) && number > 0 && number <= maximum);
+    JS_FreeValue(ctx, value);
+    if (valid) *out = (unsigned)number;
+    return valid;
+}
+
+static const char *parse_ssh(JSContext *ctx, JSValueConst obj, struct bp_step *step)
+{
+    if (!ssh_fields(ctx, obj)) return "invalid-ssh-request";
+    struct bp_ssh *ssh = step->ssh = calloc(1, sizeof *ssh);
+    if (!ssh) return "out-of-memory";
+    ssh->target = field(ctx, obj, "target");
+    ssh->command = field(ctx, obj, "command");
+    if (!ssh->target || !*ssh->target || !bp_valid_utf8(ssh->target, strlen(ssh->target)) ||
+        !ssh->command || !*ssh->command ||
+        !bp_valid_utf8(ssh->command, strlen(ssh->command)) ||
+        !ssh_number(ctx, obj, "port", 65535, 22, &ssh->port) ||
+        !ssh_number(ctx, obj, "timeoutSeconds", UINT_MAX, 30, &ssh->timeout_seconds))
+        return "invalid-ssh-request";
+    return NULL;
+}
+
 static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const char *op,
                      const struct bp_file *module, const char *location)
 {
@@ -418,6 +476,11 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }
     switch (s->op) {
+    case BP_SSH: {
+        const char *error = parse_ssh(ctx, obj, s);
+        if (error) fail(p, error, location);
+        break;
+    }
     case BP_DEFAULT:
         s->tool = field(ctx, obj, "tool");
         if (!s->tool || !*s->tool) fail(p, "invalid-tool", location);

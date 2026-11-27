@@ -34,6 +34,9 @@ enum digby_ssh_status {
     DIGBY_SSH_REJECTED, DIGBY_SSH_PLANNED, DIGBY_SSH_COMPLETED, DIGBY_SSH_UNKNOWN
 };
 
+/* Stable report spelling, borrowed for the lifetime of the process. */
+const char *digby_ssh_status_name(enum digby_ssh_status status);
+
 struct digby_ssh_result {
     enum digby_ssh_status status;
     const char *error; /* Static error code, or NULL for planned/completed. */

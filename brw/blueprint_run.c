@@ -71,6 +71,39 @@ static const char *validate_step(const char *workspace, const struct bp_step *st
     return error;
 }
 
+static struct digby_ssh_result run_ssh(const struct bp_plan *plan, const struct bp_ssh *step,
+                                       bool preview)
+{
+    const struct bp_ssh_options *options = &plan->ssh_options;
+    if (!plan->ssh_backend)
+        return (struct digby_ssh_result){DIGBY_SSH_REJECTED, "missing-capability", -1};
+    if (!options->allowed_target)
+        return (struct digby_ssh_result){DIGBY_SSH_REJECTED, "unauthorized-target", -1};
+    const struct digby_ssh_request request = {
+        .target = step->target, .port = step->port, .command = step->command,
+        .timeout_seconds = step->timeout_seconds,
+        .identity_file = options->identity_file, .known_hosts = options->known_hosts
+    };
+    if (preview) return digby_ssh_run(&request, options->allowed_target, true, NULL, NULL);
+    return plan->ssh_backend(&request, options->allowed_target, false);
+}
+
+static const char *validate_ssh_plan(struct bp_plan *plan, bool preview, struct bp_run_result *result)
+{
+    const char *error = NULL;
+    for (size_t i = 0; i < plan->count; ++i) {
+        struct bp_step *step = &plan->steps[i];
+        if (step->op != BP_SSH) continue;
+        step->ssh->reported = false;
+        if (error) continue;
+        step->ssh->result = run_ssh(plan, step->ssh, true);
+        error = step->ssh->result.error;
+        step->ssh->reported = preview || error;
+        if (error) result->failure_source = step->source;
+    }
+    return error;
+}
+
 static bool needs_output(const struct bp_step *command)
 {
     for (size_t i = 0; i < command->argc; ++i)
@@ -163,11 +196,12 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             state->has_exit_code = false;
         }
     }
+    const char *error = validate_ssh_plan(plan, preview, result);
+    if (error) return error;
     bool follows_state = false;
     for (size_t i = 0; i < plan->count; ++i) {
         const struct bp_step *s = &plan->steps[i];
-        if (s->skip_op || s->op == BP_TOOL || s->op == BP_DEFAULT) continue;
-        const char *error;
+        if (s->skip_op || s->op == BP_TOOL || s->op == BP_DEFAULT || s->op == BP_SSH) continue;
         if (s->state) {
             follows_state = true;
             error = validate_step(workspace, &s->state->check);
@@ -181,7 +215,6 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
         }
     }
     size_t segment_end = 0;
-    const char *error = NULL;
     bool earlier_effect = false, earlier_entry_effect = false;
     struct runtime_output outputs[BP_MAX_STEPS] = {0};
     size_t check = 0;
@@ -249,8 +282,17 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
         } else {
             earlier_effect = earlier_entry_effect = true;
             if (preview) continue;
-            error = step->op == BP_RUN ? command(plan->lock, workspace, step, outputs, NULL, &started)
-                                       : bp_apply_step(workspace, step);
+            if (step->op == BP_SSH) {
+                struct bp_ssh *ssh = step->ssh;
+                ssh->result = run_ssh(plan, ssh, false);
+                ssh->reported = true;
+                started = ssh->result.status == DIGBY_SSH_COMPLETED;
+                result->remote_result_unknown = ssh->result.status == DIGBY_SSH_UNKNOWN;
+                error = ssh->result.error;
+                if (started && ssh->result.remote_exit) error = "child-failed";
+            } else if (step->op == BP_RUN) {
+                error = command(plan->lock, workspace, step, outputs, NULL, &started);
+            } else error = bp_apply_step(workspace, step);
         }
         if (error) {
             result->failure_source = step->source;
