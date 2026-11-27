@@ -68,8 +68,9 @@ runs the Linux executable from its Release archive.
 
 `brw ssh` runs one command on an authorized SSH target using the Windows
 OpenSSH client. Supply the identity file and a dedicated OpenSSH
-`known_hosts` file containing the host key verified by the operator. Use
-`[host]:port` in that file for a non-default port. File references
+`known_hosts` file containing the host key verified by the operator. Digby
+uses only that file for host-key lookup. It looks up
+`host` for port 22 and `[host]:port` for any other port. File references
 containing control characters, double quotes or `${` are rejected.
 
 ~~~powershell

@@ -98,6 +98,9 @@ static int report(const struct digby_ssh_result *result, const struct ssh_option
         putchar('\n');
     } else if (result->status == DIGBY_SSH_COMPLETED) {
         printf("SSH completed with remote exit %d.\n", result->remote_exit);
+    } else if (result->status == DIGBY_SSH_UNKNOWN) {
+        fprintf(stderr, "brw ssh: %s (%s). Check remote state on %s:%u before running the command again.\n",
+                status, result->error, options->request.target, options->request.port);
     } else {
         fprintf(stderr, "brw ssh: %s (%s)\n", status, result->error);
     }

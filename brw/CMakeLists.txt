@@ -128,7 +128,12 @@ if(BUILD_TESTING)
   target_link_options(brw_test_ssh_client PRIVATE -municode -static)
   add_test(NAME brw_ssh COMMAND "${CMAKE_COMMAND}"
     "-DBRW=$<TARGET_FILE:brw_test_interrupt>" "-DCLIENT=$<TARGET_FILE:brw_test_ssh_client>"
+    "-DCANCEL=$<TARGET_FILE:brw_test_cancel>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/ssh_windows_test.cmake")
+  get_filename_component(toolchain_bin "${CMAKE_C_COMPILER}" DIRECTORY)
+  add_test(NAME brw_ssh_shell COMMAND "${CMAKE_COMMAND}"
+    "-DBRW=$<TARGET_FILE:brw_test_interrupt>" "-DCLIENT=$<TARGET_FILE:brw_test_ssh_client>"
+    "-DTOOLCHAIN_BIN=${toolchain_bin}" -P "${CMAKE_CURRENT_SOURCE_DIR}/ssh_shell_test.cmake")
   find_program(POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
   add_test(NAME brw_git COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
     -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-git.ps1"

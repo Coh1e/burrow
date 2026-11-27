@@ -47,9 +47,9 @@ static wchar_t *wide(const char *text)
     return out;
 }
 
-/* OpenSSH parses each -o as a configuration line, then expands path tokens.
-   Give it one quoted absolute filename and escape each literal percent. */
-static wchar_t *file_option(const wchar_t *name, const char *text)
+/* OpenSSH expands percent tokens in IdentityFile. GlobalKnownHostsFile uses
+   a literal absolute path across the Windows client versions. */
+static wchar_t *file_option(const wchar_t *name, const char *text, bool expand_tokens)
 {
     wchar_t *input = wide(text);
     if (!input) return NULL;
@@ -66,7 +66,7 @@ static wchar_t *file_option(const wchar_t *name, const char *text)
             *p++ = L'=';
             *p++ = L'"';
             for (const wchar_t *c = path; *c; ++c) {
-                if (*c == L'%') *p++ = L'%';
+                if (expand_tokens && *c == L'%') *p++ = L'%';
                 *p++ = *c == L'\\' ? L'/' : *c;
             }
             *p++ = L'"';
@@ -74,6 +74,27 @@ static wchar_t *file_option(const wchar_t *name, const char *text)
         }
     }
     free(path);
+    return option;
+}
+
+/* Bind trust lookup to this service. Without an explicit alias, OpenSSH may
+   also try the bare hostname when a non-default port has no matching entry. */
+static wchar_t *host_key_option(const wchar_t *target, unsigned port)
+{
+    const wchar_t *host = target ? wcschr(target, L'@') : NULL;
+    if (!host) return NULL;
+    ++host;
+    size_t length = wcslen(host);
+    if (*host == L'[') { /* The shared contract has validated the IPv6 literal. */
+        ++host;
+        length -= 2;
+    }
+    size_t cap = length + sizeof "HostKeyAlias=[]:65535";
+    wchar_t *option = malloc(cap * sizeof *option);
+    if (option) {
+        if (port == 22) swprintf(option, cap, L"HostKeyAlias=%.*ls", (int)length, host);
+        else swprintf(option, cap, L"HostKeyAlias=[%.*ls]:%u", (int)length, host, port);
+    }
     return option;
 }
 
@@ -187,22 +208,24 @@ static const char *connect_verified(void *context, const struct digby_ssh_reques
              L"printf 'brw-ready-%hs\\n'; sh -s >&2; rc=$?; printf 'brw-exit-%hs=%%d\\n' \"$rc\"",
              s->nonce, s->nonce);
     wchar_t *target = wide(request->target);
-    wchar_t *identity = file_option(L"IdentityFile", request->identity_file);
-    wchar_t *hosts = file_option(L"UserKnownHostsFile", request->known_hosts);
+    wchar_t *alias = host_key_option(target, request->port);
+    wchar_t *identity = file_option(L"IdentityFile", request->identity_file, true);
+    wchar_t *hosts = file_option(L"GlobalKnownHostsFile", request->known_hosts, false);
     const wchar_t *argv[] = {
-        app, L"-F", L"none", L"-T", L"-p", port, L"-o", identity, L"-o", hosts,
-        L"-o", L"StrictHostKeyChecking=yes", L"-o", L"GlobalKnownHostsFile=none",
+        app, L"-F", L"NUL", L"-T", L"-p", port, L"-o", identity, L"-o", hosts,
+        L"-o", L"UserKnownHostsFile=NUL", L"-o", alias, L"-o", L"StrictHostKeyChecking=yes",
         L"-o", L"UpdateHostKeys=no", L"-o", L"VerifyHostKeyDNS=no", L"-o", L"CheckHostIP=no",
         L"-o", L"PreferredAuthentications=publickey", L"-o", L"BatchMode=yes",
         L"-o", L"IdentitiesOnly=yes", L"-o", L"IdentityAgent=none", L"-o", L"CertificateFile=none",
         L"-o", L"ConnectionAttempts=1", L"--", target, script
     };
     const char *error = "invalid-ssh-request";
-    if (target && identity && hosts) {
+    if (target && alias && identity && hosts) {
         error = encode_command_line(line, sizeof argv / sizeof *argv, argv);
         if (!error && (!active(s) || !start_client(s, app, line))) error = "ssh-client";
     }
     free(target);
+    free(alias);
     free(identity);
     free(hosts);
     if (error) return error;

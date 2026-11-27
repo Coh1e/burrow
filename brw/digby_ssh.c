@@ -2,8 +2,49 @@
 #include <stdio.h>
 #include <string.h>
 
+static bool valid_ipv4_tail(const char *text)
+{
+    for (unsigned i = 0; i < 4; ++i) {
+        size_t digits = strspn(text, "0123456789");
+        if (!digits || digits > 3 || (digits > 1 && *text == '0') ||
+            (digits == 3 && strncmp(text, "255", 3) > 0)) return false;
+        text += digits;
+        if (i < 3 && *text++ != '.') return false;
+    }
+    return !strcmp(text, "]");
+}
+
+/* The text begins after '['. An IPv4 tail occupies two of the eight groups;
+   '::' must stand for at least one omitted group. */
+static bool valid_ipv6_literal(const char *text)
+{
+    unsigned groups = 0;
+    bool compressed = false;
+    if (*text == ':') {
+        if (text[1] != ':') return false;
+        compressed = true;
+        text += 2;
+    }
+    while (*text != ']') {
+        size_t digits = strspn(text, "0123456789abcdefABCDEF");
+        if (!digits || digits > 4 || groups == 8) return false;
+        if (text[digits] == '.')
+            return (compressed ? groups < 6 : groups == 6) && valid_ipv4_tail(text);
+        ++groups;
+        text += digits;
+        if (*text == ']') break;
+        if (*text++ != ':') return false;
+        if (*text == ':') {
+            if (compressed) return false;
+            compressed = true;
+            ++text;
+        } else if (*text == ']') return false;
+    }
+    return text[1] == '\0' && (compressed ? groups < 8 : groups == 8);
+}
+
 /* Keep SSH option syntax, additional principals and ports out of the destination
-   argument. The SSH client handles DNS and validates the actual host address. */
+   argument. The SSH client handles DNS. */
 static bool valid_target(const char *target)
 {
     static const char name_chars[] =
@@ -12,11 +53,7 @@ static bool valid_target(const char *target)
     size_t user_length = strspn(target, name_chars);
     if (!user_length || target[user_length] != '@') return false;
     const char *host = target + user_length + 1;
-    if (*host == '[') {
-        const char *literal = host + 1;
-        size_t length = strspn(literal, "0123456789abcdefABCDEF:.");
-        return memchr(literal, ':', length) && !strcmp(literal + length, "]");
-    }
+    if (*host == '[') return valid_ipv6_literal(host + 1);
     return *host && *host != '-' && host[strspn(host, name_chars)] == '\0';
 }
 

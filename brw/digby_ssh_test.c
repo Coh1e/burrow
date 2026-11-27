@@ -148,9 +148,32 @@ int main(void)
         request.target = bad_targets[i];
         if (!invalid_request(&request)) return 8;
     }
-    request.target = "builder@[::1]";
-    if (digby_ssh_run(&request, "builder@[::1]:2222", true, NULL, NULL).status != DIGBY_SSH_PLANNED)
-        return 9;
+    const struct {
+        const char *target;
+        bool valid;
+    } ipv6[] = {
+        {"builder@[::1]", true}, {"builder@[::]", true}, {"builder@[2001:db8::]", true},
+        {"builder@[1:2:3:4:5:6:7:8]", true}, {"builder@[::ffff:192.0.2.1]", true},
+        {"builder@[1:2:3:4:5:6:192.0.2.1]", true},
+        {"builder@[:::]", false}, {"builder@[1::2::3]", false}, {"builder@[1:2:3]", false},
+        {"builder@[1:2:3:4:5:6:7:8:9]", false}, {"builder@[::1:2:3:4:5:6:7:8]", false},
+        {"builder@[12345::]", false}, {"builder@[1:2:3:4:5:6:7:]", false},
+        {"builder@[::ffff:192.0.2.256]", false}, {"builder@[::ffff:192.0.2]", false},
+        {"builder@[::ffff:192.00.2.1]", false}, {"builder@[192.0.2.1::]", false},
+        {"builder@[::1:2:3:4:5:6:192.0.2.1]", false}, {"builder@[::1]suffix", false}
+    };
+    for (size_t i = 0; i < sizeof ipv6 / sizeof *ipv6; ++i) {
+        request.target = ipv6[i].target;
+        char authorization[80];
+        snprintf(authorization, sizeof authorization, "%s:2222", request.target);
+        struct digby_ssh_result result = digby_ssh_run(&request, authorization, true, NULL, NULL);
+        enum digby_ssh_status expected = ipv6[i].valid ? DIGBY_SSH_PLANNED : DIGBY_SSH_REJECTED;
+        if (result.status != expected ||
+            (!ipv6[i].valid && (!result.error || strcmp(result.error, "invalid-ssh-request")))) {
+            fprintf(stderr, "unexpected IPv6 preview for %s: status=%d\n", request.target, (int)result.status);
+            return 9;
+        }
+    }
     if (digby_ssh_run(&valid, allowed, false, NULL, NULL).status != DIGBY_SSH_REJECTED)
         return 10;
     struct digby_ssh_transport partial = backend;
