@@ -58,6 +58,11 @@ tests. On Ubuntu 26.04 under WSL2, both ran and passed with
 `ctest --test-dir .local/133-linux-c -V -R "^blueprint_cli_(ramfs|unknown_case)$"`.
 [WSL filesystem transcript](../docs/history/digby-133/wsl-filesystems.txt)
 
+The Windows-to-WSL acceptance run transfers the sources and pinned archives
+over verified SSH, builds `brw` offline, applies the shared Blueprint and
+runs the Linux executable from its Release archive.
+[Evidence and reproduction steps](../docs/ssh-build-acceptance.md)
+
 ## Register and use a source
 
 For verified offline bundles that combine package installation with file, text and session environment operations, see [Offline Blueprints](blueprint.md).
