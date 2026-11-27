@@ -3,6 +3,7 @@
 #include "paths_windows.h"
 #include "settings_windows.h"
 #include "git_windows.h"
+#include "ssh_command_windows.h"
 #include "blueprint_cli.h"
 #include <stdio.h>
 #include <string.h>
@@ -60,6 +61,8 @@ int wmain(int argc, wchar_t **argv)
     };
     if (argc < 2)
         goto usage;
+    if (!wcscmp(argv[1], L"ssh"))
+        return brw_ssh_command(argc - 2, argv + 2);
 #ifdef BRW_BLUEPRINT
     if (!wcscmp(argv[1], L"blueprint"))
         return brw_blueprint_wcommand(argc - 2, argv + 2);
@@ -140,6 +143,7 @@ int wmain(int argc, wchar_t **argv)
 usage:
     fputs("usage: brw install|update NAME VERSION ARCHIVE SHA256 ENTRY [--dry-run] [--json]\n"
           "       " BRW_GIT_USAGE "\n"
+          "       " BRW_SSH_USAGE "\n"
 #ifdef BRW_BLUEPRINT
           "       " BRW_BLUEPRINT_USAGE "\n"
 #endif

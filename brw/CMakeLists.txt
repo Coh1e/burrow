@@ -9,7 +9,7 @@ if(WIN32)
 endif()
 
 include(CTest)
-add_library(digby STATIC digby.c literal.c)
+add_library(digby STATIC digby.c digby_ssh.c literal.c)
 set_target_properties(digby PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 option(BRW_ENABLE_CPP_MODULE "Format literal search offsets with the optional C++23 module" OFF)
 if(BRW_ENABLE_CPP_MODULE)
@@ -30,6 +30,9 @@ if(BUILD_TESTING)
   add_executable(digby_plan_test digby_plan_test.c)
   target_link_libraries(digby_plan_test PRIVATE digby)
   add_test(NAME digby_plan COMMAND digby_plan_test)
+  add_executable(digby_ssh_test digby_ssh_test.c)
+  target_link_libraries(digby_ssh_test PRIVATE digby)
+  add_test(NAME digby_ssh COMMAND digby_ssh_test)
   add_executable(literal_test literal_test.c)
   target_link_libraries(literal_test PRIVATE digby)
   add_test(NAME digby_literal COMMAND literal_test)
@@ -93,14 +96,14 @@ add_custom_command(OUTPUT "${shim_header}"
 
 add_library(brw_common OBJECT main_windows.c git_windows.c cleanup_windows.c evidence_windows.c source_windows.c
   download_windows.c paths_windows.c init_windows.c init_command_windows.c settings_command_windows.c
-  output_windows.c "${shim_header}")
+  output_windows.c ssh_command_windows.c "${shim_header}")
 target_include_directories(brw_common SYSTEM PRIVATE "${git_source}/include")
 if(BRW_BLUEPRINT)
   target_compile_definitions(brw_common PRIVATE BRW_BLUEPRINT)
   target_sources(brw_common PRIVATE blueprint_argv_windows.c)
 endif()
 function(add_brw_cli target)
-  add_executable(${target} install_windows.c settings_windows.c $<TARGET_OBJECTS:brw_common>)
+  add_executable(${target} install_windows.c settings_windows.c ssh_windows.c $<TARGET_OBJECTS:brw_common>)
   add_dependencies(${target} brw_common)
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${archive_source}/libarchive")
   target_compile_definitions(${target} PRIVATE LIBARCHIVE_STATIC)
@@ -121,6 +124,11 @@ endforeach()
 if(BUILD_TESTING)
   add_brw_cli(brw_test_interrupt)
   target_compile_definitions(brw_test_interrupt PRIVATE BRW_TEST_INTERRUPTS)
+  add_executable(brw_test_ssh_client test_ssh_client_windows.c)
+  target_link_options(brw_test_ssh_client PRIVATE -municode -static)
+  add_test(NAME brw_ssh COMMAND "${CMAKE_COMMAND}"
+    "-DBRW=$<TARGET_FILE:brw_test_interrupt>" "-DCLIENT=$<TARGET_FILE:brw_test_ssh_client>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/ssh_windows_test.cmake")
   find_program(POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
   add_test(NAME brw_git COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
     -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-git.ps1"

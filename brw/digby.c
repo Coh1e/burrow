@@ -90,6 +90,7 @@ const char *digby_operation_name(enum digby_operation operation)
     switch (operation) {
     case DIGBY_GIT_CLONE: return "git-clone";
     case DIGBY_GIT_PULL: return "git-pull";
+    case DIGBY_SSH: return "ssh";
     case DIGBY_DOWNLOAD: return "download";
     case DIGBY_VERIFY: return "verify";
     case DIGBY_EXTRACT: return "extract";
