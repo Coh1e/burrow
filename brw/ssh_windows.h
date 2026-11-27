@@ -3,6 +3,9 @@
 
 #include "digby_ssh.h"
 
+/* Checks for the configured client executable without starting it. */
+bool brw_windows_ssh_available(void);
+
 /* Uses Windows OpenSSH and streams remote output to the caller's stderr. */
 struct digby_ssh_result brw_windows_ssh_run(const struct digby_ssh_request *request,
                                            const char *allowed_target, bool preview);

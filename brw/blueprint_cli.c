@@ -160,8 +160,11 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
         puts("}");
     } else {
         printf("%s (%zu completed)\n", status, result->completed);
+        const struct bp_ssh *failed_ssh = NULL;
         for (size_t i = 0; i < plan->count; ++i) {
-            print_step(plan, &plan->steps[i]);
+            const struct bp_step *step = &plan->steps[i];
+            if (step->source == result->failure_source) failed_ssh = step->ssh;
+            print_step(plan, step);
             putchar('\n');
         }
         if (plan->lock) {
@@ -172,6 +175,12 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
             }
         }
         if (error) fprintf(stderr, "brw: %s %s\n", error, detail);
+        if (failed_ssh && error && !strcmp(error, "invalid-ssh-request")) {
+            if (!plan->ssh_options.identity_file)
+                fputs("Supply the SSH identity file with --identity FILE.\n", stderr);
+            if (!plan->ssh_options.known_hosts)
+                fputs("Supply the trusted host key file with --known-hosts FILE.\n", stderr);
+        }
         if (result->remote_result_unknown)
             fputs("Check the remote state before running this Blueprint again.\n", stderr);
         else if (result->repair_completed) fputs("The host repair completed and may have left side effects.\n", stderr);
@@ -192,12 +201,15 @@ int brw_blueprint_command(int argc, const char *const *argv)
         else if (!strcmp(argv[i], "--json") && !json) json = true;
         else if (!strcmp(argv[i], "--dry-run") && !dry_run) dry_run = true;
         else {
+            if (generate) goto usage;
             const char **option = NULL;
             if (!strcmp(argv[i], "--allow-target")) option = &ssh.allowed_target;
             else if (!strcmp(argv[i], "--identity")) option = &ssh.identity_file;
             else if (!strcmp(argv[i], "--known-hosts")) option = &ssh.known_hosts;
-            if (!option || *option || ++i == argc || !*argv[i] || !strncmp(argv[i], "--", 2)) goto usage;
-            *option = argv[i];
+            if (!option || *option || i + 1 == argc) goto usage;
+            const char *value = argv[++i];
+            if (!*value || !strncmp(value, "--", 2)) goto usage;
+            *option = value;
         }
     }
     if ((generate && dry_run) || !digest || !workspace || !*workspace || !*argv[1]) goto usage;
@@ -213,8 +225,10 @@ int brw_blueprint_command(int argc, const char *const *argv)
     capabilities |= 1u << BP_INSTALL;
 #endif
 #ifdef _WIN32
-    plan.ssh_backend = brw_windows_ssh_run;
-    capabilities |= 1u << BP_SSH;
+    if (brw_windows_ssh_available()) {
+        plan.ssh_backend = brw_windows_ssh_run;
+        capabilities |= 1u << BP_SSH;
+    }
 #endif
     const char *error = bp_load(argv[1], digest, BRW_BP_PLATFORM, BRW_BP_ARCH,
                                 capabilities, &bundle, detail);

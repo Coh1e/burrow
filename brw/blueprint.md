@@ -74,7 +74,7 @@ The planning runtime has no filesystem, process or network bindings. A bundle ma
 
 ## Explicit SSH steps
 
-Declare `requires\tssh` in the manifest (with a tab). In the module, specify the remote user, host and command. The default port is 22 and the default timeout is 30 seconds.
+Declare `requires\tssh` in the manifest (with a tab). This capability uses the Windows system OpenSSH client. A host without that client rejects a required SSH capability before any step runs. In the module, specify the remote user, host and command. The default port is 22 and the default timeout is 30 seconds.
 
 ```js
 export default () => [
