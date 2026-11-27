@@ -75,6 +75,7 @@ jobs:
           done
           ctest --test-dir .local/brw-blueprint -E "^($covered)$" --no-tests=ignore --output-on-failure
       - name: Run the shared Blueprint acceptance checklist
+        id: checklist
         run: python3 tests/blueprint-acceptance/run.py --build-dir .local/brw-blueprint --evidence .local/blueprint-evidence
       - name: Exercise the optional C++23 module from C
         env:
@@ -88,7 +89,7 @@ jobs:
             ctest --test-dir .local/digby-cpp -R "^${contract}$" --no-tests=error --output-on-failure
           done
       - name: Keep the host acceptance reports
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && (steps.checklist.outcome == 'success' || steps.checklist.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
         with:
           name: blueprint-acceptance-${{ matrix.host }}

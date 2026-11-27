@@ -100,8 +100,11 @@ function Invoke-Probe($alias, $arguments) {
     Invoke-ProcessCapture $info -InputLine 'input'
 }
 New-Item -ItemType File -Path (Join-Path $root 'cwd.marker') | Out-Null
+# .NET Framework uses the console input encoding for redirected stdin.
+# Send the same bytes to each shim, including on a UTF-8 console.
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 $probe = Invoke-Probe $shim ('--probe "" "' + [char]0x706b + ' star" "a\"b" "ends \\" last')
-Assert ($probe.Code -eq 41 -and $probe.out.TrimEnd() -ceq 'output' -and $probe.err.TrimEnd() -ceq 'diagnostic') 'Native argv, cwd, or stream forwarding failed'
+Assert ($probe.Code -eq 41 -and $probe.out.TrimEnd() -ceq 'output' -and $probe.err.TrimEnd() -ceq 'diagnostic') "Native argv, cwd, or stream forwarding failed (exit $($probe.Code))"
 
 $again = Invoke-Install 'local-tool' $archive $sha
 Assert ($again.Code -ne 0 -and $again.Result.error -eq 'destination-exists') 'Existing version is not protected'
