@@ -271,11 +271,8 @@ def exercise_cli_diagnostics(root, brw):
     assert run.returncode == 1 and all(word in run.stderr for word in
         (b"manual.tar", b"occupied", b"destination-exists", b"new directory")), run.stderr
     if os.name == "posix":
-        # Native filenames can contain arbitrary bytes. The JSON interface accepts UTF-8.
-        raw_name = b"invalid-\xff.tar"
-        with open(os.fsencode(root) + b"/" + raw_name, "wb") as stream:
-            stream.write(data)
-        args[2:4] = [raw_name, "unused"]
+        # POSIX argv carries bytes. Reject the operand before accessing the filesystem.
+        args[2:4] = [b"invalid-\xff.tar", "unused"]
         run = subprocess.run([*args, "--json"], cwd=root, capture_output=True, timeout=25)
         assert run.returncode == 1 and json.loads(run.stdout)["error"] == "invalid-utf8"
         assert not (root / "unused").exists()
