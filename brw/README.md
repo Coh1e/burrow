@@ -20,6 +20,7 @@ POSIX to run the following CTest contracts.
 | CTest name | Observable behavior |
 | --- | --- |
 | `digby_plan`, `blueprint_plan` | Plan order, completed steps, failure location and missing capabilities before writes |
+| `digby_ssh` | A local simulated transport counts connections and sends. Preview opens no connection, authorization and host identity failures send no command, and loss after dispatch reports an unknown exit without a retry. |
 | `digby_literal`, `blueprint_cli` | UTF-8 byte offsets, file copy and text replacement, archived tool and sibling contents, and preservation of the previous command when an archive lacks its declared entry |
 | `git_worktree` | Actual commits after clone and fast-forward, refusal of dirty or diverged worktrees |
 
@@ -62,6 +63,40 @@ The Windows-to-WSL acceptance run transfers the sources and pinned archives
 over verified SSH, builds `brw` offline, applies the shared Blueprint and
 runs the Linux executable from its Release archive.
 [Evidence and reproduction steps](../docs/ssh-build-acceptance.md)
+
+## Run an explicit SSH operation on Windows
+
+`brw ssh` runs one command on an authorized SSH target using the Windows
+OpenSSH client. Supply the identity file and a dedicated OpenSSH
+`known_hosts` file containing the host key verified by the operator. Digby
+uses only that file for host-key lookup. It looks up
+`host` for port 22 and `[host]:port` for any other port. File references
+containing control characters, double quotes or `${` are rejected.
+
+~~~powershell
+brw ssh build@wsl.example --port 2222 --allow-target build@wsl.example:2222 --identity C:\keys\build --known-hosts C:\keys\wsl_hosts --timeout 30 --dry-run --json -- 'uname -s'
+~~~
+
+The independent `--allow-target` argument must match the requested user,
+host and port exactly. Use brackets for an IPv6 address, for example
+`build@[::1]` with `--allow-target build@[::1]:22`. The default port is 22
+and the default timeout for the operation is 30 seconds. Pass one POSIX
+shell command as a single argument after `--`.
+
+Preview reports the target, command and pending host verification without
+opening a connection. To execute, omit `--dry-run`. With `--json`, stdout
+contains one result object. The client writes remote output to stderr.
+
+| JSON status | `remoteExit` | Meaning |
+| --- | --- | --- |
+| `planned` | `null` | Read-only preview. |
+| `rejected` | `null` | The request failed before the command was sent. Check the reported error. |
+| `completed` | `0` to `255` | The remote exit code was confirmed. `brw` returns that code. |
+| `unknown` | `null` | The connection ended or timed out after dispatch without a confirmed exit. Check remote state before deciding to run the operation again. |
+
+An unknown result returns a nonzero exit code. Digby sends the command at
+most once per invocation. A confirmed remote exit of 255 appears as
+`completed` with `remoteExit: 255`.
 
 ## Register and use a source
 

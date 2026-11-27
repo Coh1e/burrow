@@ -65,7 +65,7 @@ jobs:
         run: |
           # The acceptance checklist runs blueprint_cli and saves its transcript.
           covered=blueprint_cli
-          for contract in digby_plan digby_literal blueprint_plan git_worktree; do
+          for contract in digby_plan digby_ssh digby_literal blueprint_plan git_worktree; do
             ctest --test-dir .local/brw-blueprint -R "^${contract}$" --no-tests=error --output-on-failure
             covered="$covered|$contract"
           done

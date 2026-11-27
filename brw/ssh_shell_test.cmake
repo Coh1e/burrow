@@ -1,0 +1,46 @@
+cmake_minimum_required(VERSION 3.25)
+
+find_program(SHELL NAMES sh HINTS "${TOOLCHAIN_BIN}" REQUIRED)
+string(RANDOM LENGTH 12 id)
+set(root "${CMAKE_CURRENT_BINARY_DIR}/ssh shell ${id}")
+file(MAKE_DIRECTORY "${root}")
+set(ENV{BRW_TEST_SSH_CLIENT} "${CLIENT}")
+set(ENV{BRW_FIXTURE_MODE} success)
+set(ENV{BRW_FIXTURE_CONNECT} "${root}/connect")
+set(ENV{BRW_FIXTURE_ARGS} "${root}/args")
+set(ENV{BRW_FIXTURE_SEND} "${root}/stdin")
+set(target "operator@host.example.invalid")
+set(command [=[printf '%s\n' 'command stdout'; printf '%s\n' 'command stderr' >&2; exit "$BRW_FIXTURE_REMOTE_EXIT"]=])
+execute_process(COMMAND "${BRW}" ssh "${target}" --allow-target "${target}:22"
+    --identity "${root}/identity" --known-hosts "${root}/known_hosts" -- "${command}"
+  RESULT_VARIABLE rc OUTPUT_VARIABLE report ERROR_VARIABLE diagnostics TIMEOUT 10)
+if(NOT "${rc}" STREQUAL "0")
+  message(FATAL_ERROR "Could not capture the SSH client invocation: ${rc}, ${report}, ${diagnostics}")
+endif()
+
+# Replay the actual remote argv and stdin through a local POSIX shell.
+file(READ "${root}/args" args)
+set(destination "--\n${target}\n")
+string(FIND "${args}" "${destination}" start)
+if(start EQUAL -1)
+  message(FATAL_ERROR "Missing SSH destination in the recorded argv")
+endif()
+string(LENGTH "${destination}" destination_length)
+math(EXPR start "${start} + ${destination_length}")
+string(SUBSTRING "${args}" ${start} -1 wrapper)
+get_filename_component(shell_bin "${SHELL}" DIRECTORY)
+set(ENV{PATH} "${shell_bin};$ENV{PATH}")
+foreach(exit_code 0 255)
+  set(ENV{BRW_FIXTURE_REMOTE_EXIT} "${exit_code}")
+  execute_process(COMMAND "${SHELL}" -c "${wrapper}" INPUT_FILE "${root}/stdin"
+    RESULT_VARIABLE rc OUTPUT_VARIABLE protocol ERROR_VARIABLE output TIMEOUT 10)
+  string(REGEX MATCH "^brw-ready-([0-9a-f]+)\n" ready "${protocol}")
+  set(nonce "${CMAKE_MATCH_1}")
+  string(LENGTH "${nonce}" nonce_length)
+  if(NOT "${rc}" STREQUAL "0" OR NOT nonce_length EQUAL 32 OR
+     NOT protocol STREQUAL "brw-ready-${nonce}\nbrw-exit-${nonce}=${exit_code}\n" OR
+     NOT output STREQUAL "command stdout\ncommand stderr\n")
+    message(FATAL_ERROR "Shell did not confirm exit ${exit_code}: ${rc}, ${protocol}, ${output}")
+  endif()
+endforeach()
+file(REMOVE_RECURSE "${root}")
