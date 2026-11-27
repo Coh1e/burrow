@@ -1,12 +1,14 @@
 # Windows 经 SSH 在专用 WSL 中离线构建和应用 Blueprint
 
-2026-11-27，Windows 使用系统 OpenSSH，将修订 `adb79f94c5a7e9b7311f2f00b7eb3a3bcb508c3c` 的源码、四份固定依赖和跨平台 Blueprint 传入专用 Ubuntu 24.04.5 LTS WSL2。远端从空目录构建启用 QuickJS 的 `brw`，预览、应用、重跑同一份 Blueprint，并执行了 Release 归档内的 ELF。另一次命令在远端确认启动后断线，客户端报告结果未知，远端仅记录一次启动。[#132 验收条件](https://github.com/Coh1e/burrow/issues/132) · [本轮原始记录 ZIP](history/ssh-132/evidence.zip)
+2026-11-27，Windows 使用系统 OpenSSH，将修订 `adb79f94c5a7e9b7311f2f00b7eb3a3bcb508c3c` 的源码、固定依赖和跨平台 Blueprint 传入专用 Ubuntu 24.04.5 LTS WSL2。远端从空目录构建启用 QuickJS 的 `brw`，预览、应用、重跑同一份 Blueprint，并执行了 Release 归档内的 ELF。[#132 验收条件](https://github.com/Coh1e/burrow/issues/132) · [本轮原始记录 ZIP](history/ssh-132/evidence.zip)
 
 ## 已有证据
 
 #117 的原型在 WSL 内用预置材料完成了离线演练。#144 在三个宿主上运行了相同的 Blueprint，核对了 Debug、Release 和下游测试的参数与输出。原样例的 `Release.zip` 只含模式标记。本轮复用其清单、子蓝图和断言，在 Linux 的工具锁中选入能编译 C 程序的 builder，沿用同一个具名输出交给消费者。[#117 原型记录](https://github.com/Coh1e/burrow/issues/117#issuecomment-7100484116) · [#144 三宿主记录](blueprint-acceptance.md) · [Linux 构建工具](../tests/ssh-acceptance/linux_builder.py)
 
 ## 实跑结果
+
+下表记录本轮 `python -B tests/ssh-acceptance/run.py` 的结果。Windows 驱动核对传输字节数、材料摘要和断线后的启动次数。远端用 `sh tests/ssh-acceptance/build.sh` 记录网络、编译器和构建日志，再通过 `python3 -B tests/ssh-acceptance/linux_case.py` 运行并记录 Linux 产物。完整参数见[复跑命令](#在-windows-复跑)。[Windows 驱动](../tests/ssh-acceptance/run.py) · [隔离构建](../tests/ssh-acceptance/build.sh) · [产物验收](../tests/ssh-acceptance/linux_case.py)
 
 | 验收项 | 观察结果 | ZIP 内记录 |
 | --- | --- | --- |
@@ -37,4 +39,4 @@ python -B tests/ssh-acceptance/run.py `
   --evidence .local/132-ssh-rerun
 ```
 
-驱动通过 SSH 取回证据。复跑结束后应关闭临时监听、撤销凭据并停止专用 WSL。本轮已验证服务停止、临时密钥已清理，Windows 回环端口拒绝连接。专用发行版保留登记，处于停止状态。详见 ZIP 内的 `host-cleanup.json`。
+驱动通过 SSH 取回证据。每次运行使用独立的 `/tmp/brw-132-*` 目录，驱动会留下源码和构建产物供核查。复跑结束后应关闭临时监听、撤销凭据并停止专用 WSL。本轮已验证服务停止、临时密钥已清理，Windows 回环端口拒绝连接。专用发行版保留登记，处于停止状态。详见 ZIP 内的 `host-cleanup.json`。
