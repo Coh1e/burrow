@@ -25,8 +25,11 @@ const char *bp_compare_output_case(const char *workspace, const char *a,
                                    const char *b, enum bp_output_match *match);
 const char *bp_validate_file_operands(const struct bp_step *s);
 const char *bp_replace_text(FILE *stage, const struct bp_step *s, const char *text, size_t size);
-/* Validate the half-open segment between external states. Indices refer to plan. */
+/* A future input still participates in path and in-memory content checks.
+   Only reads from the not-yet-created workspace directory are deferred. */
+enum bp_edit_input { BP_EDIT_SKIP, BP_EDIT_WORKSPACE, BP_EDIT_FUTURE };
+/* Both the optional input states and failed_step use original plan positions. */
 const char *bp_validate_text_range(const char *workspace, const struct bp_plan *plan,
-                                   size_t start, size_t end, size_t *failed_step);
+                                   size_t start, size_t end, const enum bp_edit_input *inputs, size_t *failed_step);
 
 #endif

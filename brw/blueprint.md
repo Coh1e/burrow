@@ -95,6 +95,10 @@ brw unpack assets.tar.gz assets --sha256 DIGEST --workspace project --json
 
 Both commands accept tar, gzip-compressed tar and ZIP. Entries must be ordinary files or directories with portable package paths. Paths differing only in ASCII case, links and repeated entries produce errors. The limits are 64 MiB of archive bytes, 256 MiB of expanded file data and 4,096 entries and paths (including implicit directories). A corrupt or out-of-bounds entry aborts publication, even if earlier files have already been staged.
 
+For a gzip-compressed tar, Digby verifies each gzip member's CRC and uncompressed length through the end of the stream. The entire expanded tar stream, including its headers and padding, is limited to 320 MiB.
+
+The CLI accepts UTF-8 paths. A successful JSON report includes `operation`, `payload`, `sha256` and the workspace-relative `path`. Its `status` is `planned` during preview and `applied` after publication. On an error it returns a nonzero exit code, `status: "failed"` and a stable `error` code.
+
 Publication requires a filesystem that can atomically rename a directory while refusing replacement. On Linux, use a native filesystem such as ext4 when a mounted Windows drive in WSL reports `publish-directory`.
 
 ## Explicit SSH steps

@@ -97,7 +97,6 @@ const char *bp_load(const char *directory, const char *digest, const char *platf
                     const char *arch, unsigned capabilities, struct bp_bundle *out,
                     char detail[BP_DETAIL_CAP]);
 void bp_bundle_free(struct bp_bundle *bundle);
-bool bp_valid_utf8(const char *text, size_t size);
 const struct bp_file *bp_find(const struct bp_bundle *bundle, const char *path);
 const char *bp_build(const struct bp_bundle *bundle, struct bp_plan *out, char detail[BP_DETAIL_CAP]);
 void bp_plan_free(struct bp_plan *plan);

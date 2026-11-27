@@ -3,6 +3,22 @@
 #include <limits.h>
 #include <string.h>
 
+bool bp_valid_utf8(const char *text, size_t size)
+{
+    const unsigned char *p = (const unsigned char *)text, *end = p + size;
+    while (p < end) {
+        unsigned lead = *p++;
+        if (lead < 0x80) continue;
+        if (lead < 0xc2 || lead > 0xf4) return false;
+        unsigned n = lead < 0xe0 ? 1 : lead < 0xf0 ? 2 : 3;
+        if ((size_t)(end - p) < n || (lead == 0xe0 && *p < 0xa0) ||
+            (lead == 0xed && *p >= 0xa0) || (lead == 0xf0 && *p < 0x90) ||
+            (lead == 0xf4 && *p >= 0x90)) return false;
+        while (n--) if ((*p++ & 0xc0) != 0x80) return false;
+    }
+    return true;
+}
+
 static unsigned lower(unsigned c)
 {
     return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;

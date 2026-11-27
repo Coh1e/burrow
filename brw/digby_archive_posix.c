@@ -5,7 +5,6 @@
 #endif
 #include "digby_archive_io.h"
 
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -17,27 +16,30 @@
 #include <linux/fs.h>
 #endif
 
+struct staged_member {
+    struct staged_member *next, *children;
+    dev_t device;
+    ino_t inode;
+    bool directory;
+    char name[];
+};
+
 struct digby_archive_stage {
     int parent, root;
     char *path, *name;
     char temporary[64];
+    struct staged_member *members;
 };
 
 static const int directory_flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
 
-static int child_directory(int parent, const char *name, bool create)
-{
-    if (create && mkdirat(parent, name, 0700) && errno != EEXIST) return -1;
-    return openat(parent, name, directory_flags);
-}
-
 /* Consume the starting fd. The returned leaf borrows from the split path. */
-static int walk_parent(int fd, char *path, bool create, char **leaf)
+static int walk_parent(int fd, char *path, char **leaf)
 {
     char *slash;
     while (fd >= 0 && (slash = strchr(path, '/')) != NULL) {
         *slash = 0;
-        int next = child_directory(fd, path, create);
+        int next = openat(fd, path, directory_flags);
         close(fd);
         fd = next;
         path = slash + 1;
@@ -52,7 +54,7 @@ static const char *open_destination(struct digby_archive_stage *s,
     s->parent = -1;
     s->path = strdup(relative);
     if (!s->path) return "out-of-memory";
-    s->parent = walk_parent(open(workspace, directory_flags), s->path, false, &s->name);
+    s->parent = walk_parent(open(workspace, directory_flags), s->path, &s->name);
     if (s->parent < 0) return "unsafe-parent";
     struct stat info;
     if (!fstatat(s->parent, s->name, &info, AT_SYMLINK_NOFOLLOW)) return "destination-exists";
@@ -77,7 +79,7 @@ const char *digby_archive_begin(const char *workspace, const char *relative,
                                 struct digby_archive_stage **out)
 {
     *out = NULL;
-    struct digby_archive_stage *s = malloc(sizeof *s);
+    struct digby_archive_stage *s = calloc(1, sizeof *s);
     if (!s) return "out-of-memory";
     const char *error = open_destination(s, workspace, relative);
     if (!error) {
@@ -94,7 +96,8 @@ const char *digby_archive_begin(const char *workspace, const char *relative,
                 *out = s;
                 return NULL;
             }
-            if (unlinkat(s->parent, s->temporary, AT_REMOVEDIR)) error = "cleanup-stage";
+            /* Without a handle we cannot identify the directory for rollback. */
+            error = "cleanup-stage";
             break;
         }
     }
@@ -103,56 +106,88 @@ const char *digby_archive_begin(const char *workspace, const char *relative,
     return error;
 }
 
+static bool same_member(const struct staged_member *member, const struct stat *info)
+{
+    return member->device == info->st_dev && member->inode == info->st_ino &&
+           (member->directory ? S_ISDIR(info->st_mode) : S_ISREG(info->st_mode));
+}
+
+/* Only recorded directories may be reopened for additional archive members. */
+static const char *open_member(int parent, struct staged_member **siblings, const char *name,
+                               bool directory, bool executable, int *out, struct staged_member **record)
+{
+    struct stat info;
+    if (directory) {
+        for (struct staged_member *member = *siblings; member; member = member->next) {
+            if (strcmp(name, member->name)) continue;
+            int fd = openat(parent, name, directory_flags);
+            if (fd < 0) return "stage-changed";
+            if (fstat(fd, &info) || !same_member(member, &info)) {
+                close(fd);
+                return "stage-changed";
+            }
+            *record = member;
+            *out = fd;
+            return NULL;
+        }
+    }
+    size_t length = strlen(name) + 1;
+    struct staged_member *member = malloc(sizeof *member + length);
+    if (!member) return "out-of-memory";
+    int fd;
+    if (directory) {
+        if (mkdirat(parent, name, 0700)) { free(member); return "archive-entry"; }
+        fd = openat(parent, name, directory_flags);
+    } else {
+        fd = openat(parent, name, O_WRONLY | O_NOFOLLOW | O_CREAT | O_EXCL | O_CLOEXEC,
+                    executable ? 0700 : 0600);
+    }
+    if (fd < 0 || fstat(fd, &info)) {
+        const char *error = directory || fd >= 0 ? "cleanup-stage" : "archive-entry";
+        if (fd >= 0) close(fd);
+        free(member);
+        return error;
+    }
+    member->device = info.st_dev;
+    member->inode = info.st_ino;
+    member->directory = directory;
+    member->children = NULL;
+    memcpy(member->name, name, length);
+    member->next = *siblings;
+    *siblings = member;
+    *record = member;
+    *out = fd;
+    return NULL;
+}
+
 const char *digby_archive_entry(struct digby_archive_stage *s, const char *relative,
                                 bool directory, bool executable, FILE **out)
 {
     *out = NULL;
-    char *path = strdup(relative), *name;
+    char *path = strdup(relative);
     if (!path) return "out-of-memory";
-    int parent = walk_parent(dup(s->root), path, true, &name);
-    const char *error = "archive-entry";
-    if (parent >= 0) {
-        if (directory) {
-            int fd = child_directory(parent, name, true);
-            if (fd >= 0) { close(fd); error = NULL; }
-        } else {
-            int fd = openat(parent, name, O_WRONLY | O_NOFOLLOW | O_CREAT | O_EXCL | O_CLOEXEC,
-                            executable ? 0700 : 0600);
-            if (fd >= 0) {
-                *out = fdopen(fd, "wb");
-                if (*out) error = NULL;
-                else close(fd);
-            }
+    int parent = s->root;
+    struct staged_member **siblings = &s->members;
+    const char *error;
+    for (char *name = path;;) {
+        char *slash = strchr(name, '/');
+        if (slash) *slash = 0;
+        struct staged_member *member;
+        int fd;
+        error = open_member(parent, siblings, name, slash || directory, executable, &fd, &member);
+        if (parent != s->root) close(parent);
+        if (error) break;
+        if (!slash) {
+            if (directory) close(fd);
+            else if (!(*out = fdopen(fd, "wb"))) { close(fd); error = "archive-entry"; }
+            break;
         }
-        close(parent);
+        parent = fd;
+        siblings = &member->children;
+        name = slash + 1;
     }
     free(path);
     return error;
-}
-
-/* Consume fd and remove entries underneath it without following links. */
-static bool empty_directory(int fd)
-{
-    DIR *dir = fdopendir(fd);
-    if (!dir) { close(fd); return false; }
-    bool ok = true;
-    for (;;) {
-        errno = 0;
-        struct dirent *item = readdir(dir);
-        if (!item) { if (errno) ok = false; break; }
-        if (!strcmp(item->d_name, ".") || !strcmp(item->d_name, "..")) continue;
-        struct stat info;
-        if (fstatat(fd, item->d_name, &info, AT_SYMLINK_NOFOLLOW)) { ok = false; continue; }
-        int flags = 0;
-        if (S_ISDIR(info.st_mode)) {
-            int child = openat(fd, item->d_name, directory_flags);
-            if (child < 0 || !empty_directory(child)) { ok = false; continue; }
-            flags = AT_REMOVEDIR;
-        }
-        if (unlinkat(fd, item->d_name, flags)) ok = false;
-    }
-    if (closedir(dir)) ok = false;
-    return ok;
 }
 
 static bool stage_owned(const struct digby_archive_stage *s)
@@ -163,10 +198,39 @@ static bool stage_owned(const struct digby_archive_stage *s)
            named.st_dev == opened.st_dev && named.st_ino == opened.st_ino;
 }
 
+/* A negative parent only releases records. Never enumerate or unlink unrecorded entries. */
+static bool release_members(struct staged_member *members, int parent)
+{
+    bool ok = true;
+    while (members) {
+        struct staged_member *member = members;
+        members = member->next;
+        int child = -1;
+        struct stat info;
+        if (parent >= 0 && member->children) {
+            child = openat(parent, member->name, directory_flags);
+            if (child >= 0 && (fstat(child, &info) || !same_member(member, &info))) {
+                close(child);
+                child = -1;
+            }
+        }
+        bool missing_parent = parent >= 0 && member->children && child < 0;
+        bool children_removed = release_members(member->children, child) && !missing_parent;
+        if (child >= 0) close(child);
+        if (!children_removed) ok = false;
+        if (parent >= 0 && children_removed &&
+            (fstatat(parent, member->name, &info, AT_SYMLINK_NOFOLLOW) || !same_member(member, &info) ||
+             unlinkat(parent, member->name, member->directory ? AT_REMOVEDIR : 0))) ok = false;
+        free(member);
+    }
+    return ok;
+}
+
 const char *digby_archive_finish(struct digby_archive_stage *s, bool publish)
 {
     const char *error = NULL;
-    if (!stage_owned(s)) error = "stage-changed";
+    bool owned = stage_owned(s);
+    if (!owned) error = "stage-changed";
     else if (publish) {
 #ifdef __APPLE__
         int status = renameatx_np(s->parent, s->temporary, s->parent, s->name, RENAME_EXCL);
@@ -175,11 +239,14 @@ const char *digby_archive_finish(struct digby_archive_stage *s, bool publish)
 #endif
         if (status) error = errno == EEXIST || errno == ENOTEMPTY ? "destination-exists" : "publish-directory";
     }
-    if (!publish || error) {
-        int fd = dup(s->root);
-        if (fd < 0 || !empty_directory(fd) || !stage_owned(s) ||
-            unlinkat(s->parent, s->temporary, AT_REMOVEDIR)) error = "cleanup-stage";
+    bool rollback = owned && (!publish || error);
+    if (rollback && !stage_owned(s)) {
+        rollback = false;
+        error = "stage-changed";
     }
+    bool removed = release_members(s->members, rollback ? s->root : -1);
+    if (rollback && (!removed || !stage_owned(s) || unlinkat(s->parent, s->temporary, AT_REMOVEDIR)))
+        error = "cleanup-stage";
     close(s->root);
     close_destination(s);
     free(s);

@@ -18,7 +18,8 @@ const char *digby_archive_entry(struct digby_archive_stage *stage, const char *r
                                 bool directory, bool executable, FILE **out);
 
 /* Consumes the stage, including on failure. Publication never overwrites an
-   existing destination. An unpublished stage is removed. */
+   existing destination. Rollback removes owned entries. A stage-changed or
+   cleanup-stage error can leave the staging directory for inspection. */
 const char *digby_archive_finish(struct digby_archive_stage *stage, bool publish);
 
 #endif

@@ -3,6 +3,7 @@
 #include "verified_file.h"
 #include <archive.h>
 #include <archive_entry.h>
+#include <zlib.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -130,13 +131,60 @@ static int enable_zip(struct archive *reader, const struct digby_archive_plan *p
     if (plan->size >= 22 && !memcmp(plan->data, empty_end, sizeof empty_end) &&
         plan->size - 22 == (size_t)plan->data[20] + 256u * plan->data[21])
         return archive_read_support_format_zip_streamable(reader);
-    return archive_read_support_format_zip_seekable(reader);
+    int status = archive_read_support_format_zip_seekable(reader);
+    if (status != ARCHIVE_OK) return status;
+    return archive_read_set_format_option(reader, "zip", "check-member-names", "1");
 }
 
 static const char *check_operands(const struct digby_archive_plan *plan)
 {
     if (!plan || !plan->data || !plan->workspace || !*plan->workspace) return "invalid-archive-plan";
+    if (plan->size > BRW_PAYLOAD_LIMIT) return "archive-limit";
     return bp_safe_path(plan->destination) ? NULL : "unsafe-destination";
+}
+
+struct gzip_source {
+    z_stream stream;
+    unsigned char block[32768];
+    size_t expanded;
+    bool member_ended;
+    const char *error;
+};
+
+/* zlib's gzip wrapper verifies each member's CRC and uncompressed size.
+   Feed its output straight to the TAR reader and retain only one block. */
+static la_ssize_t read_gzip(struct archive *reader, void *context, const void **buffer)
+{
+    (void)reader;
+    struct gzip_source *source = context;
+    z_stream *stream = &source->stream;
+    *buffer = source->block;
+    for (;;) {
+        if (source->member_ended) {
+            /* gzip writers may pad compressed members with zero bytes. */
+            while (stream->avail_in && !*stream->next_in) {
+                ++stream->next_in;
+                --stream->avail_in;
+            }
+            if (!stream->avail_in) return 0;
+            if (inflateReset(stream) != Z_OK) break;
+        }
+        stream->next_out = source->block;
+        stream->avail_out = sizeof source->block;
+        int status = inflate(stream, Z_NO_FLUSH);
+        if (status != Z_OK && status != Z_STREAM_END) break;
+        source->member_ended = status == Z_STREAM_END;
+        size_t n = sizeof source->block - stream->avail_out;
+        /* Bound decompression even for TAR headers or padding after TAR EOF. */
+        if (n > EXPANDED_LIMIT + BRW_PAYLOAD_LIMIT - source->expanded) {
+            source->error = "archive-limit";
+            return -1;
+        }
+        source->expanded += n;
+        if (n) return (la_ssize_t)n;
+    }
+    source->error = "archive-data";
+    return -1;
 }
 
 static const char *scan(const struct digby_archive_plan *plan, struct digby_archive_stage *stage)
@@ -145,10 +193,21 @@ static const char *scan(const struct digby_archive_plan *plan, struct digby_arch
     if (!reader) return "out-of-memory";
     const char *error = NULL;
     struct extraction tree = {.stage = stage};
-    if (archive_read_support_format_tar(reader) != ARCHIVE_OK ||
-        enable_zip(reader, plan) != ARCHIVE_OK ||
-        archive_read_support_filter_gzip(reader) != ARCHIVE_OK ||
-        archive_read_open_memory(reader, plan->data, plan->size) != ARCHIVE_OK) error = "archive-data";
+    bool gzip = plan->size >= 2 && plan->data[0] == 0x1f && plan->data[1] == 0x8b;
+    struct gzip_source source = {0};
+    bool gzip_open = false;
+    if (archive_read_support_format_tar(reader) != ARCHIVE_OK) error = "archive-data";
+    else if (gzip) {
+        if (inflateInit2(&source.stream, MAX_WBITS + 16) != Z_OK) error = "out-of-memory";
+        else {
+            gzip_open = true;
+            source.stream.next_in = (Bytef *)plan->data;
+            source.stream.avail_in = (uInt)plan->size;
+            if (archive_read_open(reader, &source, NULL, read_gzip, NULL) != ARCHIVE_OK)
+                error = "archive-data";
+        }
+    } else if (enable_zip(reader, plan) != ARCHIVE_OK ||
+               archive_read_open_memory(reader, plan->data, plan->size) != ARCHIVE_OK) error = "archive-data";
 
     size_t count = 0;
     while (!error) {
@@ -160,6 +219,13 @@ static const char *scan(const struct digby_archive_plan *plan, struct digby_arch
         else error = read_member(reader, item, &tree);
     }
     if (archive_read_free(reader) != ARCHIVE_OK && !error) error = "archive-data";
+    if (gzip_open) {
+        /* TAR may stop before its padding or the last gzip trailer. */
+        const void *unused;
+        if (!error) while (read_gzip(NULL, &source, &unused) > 0) { }
+        if (source.error) error = source.error;
+        if (inflateEnd(&source.stream) != Z_OK && !error) error = "archive-data";
+    }
     for (size_t i = 0; i < tree.count; ++i) free(tree.members[i].path);
     free(tree.members);
     return error;
