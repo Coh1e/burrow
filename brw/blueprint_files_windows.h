@@ -60,4 +60,48 @@ static HANDLE open_directory(const wchar_t *path)
     }
     return h;
 }
+
+/* Consumes dir and splits the validated relative path in place. */
+static inline HANDLE descend_parent(HANDLE dir, wchar_t *path, wchar_t **leaf)
+{
+    *leaf = path;
+    wchar_t *slash;
+    while (dir != INVALID_HANDLE_VALUE && (slash = wcschr(*leaf, L'/')) != NULL) {
+        *slash = 0;
+        HANDLE next = open_child(dir, *leaf, FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, FILE_DIRECTORY_FILE);
+        CloseHandle(dir);
+        dir = next;
+        if (dir != INVALID_HANDLE_VALUE && !ordinary(dir, true)) {
+            CloseHandle(dir);
+            dir = INVALID_HANDLE_VALUE;
+        }
+        *leaf = slash + 1;
+    }
+    return dir;
+}
+
+static inline HANDLE open_parent(const char *workspace, wchar_t *path, wchar_t **leaf)
+{
+    wchar_t *root = wide(workspace);
+    HANDLE dir = root ? open_directory(root) : INVALID_HANDLE_VALUE;
+    free(root);
+    return descend_parent(dir, path, leaf);
+}
+
+static inline DWORD rename_sibling(HANDLE stage, const wchar_t *name, bool replace_existing)
+{
+    size_t bytes = wcslen(name) * sizeof *name;
+    ULONG size = (ULONG)(sizeof(FILE_RENAME_INFORMATION) + bytes);
+    FILE_RENAME_INFORMATION *info = calloc(1, size);
+    if (!info) return ERROR_NOT_ENOUGH_MEMORY;
+    info->ReplaceIfExists = replace_existing;
+    /* A leaf name with no RootDirectory renames within the stage's directory. */
+    info->FileNameLength = (ULONG)bytes;
+    memcpy(info->FileName, name, bytes);
+    IO_STATUS_BLOCK io;
+    NTSTATUS rc = NtSetInformationFile(stage, &io, info, size, FileRenameInformation);
+    free(info);
+    return rc < 0 ? RtlNtStatusToDosError(rc) : ERROR_SUCCESS;
+}
 #endif

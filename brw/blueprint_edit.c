@@ -40,13 +40,17 @@ static unsigned fold_ascii(unsigned c)
 }
 
 static const char *compare_outputs(const char *workspace, const char *a, const char *b,
-                                   enum bp_output_match *match)
+                                   bool future_parent, enum bp_output_match *match)
 {
     *match = BP_SAME_OUTPUT;
     if (!strcmp(a, b)) return NULL;
     *match = BP_DISTINCT_OUTPUTS;
     for (size_t i = 0; a[i] || b[i]; ++i)
         if (fold_ascii((unsigned char)a[i]) != fold_ascii((unsigned char)b[i])) return NULL;
+    if (future_parent) {
+        *match = BP_UNKNOWN_CASE;
+        return NULL;
+    }
     return bp_compare_output_case(workspace, a, b, match);
 }
 
@@ -73,15 +77,16 @@ static char *replace_memory(const struct bp_step *step, const char *input, size_
 const char *bp_validate_text_plan(const char *workspace, const struct bp_plan *plan, size_t *failed_step)
 {
     if (!plan) return "invalid-plan";
-    return bp_validate_text_range(workspace, plan, 0, plan->count, failed_step);
+    return bp_validate_text_range(workspace, plan, 0, plan->count, NULL, failed_step);
 }
 
 const char *bp_validate_text_range(const char *workspace, const struct bp_plan *plan,
-                                   size_t start, size_t end, size_t *failed_step)
+                                   size_t start, size_t end, const enum bp_edit_input *inputs, size_t *failed_step)
 {
     if (!workspace || !plan || plan->count > BP_MAX_STEPS || !failed_step ||
         start > end || end > plan->count) return "invalid-plan";
     for (size_t i = start; i < end; ++i) {
+        if (inputs && inputs[i] == BP_EDIT_SKIP) continue;
         const struct bp_step *step = &plan->steps[i];
         if (step->op == BP_COPY || step->op == BP_REPLACE) {
             const char *error = bp_validate_file_operands(step);
@@ -93,15 +98,17 @@ const char *bp_validate_text_range(const char *workspace, const struct bp_plan *
     size_t stop = end;
     for (size_t i = start; i < stop; ++i) {
         const struct bp_step *first = &plan->steps[i];
-        if (checked[i] || (first->op != BP_COPY && first->op != BP_REPLACE)) continue;
+        if ((inputs && inputs[i] == BP_EDIT_SKIP) || checked[i] || (first->op != BP_COPY && first->op != BP_REPLACE)) continue;
         char *owned = NULL;
         const char *input = NULL;
         size_t size = 0;
         for (size_t j = i; j < stop; ++j) {
+            if (inputs && inputs[j] == BP_EDIT_SKIP) continue;
             const struct bp_step *s = &plan->steps[j];
             if (s->op != BP_REPLACE && s->op != BP_COPY) continue;
             enum bp_output_match match;
-            const char *error = compare_outputs(workspace, first->path, s->path, &match);
+            bool future_parent = inputs && (inputs[i] == BP_EDIT_FUTURE || inputs[j] == BP_EDIT_FUTURE);
+            const char *error = compare_outputs(workspace, first->path, s->path, future_parent, &match);
             if (!error && match == BP_UNKNOWN_CASE)
                 error = "path-case-unknown";
             if (error) {
@@ -117,7 +124,7 @@ const char *bp_validate_text_range(const char *workspace, const struct bp_plan *
                     input = (const char *)s->payload->data;
                     size = s->payload->size;
                 }
-            } else {
+            } else if (input || !future_parent) {
                 if (!input) {
                     error = bp_read_workspace_text(workspace, s->path, &owned, &size);
                     input = owned;

@@ -60,6 +60,7 @@ Both modules export a synchronous function returning steps. Relative ES imports 
 | `env` | `name`, `value` | Sets the environment of the current brw process for subsequent actions. The calling shell keeps its own environment. |
 | `run` | `program`, `args` | Runs the program in the caller’s `--workspace` and waits for it to exit. Preview lists its arguments. |
 | `install` | `payload`, `name`, `version`, `entry` | On Windows, installs a verified native executable or supported archive through the package transaction and publishes its command entry. |
+| `unpack` | `payload`, `path` | Extracts a verified archive and publishes its contents as a new directory in the workspace. |
 | `ssh` | `target`, `command`, optional `port` and `timeoutSeconds` | On Windows, runs one POSIX shell command on the SSH service authorized for this invocation. |
 
 For example, declare `requires\trun` (with a tab) and list `build.cmake` as a payload beside the child module. This step runs CMake with the verified script and a single argument containing a space.
@@ -71,6 +72,34 @@ For example, declare `requires\trun` (with a tab) and list `build.cmake` as a pa
 The argument list accepts up to 128 entries, including at most one script reference. Digby resolves the reference from the declaring module and stages the verified bytes in a temporary file for this invocation. Scripts can use the working directory for project files. The temporary location contains only the standalone script. String arguments pass directly to the program, including empty strings and literal `|`. To execute a pipeline, select an interpreter such as `sh` with `["-c", scriptText]` or `powershell.exe` with `["-NoProfile", "-Command", scriptText]`. Child output goes to stderr so the CLI report remains readable on stdout. A failed launch or nonzero exit stops the plan.
 
 The planning runtime has no filesystem, process or network bindings. A bundle may declare up to 128 files. The reader limits the manifest to 128 KiB, each module to 1 MiB, each payload to 64 MiB and loaded member data to 128 MiB. Nested calls, plan size, JavaScript heap, stack and execution time are also bounded. An unavailable capability, invalid import or exceeded planning limit fails before application.
+
+## Unpack an archive into the workspace
+
+Declare `requires\tunpack` in the manifest (with a tab). List the archive as a payload with its SHA-256. The payload path is relative to the declaring module. The output path is relative to the workspace.
+
+```js
+export default () => [
+  { op: "unpack", payload: "./assets.tar.gz", path: "assets" },
+  { op: "replace", path: "assets/config.txt", from: "PORT=0", to: "PORT=8080", count: 1 }
+];
+```
+
+This example also requires the `replace` capability. Preview checks the archive without creating files. Apply expands it in a sibling staging directory and publishes the complete tree with one rename. The next step can then read `assets/config.txt`. An existing output directory or file produces `destination-exists`. The parent must exist when the unpack step executes. A prior unpack can supply it.
+
+The standalone CLI uses the same Digby plan. Supply the SHA-256 of the **archive bytes** obtained from a trusted source. For example, from any current directory:
+
+```text
+brw unpack assets.tar.gz assets --sha256 DIGEST --workspace project --dry-run --json
+brw unpack assets.tar.gz assets --sha256 DIGEST --workspace project --json
+```
+
+Both commands accept tar, gzip-compressed tar and ZIP. Entries must be ordinary files or directories with portable package paths. Paths differing only in ASCII case, links and repeated entries produce errors. The limits are 64 MiB of archive bytes, 256 MiB of expanded file data and 4,096 entries and paths (including implicit directories). A corrupt or out-of-bounds entry aborts publication, even if earlier files have already been staged.
+
+For a gzip-compressed tar, Digby verifies each gzip member's CRC and uncompressed length through the end of the stream. The entire expanded tar stream, including its headers and padding, is limited to 320 MiB.
+
+The CLI accepts UTF-8 paths. A successful JSON report includes `operation`, `payload`, `sha256` and the workspace-relative `path`. Its `status` is `planned` during preview and `applied` after publication. On an error it returns a nonzero exit code, `status: "failed"` and a stable `error` code.
+
+Publication requires a filesystem that can atomically rename a directory while refusing replacement. On Linux, use a native filesystem such as ext4 when a mounted Windows drive in WSL reports `publish-directory`.
 
 ## Explicit SSH steps
 

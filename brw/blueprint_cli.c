@@ -1,4 +1,6 @@
 #include "blueprint_cli.h"
+#include "archive_cli.h"
+#include "json_utf8.h"
 #include "blueprint.h"
 #include "blueprint_lock.h"
 #ifdef _WIN32
@@ -6,17 +8,6 @@
 #endif
 #include <stdio.h>
 #include <string.h>
-
-static void quoted(const char *text)
-{
-    putchar('"');
-    for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
-        if (*p == '"' || *p == '\\') putchar('\\');
-        if (*p < 32) printf("\\u%04x", (unsigned)*p);
-        else putchar(*p);
-    }
-    putchar('"');
-}
 
 static void field(const char *key, const char *value)
 {
@@ -161,9 +152,12 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
     } else {
         printf("%s (%zu completed)\n", status, result->completed);
         const struct bp_ssh *failed_ssh = NULL;
+        const struct bp_step *failed_unpack = NULL;
         for (size_t i = 0; i < plan->count; ++i) {
             const struct bp_step *step = &plan->steps[i];
             if (step->source == result->failure_source) failed_ssh = step->ssh;
+            if (step->source == result->failure_source && step->op == BP_UNPACK && step->payload)
+                failed_unpack = step;
             print_step(plan, step);
             putchar('\n');
         }
@@ -175,6 +169,8 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
             }
         }
         if (error) fprintf(stderr, "brw: %s %s\n", error, detail);
+        if (error && failed_unpack)
+            brw_unpack_diagnostic(failed_unpack->payload->path, failed_unpack->path, error);
         if (failed_ssh && error && !strcmp(error, "invalid-ssh-request")) {
             if (!plan->ssh_options.identity_file)
                 fputs("Supply the SSH identity file with --identity FILE.\n", stderr);
@@ -220,7 +216,8 @@ int brw_blueprint_command(int argc, const char *const *argv)
     char detail[BP_DETAIL_CAP] = "";
     struct bp_run_result result = {.failure_source = detail};
     unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) |
-        (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL) | (1u << BP_DEFAULT) | (1u << BP_HOST);
+        (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL) | (1u << BP_DEFAULT) | (1u << BP_HOST) |
+        (1u << BP_UNPACK);
 #ifdef BRW_BP_NATIVE_INSTALL
     capabilities |= 1u << BP_INSTALL;
 #endif

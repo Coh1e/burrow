@@ -11,6 +11,6 @@ int bp_source_add(const char *name, const char *catalog);
 int brw_blueprint_command(int argc, const char *const *argv);
 #ifdef _WIN32
 #include <wchar.h>
-int brw_blueprint_wcommand(int argc, wchar_t **argv);
+int brw_utf8_wcommand(int argc, wchar_t **argv, int (*command)(int, const char *const *), const char *usage);
 #endif
 #endif

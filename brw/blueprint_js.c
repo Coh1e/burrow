@@ -467,11 +467,11 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         fail(p, "undeclared-capability", location);
         return;
     }
-    if (s->op == BP_COPY || s->op == BP_INSTALL) {
+    if (s->op == BP_COPY || s->op == BP_INSTALL || s->op == BP_UNPACK) {
         s->payload = payload_field(ctx, obj, p->bundle, module->path);
         if (!s->payload) { fail(p, "invalid-payload", location); return; }
     }
-    if (s->op == BP_COPY || s->op == BP_REPLACE) {
+    if (s->op == BP_COPY || s->op == BP_REPLACE || s->op == BP_UNPACK) {
         s->path = field(ctx, obj, "path");
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }

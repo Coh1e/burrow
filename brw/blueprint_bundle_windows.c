@@ -44,6 +44,18 @@ static const char *read_bytes(HANDLE file, size_t limit, unsigned char **out, si
     return NULL;
 }
 
+const char *brw_read_local_file(const char *path, size_t limit, unsigned char **out, size_t *size)
+{
+    wchar_t *name = wide(path);
+    HANDLE file = name ? CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                                     FILE_FLAG_OPEN_REPARSE_POINT, NULL) : INVALID_HANDLE_VALUE;
+    free(name);
+    if (file == INVALID_HANDLE_VALUE) return "archive-unavailable";
+    const char *error = ordinary(file, false) ? read_bytes(file, limit, out, size) : "archive-unavailable";
+    CloseHandle(file);
+    return error;
+}
+
 const char *bp_directory_read(const struct bp_directory *dir, const char *path,
                               size_t limit, unsigned char **out, size_t *size)
 {
