@@ -23,8 +23,8 @@ POSIX to run the following CTest contracts.
 | `digby_literal`, `blueprint_cli` | UTF-8 byte offsets, file copy and text replacement, archived tool and sibling contents, and preservation of the previous command when an archive lacks its declared entry |
 | `git_worktree` | Actual commits after clone and fast-forward, refusal of dirty or diverged worktrees |
 
-In a separate build directory, configure with `-DBRW_ENABLE_CPP_MODULE=ON`
-and a C++23 compiler. The optional module formats literal search offsets into
+In a separate build directory, configure with `-DBRW_ENABLE_CPP_MODULE=ON`,
+CMake 3.25 or newer and a C++23 compiler. The optional module formats literal search offsets into
 caller-owned storage. Run `ctest --test-dir <build> -R "^digby_(literal|cpp_abi)$" --output-on-failure`
 after building `literal_test` and `literal_offset_test`. Both tests use C
 callers. They check search output, exact capacity, an undersized or null

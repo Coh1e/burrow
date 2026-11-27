@@ -65,11 +65,15 @@ jobs:
             exit 1
           fi
           cmake --build .local/brw-blueprint --parallel
-      - name: Run each shared core contract
+      - name: Run native CTest contracts
         run: |
+          # The acceptance checklist runs blueprint_cli and saves its transcript.
+          covered=blueprint_cli
           for contract in digby_plan digby_literal blueprint_plan git_worktree; do
             ctest --test-dir .local/brw-blueprint -R "^${contract}$" --no-tests=error --output-on-failure
+            covered="$covered|$contract"
           done
+          ctest --test-dir .local/brw-blueprint -E "^($covered)$" --no-tests=ignore --output-on-failure
       - name: Run the shared Blueprint acceptance checklist
         run: python3 tests/blueprint-acceptance/run.py --build-dir .local/brw-blueprint --evidence .local/blueprint-evidence
       - name: Exercise the optional C++23 module from C
