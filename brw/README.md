@@ -103,7 +103,7 @@ Dry-run reads the local catalog and shows the Digby plan. Install reads the cata
 
 ## Release acceptance
 
-The candidate report records the tested revision, binaries, platform checks
+Use the checklist to verify the candidate revision, binaries, platform checks
 and native query measurements. [Release acceptance](../docs/native-release-acceptance.md)
 
 ## Directories and user PATH

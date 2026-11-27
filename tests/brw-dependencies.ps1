@@ -12,10 +12,30 @@ function Assert($condition, [string] $message) {
     if (!$condition) { throw $message }
 }
 
+function Get-FixtureSnapshot {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $entries = foreach ($item in (Get-ChildItem -LiteralPath $root -Recurse -Force | Sort-Object FullName)) {
+            $relative = $item.FullName.Substring($root.Length + 1)
+            if ($item.PSIsContainer) { "dir $relative" }
+            else {
+                $digest = $sha.ComputeHash([IO.File]::ReadAllBytes($item.FullName))
+                "file $relative $([Convert]::ToBase64String($digest))"
+            }
+        }
+        return ($entries -join [Environment]::NewLine)
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function Get-InstallPreview([string] $Name) {
+    $before = Get-FixtureSnapshot
     $plan = Invoke-Brw 0 @('install', $Name, '--dry-run')
+    Assert ((Get-FixtureSnapshot) -ceq $before) "JSON preview changed the fixture for $Name"
     $lines = & $Brw install $Name --dry-run
     Assert ($LASTEXITCODE -eq 0) "Text preview failed for $Name"
+    Assert ((Get-FixtureSnapshot) -ceq $before) "Text preview changed the fixture for $Name"
     $expected = @(
         foreach ($package in $plan.packages) { "Install $package" }
         $plan.operations
@@ -95,12 +115,9 @@ try {
         $port = $listener.LocalEndpoint.Port
         $rows -replace '^(base\s+1\s+exe\s+)payload\.exe', ('${1}http://127.0.0.1:' + $port + '/base') |
             Set-Content -LiteralPath $catalog -Encoding ASCII
-        $catalogBefore = [IO.File]::ReadAllText($catalog)
         Assert ((Invoke-Brw 0 @('show', 'base')).package.location -eq "http://127.0.0.1:$port/base") 'HTTP dependency fixture missing'
         $preview = Get-InstallPreview 'app'
         Assert (!$listener.Pending()) 'Preview contacted a dependency payload server'
-        Assert ([IO.File]::ReadAllText($catalog) -ceq $catalogBefore) 'Preview modified the catalog'
-        Assert (!(Test-Path (Join-Path $root '.cache'))) 'Preview wrote a cache'
     } finally {
         $listener.Stop()
     }
@@ -113,6 +130,13 @@ try {
     $preview = Get-InstallPreview 'app'
     Assert (($preview.packages -join ',') -eq 'mid,app') 'Installed dependency was not reused'
     Test-InstallTrace 'app' $preview
+    $before = Get-FixtureSnapshot
+    foreach ($arguments in @(@('install', 'app', '--dry-run'), @('install', 'app'))) {
+        $existing = Invoke-Brw 1 $arguments
+        Assert ($existing.status -ceq 'failed' -and $existing.error -ceq 'destination-exists' -and
+            $existing.step -eq 0 -and $existing.package -ceq 'app') 'Installed main package precondition differed'
+        Assert ((Get-FixtureSnapshot) -ceq $before) 'Rejecting the installed main package modified the fixture'
+    }
     $chain = Get-InstallPreview 'chain'
     Assert (($chain.packages -join ',') -eq 'extra,broken,later,chain') 'Dependency plan lost its failure prefix or suffix'
     Test-InstallTrace 'chain' $chain 1

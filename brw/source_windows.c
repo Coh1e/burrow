@@ -492,16 +492,13 @@ static int install_match(const wchar_t *root, struct match *target, bool json, b
         error = resolve_dependencies(&plan, target, 0);
     size_t step = 0;
     bool has_dependencies = *target->package.dependencies != 0;
+    /* Reject the main package before installing any of its dependencies. */
+    if (!error && has_dependencies && brw_is_installed(target->package.name))
+        error = "destination-exists";
     if (!error && !preview) {
-        /* An existing main package must not trigger writes to its dependencies. */
-        if (has_dependencies && brw_is_installed(target->package.name))
-            error = "destination-exists";
-        bool cancellable = false;
-        if (!error) {
-            cancellable = brw_begin_source_install();
-            if (!cancellable)
-                error = "cancel-handler";
-        }
+        bool cancellable = brw_begin_source_install();
+        if (!cancellable)
+            error = "cancel-handler";
         for (struct match *item = plan.order; !error && item; item = item->install_next) {
             error = run_match(item, &plan.operations, &step);
             if (error)

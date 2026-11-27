@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import tempfile
 import time
@@ -72,9 +73,18 @@ def machine(work):
             "driveTypeCode": ctypes.windll.kernel32.GetDriveTypeW(work.anchor)}
 
 
-def run(brw, cache, evidence, storage):
+def run(brw, cache, build_record, evidence, storage):
     if evidence.exists():
         raise FileExistsError(evidence)
+    recorded = json.loads(build_record.read_bytes())
+    revision = recorded["revision"]
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("Expected a full candidate commit in the delivery build record")
+    subprocess.run(["git", "cat-file", "-e", revision + "^{commit}"], cwd=ROOT, check=True)
+    binary_sha = hashlib.sha256(brw.read_bytes()).hexdigest()
+    cache_sha = hashlib.sha256(cache.read_bytes()).hexdigest()
+    if binary_sha != recorded["brwSha256"] or cache_sha != recorded["cacheSha256"]:
+        raise ValueError("The binary or CMake cache differs from the candidate delivery build record")
     options = {}
     for line in cache.read_text(encoding="utf-8").splitlines():
         key = line.partition(":")[0]
@@ -83,14 +93,14 @@ def run(brw, cache, evidence, storage):
                    "BUILD_TESTING", "CMAKE_EXE_LINKER_FLAGS"}:
             options[key] = line.partition("=")[2]
     evidence.parent.mkdir(parents=True, exist_ok=True)
-    result = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-              "brwSha256": hashlib.sha256(brw.read_bytes()).hexdigest(), "build": options,
+    result = {"revision": revision, "brwSha256": binary_sha, "cacheSha256": cache_sha, "build": options,
               "host": machine(evidence.parent), "repeats": REPEATS, "percentiles": "nearest rank",
               "cache": "Catalogs freshly written and registered. Package installations use the CLI. "
                        "No OS cache eviction. First invocation per query, then consecutive fresh processes.",
               "cases": []}
-    if storage:
-        result["host"]["storage"] = storage
+    if not storage or not storage.strip():
+        raise ValueError("Supply the model and bus of the disk holding the workload")
+    result["host"]["storage"] = storage.strip()
     with tempfile.TemporaryDirectory(dir=evidence.parent) as scratch:
         work = Path(scratch)
         for count in (32, 512, 2048):
@@ -116,7 +126,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--brw", type=Path, required=True)
     parser.add_argument("--cache", type=Path, required=True, help="CMakeCache.txt for this binary")
+    parser.add_argument("--build-record", type=Path, required=True, help="query-build.json from the delivery build")
     parser.add_argument("--evidence", type=Path, required=True, help="new output JSON")
-    parser.add_argument("--storage", help="model and bus of the disk holding the evidence directory")
+    parser.add_argument("--storage", required=True, help="model and bus of the disk holding the evidence directory")
     args = parser.parse_args()
-    run(args.brw.resolve(strict=True), args.cache.resolve(strict=True), args.evidence.resolve(), args.storage)
+    run(args.brw.resolve(strict=True), args.cache.resolve(strict=True), args.build_record.resolve(strict=True),
+        args.evidence.resolve(), args.storage)

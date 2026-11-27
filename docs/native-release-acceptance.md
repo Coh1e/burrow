@@ -17,10 +17,20 @@
 
 #125 的依赖顺序与回退保护、#127 的真实用户注册表、#131 的离线 devkit、#132 的真实 SSH、#133 的三宿主核心均已通过各自提交的验收。这些结果可复用其夹具和方法。本轮按候选修订核对独立记录。[依赖安装](https://github.com/Coh1e/burrow/issues/125) · [普通用户注册表](https://github.com/Coh1e/burrow/issues/127#issuecomment-7205568029) · [devkit 记录](windows-devkit.md) · [真实 SSH 记录](ssh-build-acceptance.md) · [三宿主 CTest](../brw/README.md#verification-on-native-hosts) · [旧 Linux 基线](../brw/minimal.md)
 
+## 候选宿主复验
+
+在候选源码根目录运行。先用 `git rev-parse HEAD` 核对交接单的完整提交，将随包四份固定归档置于 `.local/deps/sources/`。每项使用新输出目录。记录本次使用的操作系统、架构和工具版本。
+
+- **macOS**。预置 Apple Clang、CMake、Ninja、Git 和 Python 3 后，运行 `sh tests/release-acceptance/macos.sh "$candidate" .local/mac-134`。返回 `.local/mac-134/macos.log` 与其 `blueprint/` 目录。须通过纯 C、可选 C++23 的 C ABI、共享 Blueprint、两种 APFS 大小写模式。[macOS 验收入口](../tests/release-acceptance/macos.sh)
+- **真实 SSH**。在操作者授权的专用 WSL 仅开启回环监听，通过本地 WSL 控制台取得主机公钥，在 Windows 运行现有入口。使用 #144 的固定清单摘要和新的证据目录。返回 `transport.json`、`remote/`、主机信任来源及撤销凭据、关闭端口的记录。须核对传输两端摘要、独立网络命名空间、Linux ELF 的输出和断线后的一次启动。[Windows 命令、主机准备与通过条件](ssh-build-acceptance.md#在-windows-复跑)
+
 ## 查询基线
 
 在 Windows 使用最终交付的 `brw.exe` 和对应的 `CMakeCache.txt`。驱动在独立用户目录通过 CLI 登记包源、安装夹具；每次查询启动独立进程，计时包含进程启动和 JSON 输出捕获。每个工作负载分别记录首次和后续样本，保留全部时间，再计算最近秩 p50、p95。夹具刚写入，系统缓存沿用正常状态。[测量驱动](../tests/release-acceptance/query_baseline.py)
 
+将 `$python` 设为可运行的 Python 3.11+ 解释器。下例从存储管理接口取得夹具所在盘的型号和总线；受限进程也可以直接使用同一宿主已核实的磁盘记录。
+
 ```powershell
-python -B tests/release-acceptance/query_baseline.py --brw $releaseExe --cache $cmakeCache --evidence .local/query-baseline.json
+$disk = Get-Partition -DriveLetter (Get-Location).Drive.Name | Get-Disk
+& $python -B tests/release-acceptance/query_baseline.py --brw $releaseExe --cache $cmakeCache --build-record $queryBuildJson --storage "$($disk.FriendlyName) ($($disk.BusType))" --evidence .local/query-baseline.json
 ```
