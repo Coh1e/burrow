@@ -1,5 +1,7 @@
 # 不把 scoop-lib 换成 QuickJS
 
+> 历史决定，适用于已退役的 Scoop 兼容版 `burrow.exe`。
+
 2026-10-31 人类要求评估用 QuickJS 替代 `assets/scoop-lib/`。它是 Scoop v0.6.0 的逐字节 PowerShell 副本（16 个文件、5,491 行、193 KiB），由生成的宿主脚本 dot-source，再执行 Manifest 里的 PowerShell Hook 文本。真实 Main/Extras 的 4,149 份 Manifest 中 1,303 份带 Hook；其中 55.9% 含 `.NET` 字面量、COM、哈希表、`$_`、反引号、控制流等必须真 PowerShell 前端的构造，24.6% 依赖管道，只有 19.6% 接近可直接翻译。QuickJS 只提供 JS 引擎，不提供文件系统、进程、HTTP、哈希、归档、注册表、快捷方式或 COM/.NET 绑定。
 
 因此保留 `assets/scoop-lib/`，不引入 QuickJS 作为 Hook 运行时。Hook 是 PowerShell 源码，换引擎等于重写 PowerShell 语义与全部宿主绑定；这会破坏与 Scoop 的 Manifest 互操作（[ADR-0002](0002-share-scoop-state.md)），而现有方案只多 193 KiB，并复用每台 Windows 自带的 PowerShell。

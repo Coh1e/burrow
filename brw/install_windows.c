@@ -1701,6 +1701,15 @@ done:
 static const char *run_step(void *context, enum digby_operation operation)
 {
     struct installation *install = context;
+#ifdef BRW_TEST_INTERRUPTS
+    const wchar_t *trace = _wgetenv(L"BRW_TEST_INSTALL_TRACE");
+    if (install->source && trace && *trace) {
+        FILE *file = _wfopen(trace, L"a");
+        if (!file) return "test-trace-open";
+        int written = fprintf(file, "%ls %s\n", install->package->name, digby_operation_name(operation));
+        if (fclose(file) || written < 0) return "test-trace-write";
+    }
+#endif
     if (brw_cancelled())
         return "cancelled";
     switch (operation) {

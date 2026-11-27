@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'invoke-burrow.ps1')
+$PSDefaultParameterValues['Get-Content:Encoding'] = 'utf8'
 function Assert($condition, [string] $message) {
     if (!$condition) { throw $message }
 }
@@ -95,9 +95,25 @@ function Invoke-Probe($alias, $arguments) {
     $info.Arguments = $arguments
     $info.WorkingDirectory = $root
     $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
-    Invoke-ProcessCapture $info -InputLine 'input'
+    $process = [Diagnostics.Process]::Start($info)
+    try {
+        # Drain both streams while the probe reads its input.
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $process.StandardInput.WriteLine('input')
+        $process.StandardInput.Close()
+        $process.WaitForExit()
+        [pscustomobject]@{
+            Code = $process.ExitCode
+            Out = $stdout.GetAwaiter().GetResult()
+            Err = $stderr.GetAwaiter().GetResult()
+        }
+    } finally {
+        $process.Dispose()
+    }
 }
 New-Item -ItemType File -Path (Join-Path $root 'cwd.marker') | Out-Null
 # .NET Framework uses the console input encoding for redirected stdin.
@@ -114,6 +130,7 @@ Assert ($again.Code -ne 0 -and $again.Result.error -eq 'destination-exists') 'Ex
 function Invoke-Lifecycle([string[]] $arguments) {
     $output = & $Brw @arguments --json
     $code = $LASTEXITCODE
+    Write-Host "brw $($arguments[0]) $($arguments[1]) exit=$code $output"
     [pscustomobject]@{ Code = $code; Result = ($output | ConvertFrom-Json) }
 }
 
@@ -124,6 +141,7 @@ function Assert-Active([string] $entry) {
     $target = [Text.Encoding]::Unicode.GetString($bytes).TrimEnd([char]0)
     Assert ($target -eq (Join-Path $packages "local-tool/$entry")) 'Unexpected active version or entry'
     Assert ((Get-Content -LiteralPath $data) -eq 'keep this') 'Persistent data changed'
+    Write-Host "active entry=$entry childExit=37 output=$output persistent=keep this"
 }
 
 $dataDir = Join-Path $profile '.local/share/burrow/persist/local-tool'

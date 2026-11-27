@@ -1,5 +1,7 @@
 # shims 目录只放 Scoop 形态的入口文件
 
+> 历史决定，适用于已退役的 Scoop 兼容版 `burrow.exe`。
+
 2026-10-28 决定：`<根>/shims` 里只写 Scoop 自己会写的文件——直接 EXE/COM 目标的 `<别名>.exe` 启动器与 `<别名>.shim`；BAT/CMD、PS1、JAR 目标只写 `<别名>.cmd`、`.ps1` 与无扩展名 sh 包装，`.py` 与 bash 分支只写 `.cmd`/sh 包装。固定 Scoop 的 `shim()` 只为 `.exe/.com` 目标写 `.shim`（`assets/scoop-lib/core.ps1:963-990`），所以脚本目标一个 `.shim` 也不写。Burrow 不再写 `<别名>.burrow-shim.json`，也不再为脚本目标复制以 `<别名>.exe` 命名的启动器。
 
 原因是 PATH 解析顺序：`.exe` 先于 `.cmd`。旧设计给 `bin: clink.bat` 这类脚本入口复制了 `<别名>.exe`，用户敲 `clink` 时实际启动的是 Burrow 的启动器而不是 Scoop 的 `.cmd`，入口行为、参数转发和退出码都偏离 Scoop；2026-10-27 的真机上 `clink` 因此失效。同时 `.burrow-shim.json` 是 `shims` 里的外来文件，Scoop 的 `reset`/`uninstall` 不认识也不会清理它。

@@ -1,5 +1,7 @@
 # 使用内嵌 Git 库管理 bucket
 
+> 历史决定，适用于已退役的 Scoop 兼容版 `burrow.exe`。
+
 用户选择通过 C++ 可调用的 Git 库获取和更新 bucket，避免强制安装 git.exe，同时保留增量传输与 Git 对象读取能力。GitHub ZIP 快照不作为首选同步方案；goop 的快照路径仅作对照依据。
 
 首选候选为 libgit2，在 Burrow 内部以少量 C++ RAII 类型管理其 C API 资源，不引入额外 C++ 包装框架。库的具体版本、静态链接可行性、体积、Windows TLS/代理、认证和许可证随附要求须在构建验证中确认；本决定不代表这些已通过验证。

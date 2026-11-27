@@ -7,27 +7,36 @@
 #include <stdio.h>
 #include <string.h>
 
-int brw_report_plan(bool json, bool preview, const char *status,
-                    const struct digby_plan *plan, const char *error, size_t step)
+void brw_print_plan_operations(const struct digby_plan *plan, bool json, bool preview)
 {
     if (json) {
-        printf("{\"status\":\"%s\",\"operations\":[",
-               error ? "failed" : preview ? "planned" : status);
+        fputs("\"operations\":[", stdout);
         for (size_t i = 0; i < plan->count; ++i)
             printf("%s\"%s\"", i ? "," : "", digby_operation_name(plan->steps[i]));
         putchar(']');
         if (preview && plan->steps[0] == DIGBY_DOWNLOAD)
             fputs(",\"pending\":[\"payload-availability\",\"sha256-verification\"]", stdout);
+    } else {
+        for (size_t i = 0; i < plan->count; ++i)
+            puts(digby_operation_name(plan->steps[i]));
+        if (preview && plan->steps[0] == DIGBY_DOWNLOAD)
+            puts("Pending checks include payload availability and SHA-256 verification.");
+    }
+}
+
+int brw_report_plan(bool json, bool preview, const char *status,
+                    const struct digby_plan *plan, const char *error, size_t step)
+{
+    if (json) {
+        printf("{\"status\":\"%s\",", error ? "failed" : preview ? "planned" : status);
+        brw_print_plan_operations(plan, true, preview);
         if (error)
             printf(",\"error\":\"%s\",\"step\":%zu", error, step);
         puts("}");
     } else if (error) {
         fprintf(stderr, "brw: %s\n", error);
     } else {
-        for (size_t i = 0; i < plan->count; ++i)
-            puts(digby_operation_name(plan->steps[i]));
-        if (preview && plan->steps[0] == DIGBY_DOWNLOAD)
-            puts("Pending checks include payload availability and SHA-256 verification.");
+        brw_print_plan_operations(plan, false, preview);
     }
     return error ? 1 : 0;
 }

@@ -101,15 +101,10 @@ Use package names, versions, local filenames, and entry names made up of ASCII l
 
 Dry-run reads the local catalog and shows the Digby plan. Install reads the catalog again, downloads to a temporary file, verifies SHA-256, stages the payload, and publishes the package and entry through the local install path. A catalog supplies the expected digest and serves as the trust boundary. HTTP redirects are disabled. Ctrl+C or Ctrl+Break requests cancellation up to the start of publication. An in-flight HTTP read may take until the receive timeout to return. A rejected digest or cancelled download reports the failed step in JSON and leaves no installed version or command entry.
 
-## Design and implementation plan
+## Release acceptance
 
-The following work extends the [first-release specification](https://github.com/Coh1e/burrow/issues/119). Record the results against the [release candidate](https://github.com/Coh1e/burrow/issues/134).
-
-1. **Use one Digby plan for preview and execution.** For each invocation, resolve dependencies and build the ordered package and operation plan once. Text and JSON preview traverse that plan. Execution passes its steps to the backend in order and stops at the first failure. A later invocation reads the source and installed state again and rechecks preconditions before writing. Preview performs no writes or downloads and identifies conditions that still require remote verification. Start by removing the operation list duplicated in the dependency JSON preview. With the same local inputs, compare preview package and operation order with a recording backend for a single package and a dependency chain. Inject a failed step and check the executed prefix and reported failure. Change the source or installed state between invocations and check that execution honors the new state.
-
-2. **Normalize each native catalog row into a native package description.** At the catalog boundary, decode the source identity and the seven fields documented above into named C fields, with a typed payload kind and a list of direct dependency names. Use this description in search, show, dependency resolution and install planning. Keep installed-state decisions and operation ordering in the planner. Preserve the catalog format and CLI output. Test both six- and seven-field rows, empty dependencies, qualified names and invalid field values through the reader and its consumers.
-
-3. **Measure query latency before choosing an index or a target.** Benchmark the release build of `brw search`, `brw show` and `brw list` as separate processes against reproducible local fixtures. Vary catalog size for search/show and installed-package count for list. Include matching and missing lookups. Record the first run separately from repeated runs, report sample counts and warm p50/p95, and document cache preparation (an ordinary first run does not establish a cold filesystem cache). Retain the commands, fixture sizes, revision, build options, OS, CPU, storage and timings with the candidate evidence. Use the first baseline to decide whether a latency target or an index is warranted.
+Use the checklist to verify the candidate revision, binaries, platform checks
+and native query measurements. [Release acceptance](../docs/native-release-acceptance.md)
 
 ## Directories and user PATH
 

@@ -2,40 +2,17 @@
 
 ## Task
 
-1. Read the project instructions that apply to the task.
-2. Identify the required result and the checks that can confirm it.
-3. For a request for information, give the findings without changing files.
-4. Ask the user when a missing decision changes the required result.
-5. Continue work within the agreed scope without repeated approval requests.
+Read the applicable instructions and identify the result and its checks. Answer information requests without modifying files. Ask when a missing decision changes the result, and continue within the agreed scope.
 
 ## Changes
 
-1. Make only the changes necessary for the task.
-2. Use the existing project structure and tools.
-3. Preserve changes made by other people.
-4. Remove unused code that your changes cause.
-5. Ask before you change an existing interface or an agreed requirement.
-6. Get approval before you publish, spend money, change access rights, or delete user data.
-7. Use existing approval when it covers the proposed action.
+Use the existing structure and tools. Limit changes to the task, preserve other people's work and remove code made obsolete by your edits. Ask before changing an interface or agreed requirement. Obtain approval to publish, spend money, change access rights or delete user data. Reuse approval that covers the proposed action.
 
 ## Verification
 
-1. Use the repository's documented commands and tool versions. Prefer project-local tools.
-2. Add or update tests for changed behavior. For a bug, reproduce the failure before the fix when practical.
-3. Test relevant boundary cases and failure paths. Use the existing test framework.
-4. Run formatting checks, the affected build, and relevant tests after the final code edit.
-5. Run wider checks when required by CI or by the change's impact.
-6. Inspect the final diff for unintended edits, secrets, generated output, and compatibility changes.
-7. Report checks that failed or could not run, and say why. Never present a planned check as completed.
+Use documented versions and commands, preferably project-local tools. Cover changed behavior, boundary cases and failures in the existing framework. Reproduce bugs before fixing them when practical. After the last edit run formatting, the affected build and tests, plus wider CI checks justified by the impact. Inspect the diff for unintended edits, secrets, generated output and compatibility changes.
 
-Use sanitizers for relevant memory or concurrency risks when supported.
-For performance changes, record the workload, environment, baseline, and result.
-State that the task is complete only when the results support this statement.
-
-## Communication
-
-1. Give the result first, then the necessary evidence and limits.
-2. Read the relevant skill or procedure when its stated conditions apply.
+Use supported sanitizers for relevant memory or concurrency risks. Record performance workload, environment, baseline and result. For a release candidate, tie the build, host and artifact hashes to the same commit. See the [native release checklist](docs/native-release-acceptance.md).
 
 ## Cross-platform C and C++
 
@@ -48,9 +25,7 @@ State that the task is complete only when the results support this statement.
 
 ## Finish
 
-Report the result, key changes, checks run with outcomes, and remaining limitations.
-Claim completion only when the evidence supports the agreed acceptance criteria.
-Keep the report concise. Include exact commands when they help reproduce verification.
+Report the result first, then key changes, checks, failed or unrun checks and their reasons. Claim completion only when the evidence meets the agreed criteria. Read the relevant skill or procedure when its conditions apply.
 
 ## Agent skills
 

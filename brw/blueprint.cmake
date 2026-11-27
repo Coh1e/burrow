@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 include(quickjs.cmake)
 set(bp_sha_source "${CMAKE_CURRENT_SOURCE_DIR}/../.local/deps/sources/libgit2-1.9.7/src/util/hash/rfc6234")
-configure_file("${bp_sha_source}/sha.h" "${CMAKE_CURRENT_BINARY_DIR}/licenses/rfc6234.txt" COPYONLY)
+configure_file("${bp_sha_source}/sha.h" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/licenses/rfc6234.txt" COPYONLY)
 if(WIN32)
   set(bp_os windows)
   set(bp_backend windows)

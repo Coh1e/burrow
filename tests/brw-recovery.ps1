@@ -8,6 +8,7 @@ function Assert($condition, [string] $message) {
 function Run([int] $expected, [string[]] $arguments) {
     $output = & $Brw @arguments --json
     Assert ($LASTEXITCODE -eq $expected) "Unexpected exit $LASTEXITCODE for $arguments ($output)"
+    Write-Host "brw $($arguments[0]) exit=$expected $output"
     if ($output) { $output | ConvertFrom-Json }
 }
 function Interrupt([string] $phase, [string[]] $arguments) {
@@ -15,6 +16,12 @@ function Interrupt([string] $phase, [string[]] $arguments) {
     try {
         $null = & $InterruptBrw @arguments --json
         Assert ($LASTEXITCODE -eq 86) "Failed to interrupt $arguments at $phase"
+        $journal = Join-Path $state 'publication-v1'
+        if (Test-Path -LiteralPath $journal -PathType Leaf) {
+            $file = Get-Item -LiteralPath $journal
+            $hash = (Get-FileHash -LiteralPath $journal -Algorithm SHA256).Hash
+            Write-Host "interrupt=$phase exit=86 journal=publication-v1 bytes=$($file.Length) sha256=$hash"
+        }
     } finally { Remove-Item Env:BRW_TEST_INTERRUPT }
 }
 

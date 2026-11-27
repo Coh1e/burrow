@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 # Pre-commit guardrail: only checks that finish in a second or two. The full CTest suite stays a
-# deliberate step (scripts/build.ps1 -Action test), because a slow hook gets bypassed with
+# deliberate step (ctest --test-dir <build> --output-on-failure), because a slow hook gets bypassed with
 # --no-verify and then protects nothing.
 & (Join-Path $PSScriptRoot 'check-source-hygiene.ps1') -Staged
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

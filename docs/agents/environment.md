@@ -10,7 +10,7 @@
 
 ```powershell
 ./scripts/push.ps1
-./scripts/push.ps1 origin main v0.3.0
+./scripts/push.ps1 origin HEAD
 ```
 
 ## `.git` 写入被拒绝
@@ -32,4 +32,4 @@ gh api repos/Coh1e/burrow/commits/main | ConvertFrom-Json |
 
 ## native 命令的 stderr
 
-`git` 的进度行（`To https://…`、`Cloning into…`）在 Windows PowerShell 5.1 下会显示成 error record，即使退出码是 0。按退出码判断，不要按输出颜色判断；这条约束的由来见 [CODING_STANDARDS](../../CODING_STANDARDS.md#L37)。
+`git` 的进度行（`To https://…`、`Cloning into…`）在 Windows PowerShell 5.1 下会显示成 error record，即使退出码是 0。按退出码判断。[构建与宿主审查标准](../../CODING_STANDARDS.md#构建与宿主)

@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.10...3.25)
 project(brw LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
+if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
 if(WIN32)
   cmake_minimum_required(VERSION 3.25)
 endif()
@@ -75,7 +78,7 @@ if(BRW_MINIMAL)
 endif()
 
 include(git.cmake)
-configure_file("${git_source}/COPYING" "${CMAKE_CURRENT_BINARY_DIR}/licenses/libgit2.txt" COPYONLY)
+configure_file("${git_source}/COPYING" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/licenses/libgit2.txt" COPYONLY)
 
 add_executable(brw_shim shim_windows.c)
 target_link_options(brw_shim PRIVATE -municode -static -Wl,--no-insert-timestamp)
@@ -162,6 +165,7 @@ if(BUILD_TESTING)
   add_test(NAME brw_dependencies
     COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
       -File "${CMAKE_CURRENT_SOURCE_DIR}/../tests/brw-dependencies.ps1"
+      -RecordingBrw "$<TARGET_FILE:brw_test_interrupt>"
       -Brw "$<TARGET_FILE:brw>" -Fixture "$<TARGET_FILE:brw_test_payload>"
       -Scratch "${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME brw_paths

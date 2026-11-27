@@ -67,7 +67,7 @@ $catalog = Join-Path $root 'catalog.tsv'
 @(
     "brw-catalog-v1"
     "tool`t1.0`texe`tpayload.exe`t$exeHash`tpayload.exe"
-    "packed`t2.0`tarchive`tpackage.tar.gz`t$tarHash`tpayload.exe"
+    "packed`t2.0`tarchive`tpackage.tar.gz`t$tarHash`tpayload.exe`t"
     "broken`t1.0`texe`tpayload.exe`t$('0' * 64)`tpayload.exe"
     "unsafe`t1.0`tarchive`tunsafe.zip`t$unsafeHash`tpayload.exe"
     "remote`t3.0`tarchive`thttp://127.0.0.1:$port/package.zip?fixture=1`t$zipHash`tbin/payload.exe"
@@ -153,6 +153,20 @@ try {
         (Invoke-Brw 0 @('source', 'list')).sources.Count) {
         throw 'Malformed catalog was registered'
     }
+    foreach ($invalid in @(
+        "bad`t1`tunknown`tpayload.exe`t$exeHash`tpayload.exe",
+        "bad`t1`texe`tpayload.exe`t$exeHash",
+        "bad`t1`texe`tpayload.exe`t$exeHash`tbin/payload.exe",
+        "bad`t1`tarchive`t../package.zip`t$zipHash`tpayload.exe",
+        "bad`t1`texe`tpayload.exe`t0`tpayload.exe",
+        "bad`t1`texe`tpayload.exe`t$exeHash`tpayload.exe`ttool,",
+        "bad`t1`texe`tpayload.exe`t$exeHash`tpayload.exe`ttool`textra"
+    )) {
+        @('brw-catalog-v1', $invalid) | Set-Content -LiteralPath $malformed -Encoding ASCII
+        if ((Invoke-Brw 1 @('source', 'add', 'bad-catalog', $malformed)).error -ne 'catalog-format') {
+            throw 'Invalid native package field was accepted'
+        }
+    }
     Invoke-Brw 0 @('source', 'add', 'fixture', $catalog) | Out-Null
     $sources = Invoke-Brw 0 @('source', 'list')
     if ($sources.sources[0].name -ne 'fixture') { throw 'Source registration missing' }
@@ -161,8 +175,45 @@ try {
     if ($search.packages.Count -ne 1 -or $search.packages[0].name -ne 'tool') {
         throw 'Search did not return the matching package'
     }
+    $expectedFields = 'source,name,version,kind,location,sha256,entry'
+    if (($search.packages[0].PSObject.Properties.Name -join ',') -ne $expectedFields) {
+        throw 'Six-field catalog changed its JSON properties'
+    }
     $detail = Invoke-Brw 0 @('show', 'fixture/packed')
-    if ($detail.package.sha256 -ne $tarHash) { throw 'Package detail missing manifest fields' }
+    if (($detail.package.PSObject.Properties.Name -join ',') -ne $expectedFields -or
+        $detail.package.source -ne 'fixture' -or $detail.package.name -ne 'packed' -or
+        $detail.package.version -ne '2.0' -or $detail.package.kind -ne 'archive' -or
+        $detail.package.location -ne 'package.tar.gz' -or $detail.package.sha256 -ne $tarHash -or
+        $detail.package.entry -ne 'payload.exe') { throw 'Incorrect package detail for an empty dependency field' }
+    $withDepends = "app`t1`texe`tpayload.exe`t$exeHash`tpayload.exe`ttool,packed"
+    Add-Content -LiteralPath $catalog -Value $withDepends -Encoding ASCII
+    $detail = Invoke-Brw 0 @('show', 'fixture/app')
+    if ($detail.package.depends -cne 'tool,packed' -or $detail.package.kind -ne 'exe') {
+        throw 'Declared direct dependencies or payload kind were lost'
+    }
+    $line = & $Brw show fixture/app
+    if ($LASTEXITCODE -ne 0 -or $line -cne "fixture/app 1 exe payload.exe $exeHash payload.exe depends=tool,packed") {
+        throw 'Text show changed the package description'
+    }
+    $names = @(1..8 | ForEach-Object { ('d' * 122) + ('{0:D3}' -f $_) }) + 'last-dependency'
+    $dependencies = $names -join ','
+    if ($dependencies.Length -ne 1023) { throw 'Incorrect dependency boundary fixture' }
+    $limitCatalog = Join-Path $root 'limit.tsv'
+    $limitRows = @('brw-catalog-v1') + @($names | ForEach-Object {
+        "$_`t1`texe`tpayload.exe`t$exeHash`tpayload.exe"
+    })
+    $limitRow = "limit`t1`texe`tpayload.exe`t$exeHash`tpayload.exe`t$dependencies"
+    ($limitRows + $limitRow) | Set-Content -LiteralPath $limitCatalog -Encoding ASCII
+    Invoke-Brw 0 @('source', 'add', 'boundary', $limitCatalog) | Out-Null
+    $limitDetail = Invoke-Brw 0 @('show', 'boundary/limit')
+    $limitPlan = Invoke-Brw 0 @('install', 'boundary/limit', '--dry-run')
+    if ($limitDetail.package.depends -cne $dependencies -or
+        ($limitPlan.packages -join ',') -cne "$dependencies,limit") { throw 'Dependency names were truncated' }
+    ($limitRows + ($limitRow + 'x')) | Set-Content -LiteralPath $limitCatalog -Encoding ASCII
+    if ((Invoke-Brw 1 @('show', 'boundary/limit')).error -ne 'catalog-format') {
+        throw 'Accepted 1024 dependency characters'
+    }
+    Invoke-Brw 0 @('source', 'remove', 'boundary') | Out-Null
     $preview = Invoke-Brw 0 @('install', 'remote', '--dry-run')
     if (($preview.operations -join ',') -ne 'download,verify,extract,publish' -or
         $preview.pending -notcontains 'sha256-verification') {

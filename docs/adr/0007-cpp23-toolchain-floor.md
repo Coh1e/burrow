@@ -1,5 +1,7 @@
 # 升级到 C++23 并显式声明 MSVC 底线
 
+> 历史决定，适用于已退役的 Scoop 兼容版 `burrow.exe`。
+
 2026-10-31 人类决定把 C++ 标准从 20 升到 23。现有代码只用到 C++20 的 `starts_with`/`ends_with`（71 处）与关联容器 `.contains`（约 20 处），没有任何 C++23-only 构造；四个 fixture 目标（`fixture-1/2`、`fixture-gui`、`fixture-env`）当前没有设标准，实际按 MSVC 默认的 C++14 编译。CMake 3.25 已认识 `cxx_std_23`（3.20 起），对 MSVC 映射为 `/std:c++latest`；`/std:c++23` 不存在，`/std:c++23preview` 是未文档化开关，不采用。
 
 因此标准固定为：所有 C++ 目标（含四个 fixture）使用 `cxx_std_23`；configure 时 `MSVC_VERSION < 1930` 直接失败；CMake 最低版本保持 3.25；接受 `/std:c++latest` 会随工具链漂移，所以 CI 必须打印 `cmake`、`cl`、`ninja` 版本。当前不要求使用 C++23 库特性，`std::expected`/`std::print` 等按实际工具链可用性选用。
