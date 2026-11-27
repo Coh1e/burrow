@@ -52,28 +52,6 @@ bool bp_remove_output_file(struct bp_output_file *file)
     return ok;
 }
 
-static HANDLE open_parent(const char *workspace, wchar_t *path, wchar_t **leaf)
-{
-    wchar_t *root = wide(workspace);
-    HANDLE dir = root ? open_directory(root) : INVALID_HANDLE_VALUE;
-    free(root);
-    *leaf = path;
-    wchar_t *slash;
-    while (dir != INVALID_HANDLE_VALUE && (slash = wcschr(*leaf, L'/')) != NULL) {
-        *slash = 0;
-        HANDLE next = open_child(dir, *leaf, FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, FILE_DIRECTORY_FILE);
-        CloseHandle(dir);
-        dir = next;
-        if (dir != INVALID_HANDLE_VALUE && !ordinary(dir, true)) {
-            CloseHandle(dir);
-            dir = INVALID_HANDLE_VALUE;
-        }
-        *leaf = slash + 1;
-    }
-    return dir;
-}
-
 const char *bp_compare_output_case(const char *workspace, const char *a,
                                    const char *b, enum bp_output_match *match)
 {
@@ -167,22 +145,6 @@ const char *bp_read_workspace_text(const char *workspace, const char *relative, 
     return error;
 }
 
-static const char *publish(HANDLE stage, const wchar_t *name, bool replace_existing)
-{
-    size_t bytes = wcslen(name) * sizeof *name;
-    ULONG size = (ULONG)(sizeof(FILE_RENAME_INFORMATION) + bytes);
-    FILE_RENAME_INFORMATION *info = calloc(1, size);
-    if (!info) return "out-of-memory";
-    info->ReplaceIfExists = replace_existing;
-    /* A leaf name with no RootDirectory renames within the stage's directory. */
-    info->FileNameLength = (ULONG)bytes;
-    memcpy(info->FileName, name, bytes);
-    IO_STATUS_BLOCK io;
-    NTSTATUS rc = NtSetInformationFile(stage, &io, info, size, FileRenameInformation);
-    free(info);
-    return rc < 0 ? "publish-file" : NULL;
-}
-
 static const char *file_op(const char *workspace, const struct bp_step *s, bool apply)
 {
     const char *error = bp_validate_file_operands(s);
@@ -223,7 +185,10 @@ static const char *file_op(const char *workspace, const struct bp_step *s, bool 
                  NULL : "write-stage";
     if (fclose(out) && !error) error = "close-stage";
     if (old != INVALID_HANDLE_VALUE) { CloseHandle(old); old = INVALID_HANDLE_VALUE; }
-    if (!error) error = publish(stage, name, s->op == BP_REPLACE);
+    if (!error) {
+        DWORD status = rename_sibling(stage, name, s->op == BP_REPLACE);
+        if (status) error = status == ERROR_NOT_ENOUGH_MEMORY ? "out-of-memory" : "publish-file";
+    }
 done:
     if (stage != INVALID_HANDLE_VALUE) {
         if (error) {

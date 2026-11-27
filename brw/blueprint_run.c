@@ -1,5 +1,6 @@
 #include "blueprint_edit.h"
 #include "blueprint_lock.h"
+#include "digby_archive.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +59,15 @@ static const char *command(const struct bp_lock *lock, const char *workspace, co
     free(child_path);
     free(program);
     return error;
+}
+
+static struct digby_archive_plan archive_plan(const char *workspace, const struct bp_step *step)
+{
+    return (struct digby_archive_plan){
+        .data = step->payload && !step->payload->module ? step->payload->data : NULL,
+        .size = step->payload ? step->payload->size : 0,
+        .workspace = workspace, .destination = step->path
+    };
 }
 
 static const char *validate_step(const char *workspace, const struct bp_step *step)
@@ -163,8 +173,41 @@ static const char *check_state(const struct bp_lock *lock, const char *workspace
     return NULL;
 }
 
-/* The initial pass validates files up to the first state. Validate the rest
-   here against the workspace at the start of this segment. */
+/* An earlier unpack can supply a parent directory that does not exist yet.
+   Exact output collisions can already be diagnosed without creating it. */
+static const char *archive_dependency(const char *workspace, const struct bp_plan *plan,
+                                      size_t index, bool *created_parent)
+{
+    const struct bp_step *step = &plan->steps[index];
+    *created_parent = false;
+    if (step->op != BP_COPY && step->op != BP_REPLACE && step->op != BP_UNPACK) return NULL;
+    if (!bp_safe_path(step->path)) return "unsafe-output-path";
+    size_t length = strlen(step->path);
+    for (size_t i = 0; i < index; ++i) {
+        const struct bp_step *prior = &plan->steps[i];
+        if (prior->op != BP_UNPACK &&
+            !(step->op == BP_UNPACK && (prior->op == BP_COPY || prior->op == BP_REPLACE))) continue;
+        size_t n = strlen(prior->path);
+        if (n > length || (n < length && step->path[n] != '/') || !brw_same_ascii(prior->path, step->path, n))
+            continue;
+        if (strncmp(prior->path, step->path, n)) {
+            char prefix[BP_PACKAGE_PATH_CAP];
+            memcpy(prefix, step->path, n);
+            prefix[n] = 0;
+            enum bp_output_match match;
+            const char *error = bp_compare_output_case(workspace, prior->path, prefix, &match);
+            if (error) return error;
+            if (match == BP_UNKNOWN_CASE) return "path-case-unknown";
+            if (match == BP_DISTINCT_OUTPUTS) continue;
+        }
+        if (n == length || prior->op != BP_UNPACK) return "destination-exists";
+        *created_parent = true;
+    }
+    return NULL;
+}
+
+/* Recheck file operands against the workspace materialized by the last
+   state change or unpack operation. */
 static const char *validate_segment(const char *workspace, const struct bp_plan *plan,
                                     size_t start, size_t end, size_t *failed)
 {
@@ -202,11 +245,20 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
     for (size_t i = 0; i < plan->count; ++i) {
         const struct bp_step *s = &plan->steps[i];
         if (s->skip_op || s->op == BP_TOOL || s->op == BP_DEFAULT || s->op == BP_SSH) continue;
-        if (s->state) {
+        bool created_parent;
+        error = archive_dependency(workspace, plan, i, &created_parent);
+        if (error) {
+            result->failure_source = s->source;
+            return error;
+        }
+        if (s->op == BP_UNPACK) {
+            const struct digby_archive_plan archive = archive_plan(workspace, s);
+            error = created_parent ? digby_archive_validate(&archive) : digby_archive_extract(&archive, true);
+        } else if (s->state) {
             follows_state = true;
             error = validate_step(workspace, &s->state->check);
             if (!error && s->state->has_change) error = validate_step(workspace, &s->state->change);
-        } else if (follows_state && (s->op == BP_COPY || s->op == BP_REPLACE)) {
+        } else if ((follows_state || created_parent) && (s->op == BP_COPY || s->op == BP_REPLACE)) {
             error = bp_validate_file_operands(s);
         } else error = validate_step(workspace, s);
         if (error) {
@@ -236,9 +288,10 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
         if (error || i == plan->count) break;
         struct bp_step *step = &plan->steps[i];
         if (i >= segment_end && !step->state) {
-            /* A state change may create or edit the input of a later text operation. */
+            /* Materialize an archive or state change before checking consumers
+               against their resulting workspace. Preview never creates it. */
             segment_end = i + 1;
-            while (segment_end < plan->count) {
+            while (segment_end < plan->count && plan->steps[segment_end - 1].op != BP_UNPACK) {
                 const struct bp_state *state = plan->steps[segment_end].state;
                 if (state && state->has_change) break;
                 ++segment_end;
@@ -290,6 +343,9 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
                 result->remote_result_unknown = ssh->result.status == DIGBY_SSH_UNKNOWN;
                 error = ssh->result.error;
                 if (started && ssh->result.remote_exit) error = "child-failed";
+            } else if (step->op == BP_UNPACK) {
+                const struct digby_archive_plan archive = archive_plan(workspace, step);
+                error = digby_archive_extract(&archive, false);
             } else if (step->op == BP_RUN) {
                 error = command(plan->lock, workspace, step, outputs, NULL, &started);
             } else error = bp_apply_step(workspace, step);

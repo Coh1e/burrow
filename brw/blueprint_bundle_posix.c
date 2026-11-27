@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -47,15 +48,12 @@ static int open_file(const struct bp_directory *dir, const char *path)
     return fd;
 }
 
-const char *bp_directory_read(const struct bp_directory *dir, const char *path,
-                              size_t limit, unsigned char **out, size_t *size)
+static const char *read_bytes(int fd, bool reject_hard_links, size_t limit, unsigned char **out, size_t *size)
 {
-    int fd = open_file(dir, path);
-    if (fd < 0) return "bundle-file-unavailable";
     struct stat st;
     unsigned char *bytes = NULL;
     const char *error = "bundle-file-unavailable";
-    if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_size < 0)
+    if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) || (reject_hard_links && st.st_nlink != 1) || st.st_size < 0)
         goto done;
     error = "bundle-limit";
     if ((uintmax_t)st.st_size > limit) goto done;
@@ -82,4 +80,17 @@ done:
     free(bytes);
     close(fd);
     return error;
+}
+
+const char *brw_read_local_file(const char *path, size_t limit, unsigned char **out, size_t *size)
+{
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+    return fd < 0 ? "archive-unavailable" : read_bytes(fd, false, limit, out, size);
+}
+
+const char *bp_directory_read(const struct bp_directory *dir, const char *path,
+                              size_t limit, unsigned char **out, size_t *size)
+{
+    int fd = open_file(dir, path);
+    return fd < 0 ? "bundle-file-unavailable" : read_bytes(fd, true, limit, out, size);
 }

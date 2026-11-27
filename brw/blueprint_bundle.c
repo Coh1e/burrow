@@ -1,12 +1,12 @@
 #include "blueprint.h"
 #include "blueprint_bundle_io.h"
-#include "sha.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 enum { MANIFEST_LIMIT = 128 * 1024, MODULE_LIMIT = 1024 * 1024,
-       PAYLOAD_LIMIT = 64 * 1024 * 1024, BUNDLE_LIMIT = 128 * 1024 * 1024 };
+       BUNDLE_LIMIT = 128 * 1024 * 1024 };
 
 bool bp_valid_utf8(const char *text, size_t size)
 {
@@ -21,80 +21,6 @@ bool bp_valid_utf8(const char *text, size_t size)
             (lead == 0xf4 && *p >= 0x90)) return false;
         while (n--) if ((*p++ & 0xc0) != 0x80) return false;
     }
-    return true;
-}
-
-static unsigned lower(unsigned c)
-{
-    return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
-}
-
-static bool same_ascii(const char *a, const char *b, size_t n)
-{
-    for (size_t i = 0; i < n; ++i)
-        if (lower((unsigned char)a[i]) != lower((unsigned char)b[i])) return false;
-    return true;
-}
-
-static bool reserved(const char *part, size_t n)
-{
-    size_t stem = 0;
-    while (stem < n && part[stem] != '.') ++stem;
-    while (stem && part[stem - 1] == ' ') --stem;
-    if (stem == 3)
-        return same_ascii(part, "con", 3) || same_ascii(part, "prn", 3) ||
-               same_ascii(part, "aux", 3) || same_ascii(part, "nul", 3);
-    return stem == 4 && part[3] >= '0' && part[3] <= '9' &&
-           (same_ascii(part, "com", 3) || same_ascii(part, "lpt", 3));
-}
-
-static bool safe_relative_path(const char *path, size_t max_length)
-{
-    if (!path || !*path || strlen(path) > max_length) return false;
-    const char *part = path;
-    for (const char *p = path; ; ++p) {
-        unsigned c = (unsigned char)*p;
-        if (!c || c == '/') {
-            if (p == part || p[-1] == '.' || p[-1] == ' ' || reserved(part, (size_t)(p - part)))
-                return false;
-            if (!c) return true;
-            part = p + 1;
-        } else if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                     (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == ' '))
-            return false;
-    }
-}
-
-bool bp_safe_path(const char *path)
-{
-    return safe_relative_path(path, 255);
-}
-
-bool bp_safe_package_path(const char *path)
-{
-    return safe_relative_path(path, BP_PACKAGE_PATH_CAP - 1);
-}
-
-static bool valid_digest(const char *s)
-{
-    if (!s || strlen(s) != 64) return false;
-    for (size_t i = 0; i < 64; ++i) {
-        unsigned c = lower((unsigned char)s[i]);
-        if (!(c >= 'a' && c <= 'f') && !(c >= '0' && c <= '9')) return false;
-    }
-    return true;
-}
-
-static bool matches(const unsigned char *data, size_t size, const char *expected)
-{
-    static const char hex[] = "0123456789abcdef";
-    uint8_t hash[SHA256HashSize];
-    SHA256Context ctx;
-    if (SHA256Reset(&ctx) || SHA256Input(&ctx, data, (unsigned int)size) ||
-        SHA256Result(&ctx, hash)) return false;
-    for (size_t i = 0; i < sizeof hash; ++i)
-        if (lower((unsigned char)expected[2*i]) != (unsigned)hex[hash[i] >> 4] ||
-            lower((unsigned char)expected[2*i+1]) != (unsigned)hex[hash[i] & 15]) return false;
     return true;
 }
 
@@ -117,19 +43,19 @@ const struct bp_file *bp_find(const struct bp_bundle *bundle, const char *path)
 static const char *add_file(struct bp_bundle *bundle, const char *path, const char *digest, bool module)
 {
     if (!bp_safe_path(path)) return "unsafe-bundle-path";
-    if (!valid_digest(digest)) return "invalid-digest";
+    if (!brw_valid_sha256(digest)) return "invalid-digest";
     size_t n = strlen(path);
-    if (n == strlen("blueprint.manifest") && same_ascii(path, "blueprint.manifest", n))
+    if (n == strlen("blueprint.manifest") && brw_same_ascii(path, "blueprint.manifest", n))
         return "duplicate-bundle-path";
     for (size_t i = 0; i < bundle->count; ++i) {
         const char *prev = bundle->files[i].path;
-        if (strlen(prev) == n && same_ascii(prev, path, n)) return "duplicate-bundle-path";
+        if (strlen(prev) == n && brw_same_ascii(prev, path, n)) return "duplicate-bundle-path";
     }
     if (bundle->count == BP_MAX_FILES) return "bundle-limit";
     struct bp_file *file = &bundle->files[bundle->count];
     file->path = copy_string(path);
     if (!file->path) return "out-of-memory";
-    for (size_t i = 0; i < 64; ++i) file->digest[i] = (char)lower((unsigned char)digest[i]);
+    for (size_t i = 0; i < 64; ++i) file->digest[i] = (char)tolower((unsigned char)digest[i]);
     file->digest[64] = 0;
     file->module = module;
     ++bundle->count;
@@ -220,13 +146,13 @@ const char *bp_load(const char *directory, const char *digest, const char *platf
     if (!directory || !*directory || !platform || !arch || !out || !detail) return "invalid-bundle";
     snprintf(out->platform, sizeof out->platform, "%s", platform);
     snprintf(detail, BP_DETAIL_CAP, "blueprint.manifest");
-    if (!valid_digest(digest)) return "invalid-digest";
+    if (!brw_valid_sha256(digest)) return "invalid-digest";
     struct bp_directory *dir = bp_directory_open(directory);
     if (!dir) return "bundle-unavailable";
     unsigned char *manifest = NULL;
     size_t size = 0;
     const char *error = bp_directory_read(dir, "blueprint.manifest", MANIFEST_LIMIT, &manifest, &size);
-    if (!error && !matches(manifest, size, digest)) error = "manifest-digest-mismatch";
+    if (!error && !brw_sha256_matches(manifest, size, digest)) error = "manifest-digest-mismatch";
     if (!error && !valid_manifest_bytes(manifest, size)) error = "invalid-manifest";
     if (!error) error = parse_manifest((char *)manifest, platform, arch, capabilities, out, detail);
     free(manifest);
@@ -234,10 +160,10 @@ const char *bp_load(const char *directory, const char *digest, const char *platf
     for (size_t i = 0; !error && i < out->count; ++i) {
         struct bp_file *file = &out->files[i];
         snprintf(detail, BP_DETAIL_CAP, "%s", file->path);
-        size_t limit = file->module ? MODULE_LIMIT : PAYLOAD_LIMIT;
+        size_t limit = file->module ? MODULE_LIMIT : BRW_PAYLOAD_LIMIT;
         if (limit > remaining) limit = remaining;
         error = bp_directory_read(dir, file->path, limit, &file->data, &file->size);
-        if (!error && !matches(file->data, file->size, file->digest)) error = "file-digest-mismatch";
+        if (!error && !brw_sha256_matches(file->data, file->size, file->digest)) error = "file-digest-mismatch";
         if (!error && file->module && memchr(file->data, 0, file->size)) error = "invalid-module";
         remaining -= file->size;
     }
