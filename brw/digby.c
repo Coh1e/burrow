@@ -3,7 +3,9 @@
 
 const char *bp_op_name(enum bp_op op)
 {
-    static const char *const names[BP_OP_COUNT] = {"copy", "replace", "install", "env", "run", "state", "tool", "default", "host"};
+    static const char *const names[BP_OP_COUNT] = {
+        "copy", "replace", "install", "env", "run", "state", "tool", "default", "host", "ssh"
+    };
     return (unsigned)op < BP_OP_COUNT ? names[op] : "unknown";
 }
 

@@ -73,10 +73,7 @@ static int report(const struct digby_ssh_result *result, const struct ssh_option
                   const wchar_t *target, const wchar_t *command)
 {
     const char *operation = digby_operation_name(DIGBY_SSH);
-    const char *status = "rejected";
-    if (result->status == DIGBY_SSH_PLANNED) status = "planned";
-    if (result->status == DIGBY_SSH_COMPLETED) status = "completed";
-    if (result->status == DIGBY_SSH_UNKNOWN) status = "unknown";
+    const char *status = digby_ssh_status_name(result->status);
     if (options->json) {
         printf("{\"operation\":\"%s\",\"status\":\"%s\",\"remoteExit\":", operation, status);
         if (result->status == DIGBY_SSH_COMPLETED) printf("%d", result->remote_exit);

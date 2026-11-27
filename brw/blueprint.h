@@ -4,8 +4,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include "digby_ssh.h"
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_HOST, BP_OP_COUNT };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_HOST, BP_SSH, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
 enum { BP_PACKAGE_PATH_CAP = 260 }; /* Includes the trailing NUL. */
 
@@ -35,10 +36,23 @@ struct bp_binding {
     bool writer;
 };
 
+struct bp_ssh {
+    char *target, *command; /* Owned Blueprint operands. */
+    unsigned port, timeout_seconds;
+    struct digby_ssh_result result;
+    bool reported;
+};
+
+struct bp_ssh_options {
+    /* Borrowed from the operator for this CLI invocation. */
+    const char *allowed_target, *identity_file, *known_hosts;
+};
+
 enum bp_state_status { BP_UNCHECKED, BP_SATISFIED, BP_UNMET, BP_CHANGED, BP_DEFERRED };
 
 struct bp_step {
     struct bp_state *state; /* Owned by a state step. */
+    struct bp_ssh *ssh; /* Owned by an SSH step. */
     struct bp_binding *bindings; /* Parallel to args. Output indices are one-based. */
     char *skip_platform, *skip_op, *registry;
     enum bp_op op;
@@ -67,6 +81,8 @@ struct bp_state {
 
 struct bp_plan {
     struct bp_lock *lock; /* Borrowed for the duration of CLI execution. */
+    struct bp_ssh_options ssh_options;
+    struct digby_ssh_result (*ssh_backend)(const struct digby_ssh_request *, const char *, bool);
     struct bp_step steps[BP_MAX_STEPS];
     struct bp_output outputs[BP_MAX_STEPS];
     size_t output_count;
@@ -92,6 +108,7 @@ struct bp_run_result {
     size_t completed; /* Successful operations, excluding skipped steps. */
     const char *failure_source; /* Failing step or producer position, borrowed from the plan. */
     bool command_started; /* The external command that failed actually started. */
+    bool remote_result_unknown; /* SSH dispatched command bytes without a confirmed exit. */
     bool repair_completed; /* A host repair exited successfully before the failing recheck. */
 };
 

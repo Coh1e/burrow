@@ -112,6 +112,14 @@ static bool client_path(wchar_t path[32768])
     return true;
 }
 
+bool brw_windows_ssh_available(void)
+{
+    wchar_t path[32768];
+    if (!client_path(path)) return false;
+    DWORD attributes = GetFileAttributesW(path);
+    return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
 /* Only the three designated handles may cross into OpenSSH. The parent's pipe
    ends stay open across the READY / command / exit-status exchange. */
 static bool start_client(struct ssh_session *s, const wchar_t *app, wchar_t *line)

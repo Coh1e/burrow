@@ -5,7 +5,8 @@
 
 int brw_blueprint_wcommand(int argc, wchar_t **argv)
 {
-    char *args[8] = {0};
+    /* Subcommand, bundle, five options with values, and two switches. */
+    char *args[14] = {0};
     int result = 2;
     if (argc > (int)(sizeof args / sizeof *args)) {
         fputs("usage: " BRW_BLUEPRINT_USAGE "\n", stderr);
