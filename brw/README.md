@@ -9,6 +9,27 @@ cmake --build .local/brw-build --parallel
 ctest --test-dir .local/brw-build --output-on-failure
 ~~~
 
+### Shared Digby tests
+
+The [CI workflow](../.github/workflows/ci.yml) builds the same C99 core on Windows
+with MinGW-w64, Linux with GCC and macOS with Apple Clang. The C-only build sets
+`CXX` to a nonexistent compiler and checks that CMake selected no C++ compiler.
+Enable `BRW_BLUEPRINT` and `BUILD_TESTING` on all hosts and `BRW_TEST_GIT` on
+POSIX to run the following CTest contracts.
+
+| CTest name | Observable behavior |
+| --- | --- |
+| `digby_plan`, `blueprint_plan` | Plan order, completed steps, failure location and missing capabilities before writes |
+| `digby_literal`, `blueprint_cli` | UTF-8 byte offsets, file copy and text replacement, archived tool and sibling contents, and preservation of the previous command when an archive lacks its declared entry |
+| `git_worktree` | Actual commits after clone and fast-forward, refusal of dirty or diverged worktrees |
+
+In a separate build directory, configure with `-DBRW_ENABLE_CPP_MODULE=ON`
+and a C++23 compiler. The optional module formats literal search offsets into
+caller-owned storage. Run `ctest --test-dir <build> -R "^digby_(literal|cpp_abi)$" --output-on-failure`
+after building `literal_test` and `literal_offset_test`. Both tests use C
+callers. They check search output, exact capacity, an undersized or null
+buffer, and the largest representable offset. [C ABI contract](literal_offset.h)
+
 ## Register and use a source
 
 For verified offline bundles that combine package installation with file, text and session environment operations, see [Offline Blueprints](blueprint.md).

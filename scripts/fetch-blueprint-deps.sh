@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prepare only the sources used by the native POSIX Blueprint build.
+# Prepare the pinned sources for Blueprint and its shared Git contract tests.
 set -eu
 repo=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 sources="$repo/.local/deps/sources"
@@ -23,7 +23,10 @@ while read -r archive digest url; do
         mv "$input" "$sources/$archive"
     fi
     case "$archive" in
-        libgit2-*) tar --no-same-owner -xf "$sources/$archive" -C "$sources" "${archive%%.tar.*}/src/util/hash/rfc6234" ;;
+        libgit2-*)
+            dir=${archive%%.tar.*}
+            tar --no-same-owner -xf "$sources/$archive" -C "$sources" \
+                "$dir/CMakeLists.txt" "$dir/cmake" "$dir/include" "$dir/src" "$dir/deps" "$dir/COPYING" ;;
         quickjs-*|libarchive-*|zlib-*) tar --no-same-owner -xf "$sources/$archive" -C "$sources" ;;
         *) echo "Unknown Blueprint dependency: $archive" >&2; exit 1 ;;
     esac

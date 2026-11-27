@@ -168,12 +168,33 @@ if(NOT actual STREQUAL "3")
 endif()
 check_default(2)
 
+# A verified tar can still omit the catalog entry. Selecting it as the
+# default must leave the previous version usable and stop the next action.
+file(APPEND "${repo}/catalog" "builder\t4\tarchive\tbuilder.tar\t${hash}\tmissing.exe\n")
+file(WRITE "${bundle}/main.mjs" "export default () => [
+  {op:'tool',registry:'sdk',name:'builder',version:'4'},
+  {op:'default',tool:'builder'},
+  {op:'run',program:'${CMAKE_COMMAND}',args:['-E','touch','after-archive']}]")
+set(caps tool default run)
+seal()
+invoke(lock 0)
+invoke(preview 0)
+invoke(apply 1)
+expect_field(entry-missing error)
+expect_field("main.mjs[2]" detail)
+expect_field(1 completed)
+if(EXISTS "$ENV{XDG_DATA_HOME}/burrow/packages/builder/4" OR EXISTS "${work}/after-archive")
+  message(FATAL_ERROR "published an incomplete archive or ran its successor")
+endif()
+check_default(2)
+
 # The archive's entry remains intact when a sibling changes.
 set(archive_bin "${root}/archive default bin")
 set(ENV{BRW_BIN_DIR} "${archive_bin}")
 set(caps tool default)
 file(WRITE "${bundle}/main.mjs" "export default () => [${select_archive},{op:'default',tool:'builder'}]")
 seal()
+invoke(lock 0)
 invoke(apply 0)
 invoke(preview 0)
 check_entry_status(satisfied)
