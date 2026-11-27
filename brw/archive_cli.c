@@ -27,6 +27,62 @@ void brw_unpack_diagnostic(const char *payload, const char *destination, const c
     fprintf(stderr, "brw unpack %s -> %s: %s. %s\n", payload, destination, error, hint);
 }
 
+int brw_pack_command(int argc, const char *const *argv)
+{
+    const char **inputs = NULL;
+    if (argc < 2) goto usage;
+    inputs = calloc((size_t)argc, sizeof *inputs);
+    if (!inputs) { fputs("brw pack: out-of-memory\n", stderr); return 1; }
+    struct digby_pack_plan plan = {.destination = argv[0], .inputs = inputs};
+    bool preview = false, json = false, operands_only = false;
+    for (int i = 1; i < argc; ++i) {
+        const char *arg = argv[i];
+        if (operands_only || strncmp(arg, "--", 2)) inputs[plan.count++] = arg;
+        else if (!strcmp(arg, "--")) operands_only = true;
+        else if (!strcmp(arg, "--format") && !plan.format && i + 1 < argc) plan.format = argv[++i];
+        else if (!strcmp(arg, "--workspace") && !plan.workspace && i + 1 < argc) plan.workspace = argv[++i];
+        else if (!strcmp(arg, "--dry-run") && !preview) preview = true;
+        else if (!strcmp(arg, "--json") && !json) json = true;
+        else goto usage;
+    }
+    if (!plan.count || !plan.format || !plan.workspace || !*plan.workspace) goto usage;
+    for (int i = 0; i < argc; ++i) {
+        if (bp_valid_utf8(argv[i], strlen(argv[i]))) continue;
+        if (json) puts("{\"operation\":\"pack\",\"status\":\"failed\",\"error\":\"invalid-utf8\"}");
+        else fputs("brw pack: invalid-utf8. Supply UTF-8 paths and format.\n", stderr);
+        free(inputs);
+        return 1;
+    }
+    const char *error = digby_archive_pack(&plan, preview);
+    const char *status = error ? "failed" : preview ? "planned" : "applied";
+    if (json) {
+        printf("{\"operation\":\"pack\",\"status\":\"%s\",\"format\":", status);
+        quoted(plan.format);
+        fputs(",\"path\":", stdout);
+        quoted(plan.destination);
+        fputs(",\"inputs\":[", stdout);
+        for (size_t i = 0; i < plan.count; ++i) {
+            if (i) putchar(',');
+            quoted(inputs[i]);
+        }
+        putchar(']');
+        if (error) { fputs(",\"error\":", stdout); quoted(error); }
+        puts("}");
+    } else if (error) {
+        fprintf(stderr, "brw pack %s: %s. Check the format, input files and new output path.\n",
+                plan.destination, error);
+    } else {
+        printf("%s pack %s (%s)\n", status, plan.destination, plan.format);
+        for (size_t i = 0; i < plan.count; ++i) printf("  %s\n", inputs[i]);
+    }
+    free(inputs);
+    return error ? 1 : 0;
+usage:
+    free(inputs);
+    fputs("usage: " BRW_PACK_USAGE "\n", stderr);
+    return 2;
+}
+
 int brw_unpack_command(int argc, const char *const *argv)
 {
     const char *digest = NULL, *workspace = NULL;

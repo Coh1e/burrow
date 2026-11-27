@@ -24,11 +24,23 @@ struct staged_member {
     char name[];
 };
 
-struct digby_archive_stage {
-    int parent, root;
+struct destination {
+    int parent;
     char *path, *name;
+};
+
+struct digby_archive_stage {
+    struct destination dest;
+    int root;
     char temporary[64];
     struct staged_member *members;
+};
+
+struct digby_pack_stage {
+    struct destination dest;
+    char temporary[64];
+    int fd;
+    FILE *stream;
 };
 
 static const int directory_flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
@@ -48,7 +60,7 @@ static int walk_parent(int fd, char *path, char **leaf)
     return fd;
 }
 
-static const char *open_destination(struct digby_archive_stage *s,
+static const char *open_destination(struct destination *s,
                                     const char *workspace, const char *relative)
 {
     s->parent = -1;
@@ -61,7 +73,7 @@ static const char *open_destination(struct digby_archive_stage *s,
     return errno == ENOENT ? NULL : "inspect-output";
 }
 
-static void close_destination(struct digby_archive_stage *s)
+static void close_destination(struct destination *s)
 {
     if (s->parent >= 0) close(s->parent);
     free(s->path);
@@ -69,7 +81,7 @@ static void close_destination(struct digby_archive_stage *s)
 
 const char *digby_archive_destination(const char *workspace, const char *relative)
 {
-    struct digby_archive_stage stage;
+    struct destination stage;
     const char *error = open_destination(&stage, workspace, relative);
     close_destination(&stage);
     return error;
@@ -81,17 +93,17 @@ const char *digby_archive_begin(const char *workspace, const char *relative,
     *out = NULL;
     struct digby_archive_stage *s = calloc(1, sizeof *s);
     if (!s) return "out-of-memory";
-    const char *error = open_destination(s, workspace, relative);
+    const char *error = open_destination(&s->dest, workspace, relative);
     if (!error) {
         error = "create-stage";
         for (unsigned i = 0; i < 128; ++i) {
             snprintf(s->temporary, sizeof s->temporary, ".brw-unpack-%ld-%u", (long)getpid(), i);
-            if (!strcasecmp(s->name, s->temporary)) continue;
-            if (mkdirat(s->parent, s->temporary, 0700)) {
+            if (!strcasecmp(s->dest.name, s->temporary)) continue;
+            if (mkdirat(s->dest.parent, s->temporary, 0700)) {
                 if (errno == EEXIST) continue;
                 break;
             }
-            s->root = openat(s->parent, s->temporary, directory_flags);
+            s->root = openat(s->dest.parent, s->temporary, directory_flags);
             if (s->root >= 0) {
                 *out = s;
                 return NULL;
@@ -101,7 +113,7 @@ const char *digby_archive_begin(const char *workspace, const char *relative,
             break;
         }
     }
-    close_destination(s);
+    close_destination(&s->dest);
     free(s);
     return error;
 }
@@ -190,12 +202,20 @@ const char *digby_archive_entry(struct digby_archive_stage *s, const char *relat
     return error;
 }
 
-static bool stage_owned(const struct digby_archive_stage *s)
+static bool stage_owned(int parent, const char *temporary, int fd)
 {
     struct stat named, opened;
-    return !fstat(s->root, &opened) &&
-           !fstatat(s->parent, s->temporary, &named, AT_SYMLINK_NOFOLLOW) &&
+    return !fstat(fd, &opened) && !fstatat(parent, temporary, &named, AT_SYMLINK_NOFOLLOW) &&
            named.st_dev == opened.st_dev && named.st_ino == opened.st_ino;
+}
+
+static int publish_exclusive(const struct destination *dest, const char *temporary)
+{
+#ifdef __APPLE__
+    return renameatx_np(dest->parent, temporary, dest->parent, dest->name, RENAME_EXCL);
+#else
+    return renameat2(dest->parent, temporary, dest->parent, dest->name, RENAME_NOREPLACE);
+#endif
 }
 
 /* A negative parent only releases records. Never enumerate or unlink unrecorded entries. */
@@ -229,26 +249,75 @@ static bool release_members(struct staged_member *members, int parent)
 const char *digby_archive_finish(struct digby_archive_stage *s, bool publish)
 {
     const char *error = NULL;
-    bool owned = stage_owned(s);
+    bool owned = stage_owned(s->dest.parent, s->temporary, s->root);
     if (!owned) error = "stage-changed";
     else if (publish) {
-#ifdef __APPLE__
-        int status = renameatx_np(s->parent, s->temporary, s->parent, s->name, RENAME_EXCL);
-#else
-        int status = renameat2(s->parent, s->temporary, s->parent, s->name, RENAME_NOREPLACE);
-#endif
+        int status = publish_exclusive(&s->dest, s->temporary);
         if (status) error = errno == EEXIST || errno == ENOTEMPTY ? "destination-exists" : "publish-directory";
     }
     bool rollback = owned && (!publish || error);
-    if (rollback && !stage_owned(s)) {
+    if (rollback && !stage_owned(s->dest.parent, s->temporary, s->root)) {
         rollback = false;
         error = "stage-changed";
     }
     bool removed = release_members(s->members, rollback ? s->root : -1);
-    if (rollback && (!removed || !stage_owned(s) || unlinkat(s->parent, s->temporary, AT_REMOVEDIR)))
+    if (rollback && (!removed || !stage_owned(s->dest.parent, s->temporary, s->root) ||
+                     unlinkat(s->dest.parent, s->temporary, AT_REMOVEDIR)))
         error = "cleanup-stage";
     close(s->root);
-    close_destination(s);
+    close_destination(&s->dest);
+    free(s);
+    return error;
+}
+
+const char *digby_pack_begin(const char *workspace, const char *relative,
+                             struct digby_pack_stage **out, FILE **stream)
+{
+    *out = NULL;
+    *stream = NULL;
+    struct digby_pack_stage *s = calloc(1, sizeof *s);
+    if (!s) return "out-of-memory";
+    const char *error = open_destination(&s->dest, workspace, relative);
+    if (!error) {
+        error = "create-stage";
+        for (unsigned i = 0; i < 128; ++i) {
+            /* '~' keeps the staging file outside the workspace operand grammar. */
+            snprintf(s->temporary, sizeof s->temporary, ".brw-pack-~%ld-%u", (long)getpid(), i);
+            s->fd = openat(s->dest.parent, s->temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+            if (s->fd < 0) {
+                if (errno == EEXIST) continue;
+                break;
+            }
+            /* Retain the original fd to verify ownership after fclose. */
+            int copy = fcntl(s->fd, F_DUPFD_CLOEXEC, 0);
+            if (copy >= 0 && (s->stream = fdopen(copy, "wb"))) {
+                *stream = s->stream;
+                *out = s;
+                return NULL;
+            }
+            if (copy >= 0) close(copy);
+            error = digby_pack_finish(s, false);
+            return error ? error : "open-stage";
+        }
+    }
+    close_destination(&s->dest);
+    free(s);
+    return error;
+}
+
+const char *digby_pack_finish(struct digby_pack_stage *s, bool publish)
+{
+    const char *error = NULL;
+    if (s->stream && fclose(s->stream)) error = "close-stage";
+    if (!stage_owned(s->dest.parent, s->temporary, s->fd)) error = "stage-changed";
+    else if (!error && publish && publish_exclusive(&s->dest, s->temporary))
+        error = errno == EEXIST || errno == ENOTEMPTY ? "destination-exists" : "publish-file";
+    if (!publish || error) {
+        if (!stage_owned(s->dest.parent, s->temporary, s->fd)) error = "stage-changed";
+        else if (unlinkat(s->dest.parent, s->temporary, 0)) error = "cleanup-stage";
+    }
+    close(s->fd);
+    close_destination(&s->dest);
     free(s);
     return error;
 }

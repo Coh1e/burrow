@@ -65,10 +65,12 @@ int wmain(int argc, wchar_t **argv)
     if (!wcscmp(argv[1], L"ssh"))
         return brw_ssh_command(argc - 2, argv + 2);
     if (!wcscmp(argv[1], L"unpack"))
-        return brw_utf8_wcommand(argc - 2, argv + 2, brw_unpack_command, BRW_UNPACK_USAGE);
+        return brw_utf8_wcommand(argc - 2, argv + 2, brw_unpack_command);
+    if (!wcscmp(argv[1], L"pack"))
+        return brw_utf8_wcommand(argc - 2, argv + 2, brw_pack_command);
 #ifdef BRW_BLUEPRINT
     if (!wcscmp(argv[1], L"blueprint"))
-        return brw_utf8_wcommand(argc - 2, argv + 2, brw_blueprint_command, BRW_BLUEPRINT_USAGE);
+        return brw_utf8_wcommand(argc - 2, argv + 2, brw_blueprint_command);
 #endif
     if (!wcscmp(argv[1], L"env") || !wcscmp(argv[1], L"registry"))
         return brw_settings_command(argc, argv);
@@ -148,6 +150,7 @@ usage:
           "       " BRW_GIT_USAGE "\n"
           "       " BRW_SSH_USAGE "\n"
           "       " BRW_UNPACK_USAGE "\n"
+          "       " BRW_PACK_USAGE "\n"
 #ifdef BRW_BLUEPRINT
           "       " BRW_BLUEPRINT_USAGE "\n"
 #endif

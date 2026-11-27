@@ -45,6 +45,8 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME blueprint_unpack COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tests/blueprint-unpack.py" "$<TARGET_FILE:brw>")
+  add_test(NAME blueprint_pack COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tests/blueprint-pack.py" "$<TARGET_FILE:brw>")
   if(NOT WIN32)
     add_executable(digby_archive_posix_test digby_archive_posix_test.c)
     if(APPLE)
