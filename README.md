@@ -12,10 +12,10 @@ Windows 11 x64 原生版处于候选验收阶段。如果已取得候选 ZIP，�
 
 ```powershell
 ./scripts/fetch-deps.ps1
-cmake -S . -B .local/brw-build -G "MinGW Makefiles"
-cmake --build .local/brw-build --parallel
-ctest --test-dir .local/brw-build --output-on-failure
-./.local/brw-build/brw.exe list
+cmake -S . -B .local/native-build -G "MinGW Makefiles"
+cmake --build .local/native-build --parallel
+ctest --test-dir .local/native-build --output-on-failure
+./.local/native-build/brw.exe list
 ```
 
 ## 常用命令
