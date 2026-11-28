@@ -1,4 +1,5 @@
 #include "blueprint.h"
+#include "digby_archive.h"
 #include <quickjs.h>
 #include <limits.h>
 #include <stdio.h>
@@ -189,6 +190,14 @@ static void free_command(struct bp_step *s)
     free(s->tool);
 }
 
+static void free_pack(struct bp_pack *pack)
+{
+    if (!pack) return;
+    for (size_t i = 0; i < pack->count; ++i) free(pack->inputs[i]);
+    free(pack->format);
+    free(pack);
+}
+
 void bp_plan_free(struct bp_plan *plan)
 {
     if (!plan) return;
@@ -207,6 +216,7 @@ void bp_plan_free(struct bp_plan *plan)
             free(s->ssh->command);
             free(s->ssh);
         }
+        free_pack(s->pack);
         free(s->skip_platform);
         free(s->skip_op);
         free(s->registry);
@@ -445,6 +455,33 @@ static const char *parse_ssh(JSContext *ctx, JSValueConst obj, struct bp_step *s
     return NULL;
 }
 
+static const char *parse_pack(JSContext *ctx, JSValueConst obj, struct bp_step *step)
+{
+    JSValue inputs = JS_GetPropertyStr(ctx, obj, "inputs");
+    struct bp_pack *pack = NULL;
+    size_t count;
+    const char *error = "invalid-archive-plan";
+    if (JS_IsArray(ctx, inputs) != 1 || !integer_field(ctx, inputs, "length", &count) || !count) goto done;
+    if (count > DIGBY_ARCHIVE_MEMBER_LIMIT) { error = "archive-limit"; goto done; }
+    pack = calloc(1, sizeof *pack + count * sizeof *pack->inputs);
+    if (!pack) { error = "out-of-memory"; goto done; }
+    pack->count = count;
+    pack->format = field(ctx, obj, "format");
+    if (!pack->format || !bp_valid_utf8(pack->format, strlen(pack->format))) goto done;
+    for (size_t i = 0; i < count; ++i) {
+        JSValue input = JS_GetPropertyUint32(ctx, inputs, (uint32_t)i);
+        pack->inputs[i] = copy_string(ctx, input);
+        JS_FreeValue(ctx, input);
+        if (!bp_safe_path(pack->inputs[i])) { error = "archive-path"; goto done; }
+    }
+    step->pack = pack;
+    error = NULL;
+done:
+    if (error) free_pack(pack);
+    JS_FreeValue(ctx, inputs);
+    return error;
+}
+
 static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const char *op,
                      const struct bp_file *module, const char *location)
 {
@@ -471,11 +508,16 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         s->payload = payload_field(ctx, obj, p->bundle, module->path);
         if (!s->payload) { fail(p, "invalid-payload", location); return; }
     }
-    if (s->op == BP_COPY || s->op == BP_REPLACE || s->op == BP_UNPACK) {
+    if (s->op == BP_COPY || s->op == BP_REPLACE || s->op == BP_UNPACK || s->op == BP_PACK) {
         s->path = field(ctx, obj, "path");
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }
     switch (s->op) {
+    case BP_PACK: {
+        const char *error = parse_pack(ctx, obj, s);
+        if (error) fail(p, error, location);
+        break;
+    }
     case BP_SSH: {
         const char *error = parse_ssh(ctx, obj, s);
         if (error) fail(p, error, location);

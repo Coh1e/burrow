@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "blueprint_bundle_io.h"
+#include "blueprint_files_posix.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -9,8 +10,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-struct bp_directory { int fd; };
 
 struct bp_directory *bp_directory_open(const char *path)
 {

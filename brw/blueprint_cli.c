@@ -50,6 +50,16 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
     field("source", s->source);
     if (s->ssh) print_ssh(s->ssh);
     field("path", s->path);
+    if (s->pack) {
+        field("format", s->pack->format);
+        fputs(",\"inputs\":[", stdout);
+        for (size_t i = 0; i < s->pack->count; ++i) {
+            if (i) putchar(',');
+            quoted(s->pack->inputs[i]);
+        }
+        putchar(']');
+        if (s->pack->pending) field("status", "check-at-execution");
+    }
     field("name", s->name);
     field("value", s->value);
     field("version", s->version);
@@ -217,7 +227,7 @@ int brw_blueprint_command(int argc, const char *const *argv)
     struct bp_run_result result = {.failure_source = detail};
     unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) |
         (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL) | (1u << BP_DEFAULT) | (1u << BP_HOST) |
-        (1u << BP_UNPACK);
+        (1u << BP_UNPACK) | (1u << BP_PACK);
 #ifdef BRW_BP_NATIVE_INSTALL
     capabilities |= 1u << BP_INSTALL;
 #endif

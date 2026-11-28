@@ -61,6 +61,7 @@ Both modules export a synchronous function returning steps. Relative ES imports 
 | `run` | `program`, `args` | Runs the program in the caller’s `--workspace` and waits for it to exit. Preview lists its arguments. |
 | `install` | `payload`, `name`, `version`, `entry` | On Windows, installs a verified native executable or supported archive through the package transaction and publishes its command entry. |
 | `unpack` | `payload`, `path` | Extracts a verified archive and publishes its contents as a new directory in the workspace. |
+| `pack` | `inputs`, `path`, `format` | Creates a new workspace archive from the listed workspace files in declaration order. |
 | `ssh` | `target`, `command`, optional `port` and `timeoutSeconds` | On Windows, runs one POSIX shell command on the SSH service authorized for this invocation. |
 
 For example, declare `requires\trun` (with a tab) and list `build.cmake` as a payload beside the child module. This step runs CMake with the verified script and a single argument containing a space.
@@ -100,6 +101,23 @@ For a gzip-compressed tar, Digby verifies each gzip member's CRC and uncompresse
 The CLI accepts UTF-8 paths. A successful JSON report includes `operation`, `payload`, `sha256` and the workspace-relative `path`. Its `status` is `planned` during preview and `applied` after publication. On an error it returns a nonzero exit code, `status: "failed"` and a stable `error` code.
 
 Publication requires a filesystem that can atomically rename a directory while refusing replacement. On Linux, use a native filesystem such as ext4 when a mounted Windows drive in WSL reports `publish-directory`.
+
+## Create an archive from workspace files
+
+Declare `requires\tpack` in the manifest (with a tab). Both the archive path and every input path are relative to the workspace. The output parent must exist when the step runs. Each ordinary input file becomes a member under its listed path, in the listed order. For example, the second step reads the archive published by the first.
+
+```js
+export default () => [
+  { op: "pack", format: "tar.gz", path: "dist/source.tar.gz", inputs: ["src/main.c", "README.md"] },
+  { op: "pack", format: "zip", path: "dist/delivery.zip", inputs: ["dist/source.tar.gz"] }
+];
+```
+
+Select `tar`, `tar.gz` or `zip` explicitly. Preview lists `format`, `inputs` and `path` and checks readable inputs without creating a file. If an earlier step will produce an input or might change the workspace through an external command, the JSON step reports `check-at-execution`. Apply reads the inputs when it reaches the step. A failed read or write discards the staged archive and stops subsequent steps. Publication requires a filesystem that supports an atomic rename to a new file. An occupied destination returns `destination-exists`.
+
+Paths follow the portable workspace rules. Links, duplicate member names, ASCII case collisions and conflicting file/directory names are rejected. Each input and the completed archive are limited to 64 MiB, with at most 256 MiB of input data and 4,096 members including implied directories.
+
+On Linux and macOS, Digby writes the archive inside a private staging directory beside the destination. Other processes running as the same user can modify private files. If Digby detects a changed stage or cannot remove it, inspect the reported destination and the staging directory before retrying. A cleanup failure after publication leaves the complete archive at the destination.
 
 ## Explicit SSH steps
 

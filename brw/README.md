@@ -22,6 +22,7 @@ POSIX to run the following CTest contracts.
 | `digby_plan`, `blueprint_plan` | Plan order, completed steps, failure location and missing capabilities before writes |
 | `digby_ssh` | A local simulated transport counts connections and sends. Preview opens no connection, authorization and host identity failures send no command, and loss after dispatch reports an unknown exit without a retry. |
 | `blueprint_unpack` | Local TAR, gzip and ZIP fixtures use both the standalone CLI and a nested Blueprint. They check read-only preview, later consumption of the published tree and preservation of the workspace on errors. The fixture uses Python 3. |
+| `blueprint_pack` | The CLI and Blueprint create tar, tar.gz and ZIP archives from local inputs. A later step reads the published file. Workspace snapshots cover preview, an occupied target and failure on the final input. |
 | `digby_literal`, `blueprint_cli` | UTF-8 byte offsets, file copy and text replacement, archived tool and sibling contents, and preservation of the previous command when an archive lacks its declared entry |
 | `git_worktree` | Actual commits after clone and fast-forward, refusal of dirty or diverged worktrees |
 
@@ -102,6 +103,14 @@ most once per invocation. A confirmed remote exit of 255 appears as
 ## Unpack a verified workspace archive
 
 Use `brw unpack ARCHIVE PATH --sha256 DIGEST --workspace DIRECTORY` to publish a new directory from a local tar, gzip-compressed tar or ZIP. Add `--dry-run --json` for a read-only plan. The CLI and Blueprint use the same verification and publication rules. [Blueprint example and filesystem requirements](blueprint.md#unpack-an-archive-into-the-workspace)
+
+## Create a workspace archive
+
+```text
+brw pack dist/source.tar.gz src/main.c README.md --format tar.gz --workspace project --dry-run --json
+```
+
+The full CLI takes the output path first, followed by one or more regular input files. Paths are relative to the workspace. The example previews the two members in archive order. Omit `--dry-run` to publish the new archive under the existing `project/dist` directory. Select `tar`, `tar.gz` or `zip` with `--format`. [Blueprint pack steps and path rules](blueprint.md#create-an-archive-from-workspace-files)
 
 ## Register and use a source
 

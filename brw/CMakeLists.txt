@@ -56,7 +56,7 @@ if(WIN32 OR BRW_BLUEPRINT)
   add_library(brw_verified_files STATIC verified_file.c blueprint_bundle_${brw_file_backend}.c
     "${bp_sha_source}/sha224-256.c")
   target_include_directories(brw_verified_files PRIVATE "${bp_sha_source}")
-  add_library(digby_archive STATIC digby_archive.c digby_archive_${brw_file_backend}.c archive_cli.c)
+  add_library(digby_archive STATIC digby_archive.c digby_pack.c digby_archive_${brw_file_backend}.c archive_cli.c)
   target_include_directories(digby_archive PRIVATE "${archive_source}/libarchive")
   target_link_libraries(digby_archive PRIVATE brw_verified_files archive_static zlibstatic)
   if(WIN32)

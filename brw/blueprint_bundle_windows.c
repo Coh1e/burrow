@@ -2,8 +2,6 @@
 #include "blueprint_bundle_io.h"
 #include "blueprint_files_windows.h"
 
-struct bp_directory { HANDLE handle; };
-
 struct bp_directory *bp_directory_open(const char *path)
 {
     wchar_t *name = wide(path);

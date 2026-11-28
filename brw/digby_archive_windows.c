@@ -19,13 +19,25 @@ struct digby_archive_stage {
     struct created_member *created;
 };
 
+struct digby_pack_stage {
+    HANDLE file, parent;
+    wchar_t *name;
+    FILE *stream;
+};
+
 /* On success the caller owns both the pinned parent and the leaf name. */
-static const char *destination(const char *workspace, const char *relative, HANDLE *parent,
+static const char *destination(const struct bp_directory *workspace, const char *relative, HANDLE *parent,
                                wchar_t **name)
 {
     wchar_t *path = wide(relative), *leaf;
     if (!path) return "out-of-memory";
-    HANDLE dir = open_parent(workspace, path, &leaf);
+    HANDLE root;
+    if (!DuplicateHandle(GetCurrentProcess(), workspace->handle, GetCurrentProcess(), &root,
+                         0, FALSE, DUPLICATE_SAME_ACCESS)) {
+        free(path);
+        return "unsafe-parent";
+    }
+    HANDLE dir = descend_parent(root, path, &leaf);
     const char *error = "unsafe-parent";
     if (dir != INVALID_HANDLE_VALUE) {
         HANDLE found = open_child(dir, leaf, FILE_READ_ATTRIBUTES,
@@ -45,7 +57,7 @@ static const char *destination(const char *workspace, const char *relative, HAND
     return error;
 }
 
-const char *digby_archive_destination(const char *workspace, const char *relative)
+const char *digby_archive_destination(const struct bp_directory *workspace, const char *relative)
 {
     HANDLE parent;
     wchar_t *name;
@@ -57,7 +69,37 @@ const char *digby_archive_destination(const char *workspace, const char *relativ
     return error;
 }
 
-const char *digby_archive_begin(const char *workspace, const char *relative,
+static HANDLE create_stage(HANDLE parent, const wchar_t *destination_name, bool directory)
+{
+    for (unsigned i = 0; i < 8; ++i) {
+        wchar_t name[48];
+        ULONGLONG random;
+        if (BCryptGenRandom(NULL, (PUCHAR)&random, sizeof random, BCRYPT_USE_SYSTEM_PREFERRED_RNG) ||
+            swprintf(name, 48, directory ? L".brw-unpack-%016llx" : L".brw-pack-~%016llx", random) < 0) break;
+        if (!_wcsicmp(name, destination_name)) continue;
+        HANDLE h = open_child(parent, name, (directory ? FILE_TRAVERSE : GENERIC_WRITE) | FILE_READ_ATTRIBUTES | DELETE,
+            0, FILE_CREATE, directory ? FILE_DIRECTORY_FILE : FILE_NON_DIRECTORY_FILE);
+        if (h != INVALID_HANDLE_VALUE) return h;
+        DWORD error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS) break;
+    }
+    return INVALID_HANDLE_VALUE;
+}
+
+/* The returned binary stream owns h; on failure the handle is closed here. */
+static FILE *output_stream(HANDLE h)
+{
+    int fd = _open_osfhandle((intptr_t)h, _O_WRONLY | _O_BINARY | _O_NOINHERIT);
+    if (fd < 0) {
+        CloseHandle(h);
+        return NULL;
+    }
+    FILE *stream = _fdopen(fd, "wb");
+    if (!stream) _close(fd);
+    return stream;
+}
+
+const char *digby_archive_begin(const struct bp_directory *workspace, const char *relative,
                                 struct digby_archive_stage **out)
 {
     *out = NULL;
@@ -65,19 +107,10 @@ const char *digby_archive_begin(const char *workspace, const char *relative,
     if (!stage) return "out-of-memory";
     const char *error = destination(workspace, relative, &stage->parent, &stage->name);
     if (!error) {
-        for (unsigned i = 0; i < 8; ++i) {
-            wchar_t name[48];
-            ULONGLONG random;
-            if (BCryptGenRandom(NULL, (PUCHAR)&random, sizeof random, BCRYPT_USE_SYSTEM_PREFERRED_RNG) ||
-                swprintf(name, 48, L".brw-unpack-%016llx", random) < 0) break;
-            if (!_wcsicmp(name, stage->name)) continue;
-            stage->root = open_child(stage->parent, name, FILE_TRAVERSE | FILE_READ_ATTRIBUTES | DELETE,
-                0, FILE_CREATE, FILE_DIRECTORY_FILE);
-            if (stage->root != INVALID_HANDLE_VALUE) {
-                *out = stage;
-                return NULL;
-            }
-            if (GetLastError() != ERROR_ALREADY_EXISTS) break;
+        stage->root = create_stage(stage->parent, stage->name, true);
+        if (stage->root != INVALID_HANDLE_VALUE) {
+            *out = stage;
+            return NULL;
         }
         CloseHandle(stage->parent);
         free(stage->name);
@@ -149,15 +182,7 @@ const char *digby_archive_entry(struct digby_archive_stage *stage, const char *r
         if (error) break;
         if (!slash) {
             if (directory) CloseHandle(h);
-            else {
-                int fd = _open_osfhandle((intptr_t)h, _O_WRONLY | _O_BINARY | _O_NOINHERIT);
-                if (fd < 0) CloseHandle(h);
-                else {
-                    *out = _fdopen(fd, "wb");
-                    if (!*out) _close(fd);
-                }
-                if (!*out) error = "write-stage";
-            }
+            else if (!(*out = output_stream(h))) error = "write-stage";
             break;
         }
         *slash = L'/';
@@ -210,5 +235,51 @@ const char *digby_archive_finish(struct digby_archive_stage *stage, bool publish
     CloseHandle(stage->parent);
     free(stage->name);
     free(stage);
+    return error;
+}
+
+const char *digby_pack_begin(const struct bp_directory *workspace, const char *relative,
+                             struct digby_pack_stage **out, FILE **stream)
+{
+    *out = NULL;
+    *stream = NULL;
+    struct digby_pack_stage *s = calloc(1, sizeof *s);
+    if (!s) return "out-of-memory";
+    const char *error = destination(workspace, relative, &s->parent, &s->name);
+    if (!error) {
+        s->file = create_stage(s->parent, s->name, false);
+        if (s->file != INVALID_HANDLE_VALUE) {
+            HANDLE copy;
+            if (DuplicateHandle(GetCurrentProcess(), s->file, GetCurrentProcess(), &copy,
+                                0, FALSE, DUPLICATE_SAME_ACCESS) && (s->stream = output_stream(copy))) {
+                *out = s;
+                *stream = s->stream;
+                return NULL;
+            }
+            error = digby_pack_finish(s, false);
+            return error ? error : "open-stage";
+        }
+        CloseHandle(s->parent);
+        free(s->name);
+        error = "create-stage";
+    }
+    free(s);
+    return error;
+}
+
+const char *digby_pack_finish(struct digby_pack_stage *s, bool publish)
+{
+    const char *error = NULL;
+    if (s->stream && fclose(s->stream)) error = "close-stage";
+    if (!error && publish) {
+        DWORD status = rename_sibling(s->file, s->name, false);
+        if (status == ERROR_ALREADY_EXISTS || status == ERROR_FILE_EXISTS) error = "destination-exists";
+        else if (status) error = status == ERROR_NOT_ENOUGH_MEMORY ? "out-of-memory" : "publish-file";
+    }
+    if ((!publish || error) && !discard(s->file)) error = "cleanup-stage";
+    CloseHandle(s->file);
+    CloseHandle(s->parent);
+    free(s->name);
+    free(s);
     return error;
 }

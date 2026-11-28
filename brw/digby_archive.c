@@ -7,8 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { MEMBER_LIMIT = 4096, EXPANDED_LIMIT = 256 * 1024 * 1024 };
-
 struct member {
     char *path;
     bool directory, explicit_entry;
@@ -48,7 +46,7 @@ static const char *record_member(struct extraction *tree, const char *path,
         if (cmp < 0) hi = middle;
         else lo = middle + 1;
     }
-    if (tree->count == MEMBER_LIMIT) return "archive-limit";
+    if (tree->count == DIGBY_ARCHIVE_MEMBER_LIMIT) return "archive-limit";
     if (tree->count == tree->capacity) {
         size_t capacity = tree->capacity ? tree->capacity * 2 : 16;
         struct member *members = realloc(tree->members, capacity * sizeof *members);
@@ -79,6 +77,46 @@ static const char *record_path(struct extraction *tree, char *path, bool directo
     return record_member(tree, path, directory, true);
 }
 
+static void free_members(struct extraction *tree)
+{
+    for (size_t i = 0; i < tree->count; ++i) free(tree->members[i].path);
+    free(tree->members);
+}
+
+/* A file cannot also be a parent of another file. Compare whole components
+   under the same portable case-folding rule used by the archive reader. */
+static bool overlap(const char *a, const char *b)
+{
+    size_t a_length = strlen(a), b_length = strlen(b);
+    size_t n = a_length < b_length ? a_length : b_length;
+    return brw_same_ascii(a, b, n) && (a_length == b_length || a[n] == '/' || b[n] == '/');
+}
+
+const char *digby_pack_validate_operands(const struct digby_pack_plan *plan)
+{
+    if (!plan || !plan->workspace || !*plan->workspace || !plan->format || !plan->inputs ||
+        !plan->count) return "invalid-archive-plan";
+    if (strcmp(plan->format, "tar") && strcmp(plan->format, "tar.gz") &&
+        strcmp(plan->format, "zip")) return "archive-format";
+    if (!bp_safe_path(plan->destination)) return "unsafe-destination";
+    if (plan->count > DIGBY_ARCHIVE_MEMBER_LIMIT) return "archive-limit";
+
+    struct extraction tree = {0};
+    const char *error = NULL;
+    for (size_t i = 0; !error && i < plan->count; ++i) {
+        const char *input = plan->inputs[i];
+        if (!bp_safe_path(input)) error = "archive-path";
+        else if (overlap(input, plan->destination)) error = "archive-path-conflict";
+        else {
+            char path[BP_PACKAGE_PATH_CAP];
+            strcpy(path, input);
+            error = record_path(&tree, path, false);
+        }
+    }
+    free_members(&tree);
+    return error;
+}
+
 static const char *read_body(struct archive *reader, FILE *out, size_t expected)
 {
     unsigned char block[16384];
@@ -101,7 +139,7 @@ static const char *read_member(struct archive *reader, struct archive_entry *ite
     if (archive_entry_is_encrypted(item) || !archive_entry_size_is_set(item)) return "archive-data";
     la_int64_t size = archive_entry_size(item);
     if (size < 0 || (directory && size)) return "archive-data";
-    if (size > (la_int64_t)(EXPANDED_LIMIT - tree->expanded)) return "archive-limit";
+    if (size > (la_int64_t)(DIGBY_ARCHIVE_EXPANDED_LIMIT - tree->expanded)) return "archive-limit";
 
     while (!strncmp(name, "./", 2)) name += 2;
     if (directory && (!*name || !strcmp(name, "."))) return NULL;
@@ -176,7 +214,7 @@ static la_ssize_t read_gzip(struct archive *reader, void *context, const void **
         source->member_ended = status == Z_STREAM_END;
         size_t n = sizeof source->block - stream->avail_out;
         /* Bound decompression even for TAR headers or padding after TAR EOF. */
-        if (n > EXPANDED_LIMIT + BRW_PAYLOAD_LIMIT - source->expanded) {
+        if (n > DIGBY_ARCHIVE_EXPANDED_LIMIT + BRW_PAYLOAD_LIMIT - source->expanded) {
             source->error = "archive-limit";
             return -1;
         }
@@ -215,7 +253,7 @@ static const char *scan(const struct digby_archive_plan *plan, struct digby_arch
         int status = archive_read_next_header(reader, &item);
         if (status == ARCHIVE_EOF) break;
         if (status != ARCHIVE_OK) error = "archive-data";
-        else if (++count > MEMBER_LIMIT) error = "archive-limit";
+        else if (++count > DIGBY_ARCHIVE_MEMBER_LIMIT) error = "archive-limit";
         else error = read_member(reader, item, &tree);
     }
     if (archive_read_free(reader) != ARCHIVE_OK && !error) error = "archive-data";
@@ -226,8 +264,7 @@ static const char *scan(const struct digby_archive_plan *plan, struct digby_arch
         if (source.error) error = source.error;
         if (inflateEnd(&source.stream) != Z_OK && !error) error = "archive-data";
     }
-    for (size_t i = 0; i < tree.count; ++i) free(tree.members[i].path);
-    free(tree.members);
+    free_members(&tree);
     return error;
 }
 
@@ -242,8 +279,11 @@ const char *digby_archive_extract(const struct digby_archive_plan *plan, bool pr
     const char *error = check_operands(plan);
     if (error) return error;
     struct digby_archive_stage *stage = NULL;
-    error = preview ? digby_archive_destination(plan->workspace, plan->destination) :
-                      digby_archive_begin(plan->workspace, plan->destination, &stage);
+    struct bp_directory *workspace = bp_directory_open(plan->workspace);
+    if (!workspace) return "unsafe-parent";
+    error = preview ? digby_archive_destination(workspace, plan->destination) :
+                      digby_archive_begin(workspace, plan->destination, &stage);
+    bp_directory_close(workspace);
     if (error) return error;
     error = scan(plan, stage);
     if (stage) {

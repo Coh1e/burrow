@@ -7,7 +7,7 @@
 #include "digby_ssh.h"
 #include "verified_file.h"
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_HOST, BP_SSH, BP_UNPACK, BP_OP_COUNT };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_HOST, BP_SSH, BP_UNPACK, BP_PACK, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
 
 struct bp_file {
@@ -48,11 +48,19 @@ struct bp_ssh_options {
     const char *allowed_target, *identity_file, *known_hosts;
 };
 
+struct bp_pack {
+    char *format;
+    size_t count;
+    bool pending; /* Preview needs outputs of earlier steps to finish preflight. */
+    char *inputs[]; /* Owned workspace-relative input names in archive order. */
+};
+
 enum bp_state_status { BP_UNCHECKED, BP_SATISFIED, BP_UNMET, BP_CHANGED, BP_DEFERRED };
 
 struct bp_step {
     struct bp_state *state; /* Owned by a state step. */
     struct bp_ssh *ssh; /* Owned by an SSH step. */
+    struct bp_pack *pack; /* Owned by a pack step. */
     struct bp_binding *bindings; /* Parallel to args. Output indices are one-based. */
     char *skip_platform, *skip_op, *registry;
     enum bp_op op;
