@@ -6,6 +6,7 @@
 #include "ssh_command_windows.h"
 #include "blueprint_cli.h"
 #include "archive_cli.h"
+#include "download_cli.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -68,6 +69,8 @@ int wmain(int argc, wchar_t **argv)
         return brw_utf8_wcommand(argc - 2, argv + 2, brw_unpack_command);
     if (!wcscmp(argv[1], L"pack"))
         return brw_utf8_wcommand(argc - 2, argv + 2, brw_pack_command);
+    if (!wcscmp(argv[1], L"download"))
+        return brw_utf8_wcommand(argc - 2, argv + 2, brw_download_command);
 #ifdef BRW_BLUEPRINT
     if (!wcscmp(argv[1], L"blueprint"))
         return brw_utf8_wcommand(argc - 2, argv + 2, brw_blueprint_command);
@@ -151,6 +154,7 @@ usage:
           "       " BRW_SSH_USAGE "\n"
           "       " BRW_UNPACK_USAGE "\n"
           "       " BRW_PACK_USAGE "\n"
+          "       " BRW_DOWNLOAD_USAGE "\n"
 #ifdef BRW_BLUEPRINT
           "       " BRW_BLUEPRINT_USAGE "\n"
 #endif

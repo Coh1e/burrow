@@ -1,7 +1,9 @@
 #define _POSIX_C_SOURCE 200809L
 #include "blueprint_bundle_io.h"
 #include "blueprint_files_posix.h"
+#include "verified_file.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -10,6 +12,12 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+bool brw_valid_ipv6_literal(const char *address)
+{
+    struct in6_addr parsed;
+    return address && inet_pton(AF_INET6, address, &parsed) == 1;
+}
 
 struct bp_directory *bp_directory_open(const char *path)
 {

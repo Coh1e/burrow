@@ -96,14 +96,14 @@ static const char *pack(const struct digby_pack_plan *plan, bool preview,
     if (error) return error;
     struct bp_directory *workspace = bp_directory_open(plan->workspace);
     if (!workspace) return "unsafe-parent";
-    struct digby_pack_stage *stage = NULL;
+    struct digby_file_stage *stage = NULL;
     FILE *stream = NULL;
-    if (!preview) error = digby_pack_begin(workspace, plan->destination, &stage, &stream);
-    else if (!defer_destination) error = digby_archive_destination(workspace, plan->destination);
+    if (!preview) error = digby_file_begin(workspace, plan->destination, &stage, &stream);
+    else if (!defer_destination) error = digby_check_destination(workspace, plan->destination);
     if (!error) error = write_archive(plan, defer_inputs, workspace, stream);
     bp_directory_close(workspace);
     if (stage) {
-        const char *finish = digby_pack_finish(stage, !error);
+        const char *finish = digby_file_finish(stage, !error, NULL, NULL);
         if (finish) return finish;
     }
     return error;

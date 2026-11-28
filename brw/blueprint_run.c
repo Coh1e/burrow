@@ -1,6 +1,7 @@
 #include "blueprint_edit.h"
 #include "blueprint_lock.h"
 #include "digby_archive.h"
+#include "digby_download.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -189,7 +190,7 @@ static const char *path_relation(const char *workspace, const char *producer, co
         prefix[n] = 0;
         enum bp_output_match match;
         const char *error = bp_compare_output_case(workspace, producer, prefix, &match);
-        /* The external command may create this parent. The pack will resolve
+        /* The external command may create this parent. The step will resolve
            the spelling against its actual directory when it runs. */
         if (parent_may_change && error && !strcmp(error, "inspect-output")) return NULL;
         if (error) return error;
@@ -200,30 +201,35 @@ static const char *path_relation(const char *workspace, const char *producer, co
     return NULL;
 }
 
-/* An unpack can supply an output directory; a pack can supply a file.
-   Exact output collisions can already be diagnosed before publication. */
-static const char *archive_dependency(const char *workspace, const struct bp_plan *plan,
-                                      size_t pack_known_from, size_t index, size_t *ready_after)
+static bool publishes_file(enum bp_op op)
+{
+    return op == BP_PACK || op == BP_DOWNLOAD;
+}
+
+/* Unpack publishes a directory. Pack and download publish ordinary files. */
+static const char *output_dependency(const char *workspace, const struct bp_plan *plan,
+                                     size_t known_from, size_t index, size_t *ready_after)
 {
     const struct bp_step *step = &plan->steps[index];
     *ready_after = 0;
-    bool archive = step->op == BP_UNPACK || step->op == BP_PACK;
-    if (!archive && step->op != BP_COPY && step->op != BP_REPLACE) return NULL;
+    bool file = publishes_file(step->op);
+    bool publishes = file || step->op == BP_UNPACK;
+    if (!publishes && step->op != BP_COPY && step->op != BP_REPLACE) return NULL;
     if (!bp_safe_path(step->path)) return "unsafe-output-path";
-    size_t start = step->op == BP_PACK ? pack_known_from : 0;
+    size_t start = file ? known_from : 0;
     for (size_t i = start; i < index; ++i) {
         const struct bp_step *prior = &plan->steps[i];
-        if (prior->op != BP_UNPACK && prior->op != BP_PACK &&
-            !(archive && (prior->op == BP_COPY || prior->op == BP_REPLACE))) continue;
+        bool prior_file = publishes_file(prior->op);
+        if (prior->op != BP_UNPACK && !prior_file &&
+            !(publishes && (prior->op == BP_COPY || prior->op == BP_REPLACE))) continue;
         enum path_relation relation;
-        const char *error = path_relation(workspace, prior->path, step->path,
-                                          step->op == BP_PACK && pack_known_from != 0, &relation);
+        const char *error = path_relation(workspace, prior->path, step->path, file && known_from != 0, &relation);
         if (error) return error;
         if (relation == PATH_NO_KNOWN_MATCH) continue;
-        if (prior->op == BP_PACK && i < pack_known_from)
-            *ready_after = pack_known_from;
+        if (prior_file && i < known_from)
+            *ready_after = known_from;
         else if ((relation == PATH_BELOW && prior->op == BP_UNPACK) ||
-            (relation == PATH_EQUAL && prior->op == BP_PACK && step->op == BP_REPLACE))
+                 (relation == PATH_EQUAL && prior_file && step->op == BP_REPLACE))
             *ready_after = i + 1;
         else return "destination-exists";
     }
@@ -250,7 +256,7 @@ static const char *preflight_pack(const char *workspace, struct bp_plan *plan, s
     for (size_t i = start; i < index; ++i) {
         const struct bp_step *prior = &plan->steps[i];
         if (prior->op != BP_COPY && prior->op != BP_REPLACE &&
-            prior->op != BP_UNPACK && prior->op != BP_PACK) continue;
+            prior->op != BP_UNPACK && !publishes_file(prior->op)) continue;
         for (size_t j = 0; j < pack.count; ++j) {
             enum path_relation relation;
             const char *error = path_relation(workspace, prior->path, pack.inputs[j], start != 0, &relation);
@@ -265,18 +271,25 @@ static const char *preflight_pack(const char *workspace, struct bp_plan *plan, s
     return digby_pack_preflight(&pack, future, defer_destination);
 }
 
+static struct digby_download_plan download_plan(const char *workspace, const struct bp_step *step)
+{
+    return (struct digby_download_plan){
+        .workspace = workspace, .url = step->url, .destination = step->path, .sha256 = step->sha256
+    };
+}
+
 /* At the start of a segment, validate every edit whose parent is available.
    After publication, validate edits that were waiting for its output. */
 static const char *validate_segment(const char *workspace, const struct bp_plan *plan,
                                     size_t start, size_t end, const size_t *ready_after,
-                                    bool after_archive, size_t *failed)
+                                    bool after_publish, size_t *failed)
 {
     bool recheck_files = start != 0;
     enum bp_edit_input inputs[BP_MAX_STEPS] = {BP_EDIT_SKIP};
     for (size_t i = start; i < end; ++i) {
         const struct bp_step *step = &plan->steps[i];
         if (step->state) recheck_files = true;
-        if (after_archive && ready_after[i] != start) continue;
+        if (after_publish && ready_after[i] != start) continue;
         inputs[i] = ready_after[i] <= start ? BP_EDIT_WORKSPACE : BP_EDIT_FUTURE;
         if (inputs[i] == BP_EDIT_FUTURE || !recheck_files || (step->op != BP_COPY && step->op != BP_REPLACE)) continue;
         const char *error = bp_validate_step(workspace, step);
@@ -306,11 +319,15 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
     if (error) return error;
     bool follows_state = false;
     size_t ready_after[BP_MAX_STEPS] = {0};
-    size_t pack_known_from = 0;
+    size_t known_from = 0;
     for (size_t i = 0; i < plan->count; ++i) {
         const struct bp_step *s = &plan->steps[i];
         if (s->skip_op || s->op == BP_TOOL || s->op == BP_DEFAULT || s->op == BP_SSH) continue;
-        error = archive_dependency(workspace, plan, pack_known_from, i, &ready_after[i]);
+        if (s->op == BP_DOWNLOAD) {
+            const struct digby_download_plan download = download_plan(workspace, s);
+            error = digby_download_validate(&download);
+        }
+        if (!error) error = output_dependency(workspace, plan, known_from, i, &ready_after[i]);
         if (error) {
             result->failure_source = s->source;
             return error;
@@ -319,7 +336,12 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             const struct digby_archive_plan archive = archive_plan(workspace, s);
             error = ready_after[i] ? digby_archive_validate(&archive) : digby_archive_extract(&archive, true);
         } else if (s->op == BP_PACK) {
-            error = preflight_pack(workspace, plan, pack_known_from, i, ready_after[i] != 0, preview);
+            error = preflight_pack(workspace, plan, known_from, i, ready_after[i] != 0, preview);
+        } else if (s->op == BP_DOWNLOAD) {
+            if (!ready_after[i] && !known_from) {
+                const struct digby_download_plan download = download_plan(workspace, s);
+                error = digby_download(&download, true);
+            }
         } else if (s->state) {
             follows_state = true;
             error = validate_step(workspace, &s->state->check);
@@ -331,8 +353,8 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             result->failure_source = s->source;
             return error;
         }
-        /* A command can rearrange pack inputs and previously published archives. */
-        if (s->op == BP_RUN || (s->state && s->state->has_change)) pack_known_from = i + 1;
+        /* A command can rearrange workspace inputs and published files. */
+        if (s->op == BP_RUN || (s->state && s->state->has_change)) known_from = i + 1;
     }
     size_t segment_end = 0;
     bool earlier_effect = false, earlier_entry_effect = false;
@@ -356,8 +378,8 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
         if (error || i == plan->count) break;
         struct bp_step *step = &plan->steps[i];
         bool new_segment = i >= segment_end && !step->state;
-        bool after_archive = !preview && i && i < segment_end &&
-            (plan->steps[i-1].op == BP_UNPACK || plan->steps[i-1].op == BP_PACK);
+        bool after_publish = !preview && i && i < segment_end &&
+            (plan->steps[i-1].op == BP_UNPACK || publishes_file(plan->steps[i-1].op));
         if (new_segment) {
             segment_end = i + 1;
             while (segment_end < plan->count) {
@@ -366,9 +388,9 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
                 ++segment_end;
             }
         }
-        if ((new_segment && (!preview || !earlier_effect)) || after_archive) {
+        if ((new_segment && (!preview || !earlier_effect)) || after_publish) {
             size_t failed = i;
-            error = validate_segment(workspace, plan, i, segment_end, ready_after, after_archive, &failed);
+            error = validate_segment(workspace, plan, i, segment_end, ready_after, after_publish, &failed);
             if (error) {
                 result->failure_source = plan->steps[failed].source;
                 break;
@@ -418,6 +440,9 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             } else if (step->op == BP_PACK) {
                 const struct digby_pack_plan pack = pack_plan(workspace, step);
                 error = digby_archive_pack(&pack, false);
+            } else if (step->op == BP_DOWNLOAD) {
+                const struct digby_download_plan download = download_plan(workspace, step);
+                error = digby_download(&download, false);
             } else if (step->op == BP_RUN) {
                 error = command(plan->lock, workspace, step, outputs, NULL, &started);
             } else error = bp_apply_step(workspace, step);

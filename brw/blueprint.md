@@ -62,6 +62,7 @@ Both modules export a synchronous function returning steps. Relative ES imports 
 | `install` | `payload`, `name`, `version`, `entry` | On Windows, installs a verified native executable or supported archive through the package transaction and publishes its command entry. |
 | `unpack` | `payload`, `path` | Extracts a verified archive and publishes its contents as a new directory in the workspace. |
 | `pack` | `inputs`, `path`, `format` | Creates a new workspace archive from the listed workspace files in declaration order. |
+| `download` | `url`, `sha256`, `path` | Verifies the downloaded bytes and publishes them as a new workspace file. |
 | `ssh` | `target`, `command`, optional `port` and `timeoutSeconds` | On Windows, runs one POSIX shell command on the SSH service authorized for this invocation. |
 
 For example, declare `requires\trun` (with a tab) and list `build.cmake` as a payload beside the child module. This step runs CMake with the verified script and a single argument containing a space.
@@ -73,6 +74,28 @@ For example, declare `requires\trun` (with a tab) and list `build.cmake` as a pa
 The argument list accepts up to 128 entries, including at most one script reference. Digby resolves the reference from the declaring module and stages the verified bytes in a temporary file for this invocation. Scripts can use the working directory for project files. The temporary location contains only the standalone script. String arguments pass directly to the program, including empty strings and literal `|`. To execute a pipeline, select an interpreter such as `sh` with `["-c", scriptText]` or `powershell.exe` with `["-NoProfile", "-Command", scriptText]`. Child output goes to stderr so the CLI report remains readable on stdout. A failed launch or nonzero exit stops the plan.
 
 The planning runtime has no filesystem, process or network bindings. A bundle may declare up to 128 files. The reader limits the manifest to 128 KiB, each module to 1 MiB, each payload to 64 MiB and loaded member data to 128 MiB. Nested calls, plan size, JavaScript heap, stack and execution time are also bounded. An unavailable capability, invalid import or exceeded planning limit fails before application.
+
+## Download a verified file
+
+Declare `requires<TAB>download` in the manifest. Supply the expected SHA-256 from a trusted source. The destination is relative to the workspace and its parent directory must exist when the step runs. This example also requires `pack` and reads the verified file from the next step.
+
+```js
+export default () => [
+  { op: "download", url: "https://example.org/hello.txt", path: "out/hello.txt",
+    sha256: "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03" },
+  { op: "pack", format: "tar", path: "out/receipt.tar", inputs: ["out/hello.txt"] }
+];
+```
+
+The example digest is for the six bytes `hello\n`, including the newline. Replace the URL and digest with those of your file. Use the standalone CLI to preview the same Digby plan.
+
+```sh
+brw download URL out/hello.txt --sha256 DIGEST --workspace project --dry-run --json
+```
+
+Preview checks the URL, digest and local destination. It reports the remote condition as `"remoteStatus":"unverified"` and opens zero connections. Apply accepts a complete HTTP 200 response of up to 64 MiB over HTTP or HTTPS. Use a direct URL without embedded credentials or a fragment. Windows uses WinHTTP. On Linux and macOS, `curl` must be executable on `PATH`. A required download capability is checked before the first Blueprint step.
+
+After the digest matches, Digby closes its staged file and publishes it without overwriting an existing destination. A digest mismatch (`file-digest-mismatch`), incomplete transfer (`download-failed`) or operator interrupt before publication (`cancelled`) discards the stage and stops later Blueprint steps. An occupied destination returns `destination-exists`.
 
 ## Unpack an archive into the workspace
 

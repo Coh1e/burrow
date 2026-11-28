@@ -1,5 +1,7 @@
 #include "blueprint_cli.h"
 #include "archive_cli.h"
+#include "download_cli.h"
+#include "digby_download.h"
 #include "json_utf8.h"
 #include "blueprint.h"
 #include "blueprint_lock.h"
@@ -38,7 +40,7 @@ static void print_ssh(const struct bp_ssh *ssh)
     if (result->status == DIGBY_SSH_PLANNED) fputs(",\"pending\":[\"host-identity\"]", stdout);
 }
 
-static void print_step(const struct bp_plan *plan, const struct bp_step *s)
+static void print_step(const struct bp_plan *plan, const struct bp_step *s, bool preview)
 {
     printf("{\"op\":");
     quoted(s->skip_op ? s->skip_op : bp_op_name(s->op));
@@ -50,6 +52,11 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
     field("source", s->source);
     if (s->ssh) print_ssh(s->ssh);
     field("path", s->path);
+    if (s->op == BP_DOWNLOAD) {
+        field("url", s->url);
+        field("sha256", s->sha256);
+        if (preview) field("remoteStatus", "unverified");
+    }
     if (s->pack) {
         field("format", s->pack->format);
         fputs(",\"inputs\":[", stdout);
@@ -103,11 +110,11 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s)
             }
         }
         printf("],\"check\":");
-        print_step(plan, &s->state->check);
+        print_step(plan, &s->state->check, preview);
         if (s->state->has_change) {
             if (s->op == BP_HOST) printf(",\"onMismatch\":[\"repair\",\"recheck\"],\"repair\":");
             else printf(",\"change\":");
-            print_step(plan, &s->state->change);
+            print_step(plan, &s->state->change, preview);
         }
         print_state_status(s->state->status);
         if (s->state->has_exit_code) printf(",\"exitCode\":%lu", s->state->exit_code);
@@ -133,7 +140,7 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
         printf("{\"status\":\"%s\",\"completed\":%zu,\"steps\":[", status, result->completed);
         for (size_t i = 0; i < plan->count; ++i) {
             if (i) putchar(',');
-            print_step(plan, &plan->steps[i]);
+            print_step(plan, &plan->steps[i], preview);
         }
         putchar(']');
         if (plan->lock && plan->lock->count) {
@@ -161,14 +168,11 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
         puts("}");
     } else {
         printf("%s (%zu completed)\n", status, result->completed);
-        const struct bp_ssh *failed_ssh = NULL;
-        const struct bp_step *failed_unpack = NULL;
+        const struct bp_step *failed = NULL;
         for (size_t i = 0; i < plan->count; ++i) {
             const struct bp_step *step = &plan->steps[i];
-            if (step->source == result->failure_source) failed_ssh = step->ssh;
-            if (step->source == result->failure_source && step->op == BP_UNPACK && step->payload)
-                failed_unpack = step;
-            print_step(plan, step);
+            if (error && step->source && !strcmp(step->source, detail)) failed = step;
+            print_step(plan, step, preview);
             putchar('\n');
         }
         if (plan->lock) {
@@ -179,9 +183,10 @@ static void report(const struct bp_plan *plan, bool json, bool preview, bool gen
             }
         }
         if (error) fprintf(stderr, "brw: %s %s\n", error, detail);
-        if (error && failed_unpack)
-            brw_unpack_diagnostic(failed_unpack->payload->path, failed_unpack->path, error);
-        if (failed_ssh && error && !strcmp(error, "invalid-ssh-request")) {
+        if (failed && failed->op == BP_UNPACK && failed->payload)
+            brw_unpack_diagnostic(failed->payload->path, failed->path, error);
+        if (failed && failed->op == BP_DOWNLOAD) brw_download_diagnostic(failed->path, error);
+        if (failed && failed->ssh && !strcmp(error, "invalid-ssh-request")) {
             if (!plan->ssh_options.identity_file)
                 fputs("Supply the SSH identity file with --identity FILE.\n", stderr);
             if (!plan->ssh_options.known_hosts)
@@ -228,6 +233,7 @@ int brw_blueprint_command(int argc, const char *const *argv)
     unsigned capabilities = (1u << BP_COPY) | (1u << BP_REPLACE) | (1u << BP_ENV) |
         (1u << BP_RUN) | (1u << BP_STATE) | (1u << BP_TOOL) | (1u << BP_DEFAULT) | (1u << BP_HOST) |
         (1u << BP_UNPACK) | (1u << BP_PACK);
+    if (digby_download_available()) capabilities |= 1u << BP_DOWNLOAD;
 #ifdef BRW_BP_NATIVE_INSTALL
     capabilities |= 1u << BP_INSTALL;
 #endif

@@ -37,7 +37,7 @@ struct digby_archive_stage {
     struct staged_member *members;
 };
 
-struct digby_pack_stage {
+struct digby_file_stage {
     struct destination dest;
     char temporary[64];
     int directory, fd;
@@ -80,7 +80,7 @@ static void close_destination(struct destination *s)
     free(s->path);
 }
 
-const char *digby_archive_destination(const struct bp_directory *workspace, const char *relative)
+const char *digby_check_destination(const struct bp_directory *workspace, const char *relative)
 {
     struct destination stage;
     const char *error = open_destination(&stage, workspace, relative);
@@ -271,12 +271,12 @@ const char *digby_archive_finish(struct digby_archive_stage *s, bool publish)
     return error;
 }
 
-const char *digby_pack_begin(const struct bp_directory *workspace, const char *relative,
-                             struct digby_pack_stage **out, FILE **stream)
+const char *digby_file_begin(const struct bp_directory *workspace, const char *relative,
+                             struct digby_file_stage **out, FILE **stream)
 {
     *out = NULL;
     *stream = NULL;
-    struct digby_pack_stage *s = calloc(1, sizeof *s);
+    struct digby_file_stage *s = calloc(1, sizeof *s);
     if (!s) return "out-of-memory";
     const char *error = open_destination(&s->dest, workspace, relative);
     if (!error) {
@@ -298,7 +298,7 @@ const char *digby_pack_begin(const struct bp_directory *workspace, const char *r
             }
             s->fd = openat(s->directory, "archive", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
             if (s->fd < 0) {
-                error = digby_pack_finish(s, false);
+                error = digby_file_finish(s, false, NULL, NULL);
                 return error ? error : "create-stage";
             }
             /* Retain the original fd to verify ownership after fclose. */
@@ -309,7 +309,7 @@ const char *digby_pack_begin(const struct bp_directory *workspace, const char *r
                 return NULL;
             }
             if (copy >= 0) close(copy);
-            error = digby_pack_finish(s, false);
+            error = digby_file_finish(s, false, NULL, NULL);
             return error ? error : "open-stage";
         }
     }
@@ -318,7 +318,8 @@ const char *digby_pack_begin(const struct bp_directory *workspace, const char *r
     return error;
 }
 
-const char *digby_pack_finish(struct digby_pack_stage *s, bool publish)
+const char *digby_file_finish(struct digby_file_stage *s, bool publish,
+                              const char *(*before_publish)(void *context), void *context)
 {
     const char *error = NULL;
     if (s->stream && fclose(s->stream)) error = "close-stage";
@@ -326,6 +327,7 @@ const char *digby_pack_finish(struct digby_pack_stage *s, bool publish)
     if (s->fd >= 0) {
         /* Only the private directory handle is used to resolve the archive. */
         if (!stage_owned(s->directory, "archive", s->fd)) goto changed;
+        if (!error && publish && before_publish) error = before_publish(context);
         if (!error && publish && publish_exclusive(s->directory, "archive", &s->dest))
             error = errno == EEXIST || errno == ENOTEMPTY ? "destination-exists" : "publish-file";
         if (!publish || error) {

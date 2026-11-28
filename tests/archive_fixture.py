@@ -1,4 +1,4 @@
-"""Shared process and workspace assertions for the CLI and Blueprint archive fixtures."""
+"""Shared process and workspace assertions for CLI and Blueprint fixtures."""
 
 import hashlib
 import json
@@ -25,13 +25,17 @@ def snapshot(root, include_times):
     return result
 
 
-def invoke(args, root, expected_code):
+def fixture_env(root):
     env = os.environ.copy()
     for variable in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "BRW_BIN_DIR"):
         env[variable] = str(root / variable)
     for variable in ("TMP", "TEMP", "TMPDIR"):
         env[variable] = str(root / "temp")
-    run = subprocess.run(args, cwd=root, env=env, capture_output=True, timeout=25)
+    return env
+
+
+def invoke(args, root, expected_code):
+    run = subprocess.run(args, cwd=root, env=fixture_env(root), capture_output=True, timeout=25)
     assert run.returncode == expected_code, (args, run.returncode, run.stdout, run.stderr)
     return json.loads(run.stdout)
 

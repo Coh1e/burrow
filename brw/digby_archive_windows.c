@@ -19,7 +19,7 @@ struct digby_archive_stage {
     struct created_member *created;
 };
 
-struct digby_pack_stage {
+struct digby_file_stage {
     HANDLE file, parent;
     wchar_t *name;
     FILE *stream;
@@ -57,7 +57,7 @@ static const char *destination(const struct bp_directory *workspace, const char 
     return error;
 }
 
-const char *digby_archive_destination(const struct bp_directory *workspace, const char *relative)
+const char *digby_check_destination(const struct bp_directory *workspace, const char *relative)
 {
     HANDLE parent;
     wchar_t *name;
@@ -238,12 +238,12 @@ const char *digby_archive_finish(struct digby_archive_stage *stage, bool publish
     return error;
 }
 
-const char *digby_pack_begin(const struct bp_directory *workspace, const char *relative,
-                             struct digby_pack_stage **out, FILE **stream)
+const char *digby_file_begin(const struct bp_directory *workspace, const char *relative,
+                             struct digby_file_stage **out, FILE **stream)
 {
     *out = NULL;
     *stream = NULL;
-    struct digby_pack_stage *s = calloc(1, sizeof *s);
+    struct digby_file_stage *s = calloc(1, sizeof *s);
     if (!s) return "out-of-memory";
     const char *error = destination(workspace, relative, &s->parent, &s->name);
     if (!error) {
@@ -256,7 +256,7 @@ const char *digby_pack_begin(const struct bp_directory *workspace, const char *r
                 *stream = s->stream;
                 return NULL;
             }
-            error = digby_pack_finish(s, false);
+            error = digby_file_finish(s, false, NULL, NULL);
             return error ? error : "open-stage";
         }
         CloseHandle(s->parent);
@@ -267,10 +267,12 @@ const char *digby_pack_begin(const struct bp_directory *workspace, const char *r
     return error;
 }
 
-const char *digby_pack_finish(struct digby_pack_stage *s, bool publish)
+const char *digby_file_finish(struct digby_file_stage *s, bool publish,
+                              const char *(*before_publish)(void *context), void *context)
 {
     const char *error = NULL;
     if (s->stream && fclose(s->stream)) error = "close-stage";
+    if (!error && publish && before_publish) error = before_publish(context);
     if (!error && publish) {
         DWORD status = rename_sibling(s->file, s->name, false);
         if (status == ERROR_ALREADY_EXISTS || status == ERROR_FILE_EXISTS) error = "destination-exists";

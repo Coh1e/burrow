@@ -70,6 +70,48 @@ bool bp_safe_package_path(const char *path)
     return safe_relative_path(path, BP_PACKAGE_PATH_CAP - 1);
 }
 
+/* Validate the network-independent parts on both preview and apply. Host
+   reachability, response length and certificate checks belong to transport. */
+bool brw_valid_http_url(const char *url)
+{
+    if (!url || !bp_valid_utf8(url, strlen(url))) return false;
+    size_t scheme = strcspn(url, ":");
+    if (!((scheme == 4 && brw_same_ascii(url, "http", 4)) ||
+          (scheme == 5 && brw_same_ascii(url, "https", 5))) ||
+        strncmp(url + scheme, "://", 3)) return false;
+    const char *host = url + scheme + 3;
+    size_t authority = strcspn(host, "/?");
+    if (!authority || memchr(host, '@', authority)) return false;
+    for (const unsigned char *p = (const unsigned char *)host; *p; ++p)
+        if (*p <= ' ' || *p == 127 || *p == '\\' || *p == '#') return false;
+
+    const char *end = host + authority;
+    const char *port;
+    if (host[0] == '[') {
+        const char *close = memchr(host + 1, ']', authority - 1);
+        /* Longest numeric IPv6 text is 45 bytes, including a dotted IPv4 tail. */
+        char address[46];
+        if (!close || (size_t)(close - host - 1) >= sizeof address) return false;
+        size_t length = (size_t)(close - host - 1);
+        memcpy(address, host + 1, length);
+        address[length] = 0;
+        if (!brw_valid_ipv6_literal(address)) return false;
+        port = close + 1;
+    } else {
+        port = host + strcspn(host, ":/?");
+        if (port == host || memchr(host, '[', authority) || memchr(host, ']', authority)) return false;
+    }
+    if (port == end) return true;
+    if (*port++ != ':' || port == end) return false;
+    unsigned number = 0;
+    for (; port < end; ++port) {
+        if (*port < '0' || *port > '9') return false;
+        number = number * 10u + (unsigned)(*port - '0');
+        if (number > 65535) return false;
+    }
+    return number != 0;
+}
+
 bool brw_valid_sha256(const char *s)
 {
     if (!s || strlen(s) != 64) return false;
@@ -80,16 +122,21 @@ bool brw_valid_sha256(const char *s)
     return true;
 }
 
-bool brw_sha256_matches(const unsigned char *data, size_t size, const char *expected)
+bool brw_sha256_digest_matches(const unsigned char hash[32], const char *expected)
 {
     static const char hex[] = "0123456789abcdef";
-    uint8_t hash[SHA256HashSize];
-    SHA256Context ctx;
-    if (!data || size > UINT_MAX || !brw_valid_sha256(expected)) return false;
-    if (SHA256Reset(&ctx) || SHA256Input(&ctx, data, (unsigned int)size) ||
-        SHA256Result(&ctx, hash)) return false;
-    for (size_t i = 0; i < sizeof hash; ++i)
+    if (!hash || !brw_valid_sha256(expected)) return false;
+    for (size_t i = 0; i < SHA256HashSize; ++i)
         if (lower((unsigned char)expected[2*i]) != (unsigned)hex[hash[i] >> 4] ||
             lower((unsigned char)expected[2*i+1]) != (unsigned)hex[hash[i] & 15]) return false;
     return true;
+}
+
+bool brw_sha256_matches(const unsigned char *data, size_t size, const char *expected)
+{
+    uint8_t hash[SHA256HashSize];
+    SHA256Context ctx;
+    return data && size <= UINT_MAX && !SHA256Reset(&ctx) &&
+           !SHA256Input(&ctx, data, (unsigned int)size) && !SHA256Result(&ctx, hash) &&
+           brw_sha256_digest_matches(hash, expected);
 }

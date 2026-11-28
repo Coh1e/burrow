@@ -1,6 +1,15 @@
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include "blueprint_bundle_io.h"
 #include "blueprint_files_windows.h"
+#include "verified_file.h"
+
+bool brw_valid_ipv6_literal(const char *address)
+{
+    IN6_ADDR parsed;
+    return address && InetPtonA(AF_INET6, address, &parsed) == 1;
+}
 
 struct bp_directory *bp_directory_open(const char *path)
 {

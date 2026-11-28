@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "digby_archive_io.h"
+#include <errno.h>
 #include <glob.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,13 +40,13 @@ static bool rollback_preserves_unrecorded_file(const struct bp_directory *worksp
 
 static bool pack_preserves_other_writer(const struct bp_directory *workspace)
 {
-    struct digby_pack_stage *first, *second;
+    struct digby_file_stage *first, *second;
     FILE *one, *two;
-    if (digby_pack_begin(workspace, "archive.tar", &first, &one) ||
-        digby_pack_begin(workspace, "archive.tar", &second, &two) ||
+    if (digby_file_begin(workspace, "archive.tar", &first, &one) ||
+        digby_file_begin(workspace, "archive.tar", &second, &two) ||
         fputs("first", one) < 0 || fputs("second", two) < 0 ||
-        digby_pack_finish(second, true)) return false;
-    const char *error = digby_pack_finish(first, true);
+        digby_file_finish(second, true, NULL, NULL)) return false;
+    const char *error = digby_file_finish(first, true, NULL, NULL);
     if (!error || strcmp(error, "destination-exists")) return false;
     FILE *result = fopen("archive.tar", "rb");
     char bytes[8];
@@ -68,15 +69,15 @@ static bool renamed_stage_is_preserved(const struct bp_directory *workspace)
 
 static bool pack_reports_moved_directory(const struct bp_directory *workspace)
 {
-    struct digby_pack_stage *stage;
+    struct digby_file_stage *stage;
     FILE *stream;
-    if (digby_pack_begin(workspace, "output", &stage, &stream) || fputs("ready", stream) < 0) return false;
+    if (digby_file_begin(workspace, "output", &stage, &stream) || fputs("ready", stream) < 0) return false;
     char *name = stage_name(".brw-pack-*");
     struct stat info;
     bool moved = name && !lstat(name, &info) && S_ISDIR(info.st_mode) && !(info.st_mode & 0077) &&
                  !rename(name, "retained");
     free(name);
-    const char *error = digby_pack_finish(stage, true);
+    const char *error = digby_file_finish(stage, true, NULL, NULL);
     return moved && error && !strcmp(error, "stage-changed") && access("output", F_OK) != 0 &&
            !unlink("retained/archive") && !rmdir("retained");
 }
@@ -88,17 +89,42 @@ static bool pack_root_is_pinned(void)
     if (!workspace) return false;
     /* Rotate the workspace before checking and opening the archive destination. */
     const char *relative = "products/result";
-    struct digby_pack_stage *stage;
+    struct digby_file_stage *stage;
     FILE *stream;
     bool opened = !rename("work", "held") && !mkdir("work", 0700) &&
-                  !digby_archive_destination(workspace, relative) &&
-                  !digby_pack_begin(workspace, relative, &stage, &stream);
+                  !digby_check_destination(workspace, relative) &&
+                  !digby_file_begin(workspace, relative, &stage, &stream);
     bp_directory_close(workspace);
     if (!opened) return false;
     bool written = fputs("held", stream) >= 0;
-    if (digby_pack_finish(stage, written) || !written) return false;
+    if (digby_file_finish(stage, written, NULL, NULL) || !written) return false;
     return !unlink("held/products/result") && !rmdir("held/products") &&
            !rmdir("held") && !rmdir("work");
+}
+
+struct stage_probe { int writer, observer; };
+
+static const char *cancel_after_close(void *context)
+{
+    const struct stage_probe *probe = context;
+    struct stat info;
+    if (!fstat(probe->writer, &info) || errno != EBADF) return "writer-still-open";
+    if (fstat(probe->observer, &info) || info.st_size != 5) return "writer-not-flushed";
+    return "cancelled";
+}
+
+static bool cancellation_discards_flushed_stage(const struct bp_directory *workspace)
+{
+    struct digby_file_stage *stage;
+    FILE *stream;
+    if (digby_file_begin(workspace, "verified", &stage, &stream)) return false;
+    struct stage_probe probe = {.writer = fileno(stream)};
+    probe.observer = dup(probe.writer);
+    bool written = probe.observer >= 0 && fputs("ready", stream) >= 0;
+    const char *error = digby_file_finish(stage, written, cancel_after_close, &probe);
+    if (probe.observer >= 0) close(probe.observer);
+    /* The final rmdir in main also checks that the veto left no private stage. */
+    return written && error && !strcmp(error, "cancelled") && access("verified", F_OK) != 0;
 }
 
 int main(void)
@@ -109,7 +135,7 @@ int main(void)
     if (!workspace) return 1;
     bool ok = rollback_preserves_unrecorded_file(workspace) && renamed_stage_is_preserved(workspace) &&
               pack_root_is_pinned() && pack_preserves_other_writer(workspace) &&
-              pack_reports_moved_directory(workspace);
+              pack_reports_moved_directory(workspace) && cancellation_discards_flushed_stage(workspace);
     bp_directory_close(workspace);
     if (!ok) {
         fprintf(stderr, "Archive staging contract failed in %s\n", root);
