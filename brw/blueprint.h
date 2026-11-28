@@ -5,9 +5,10 @@
 #include <stddef.h>
 #include <stdio.h>
 #include "digby_ssh.h"
+#include "git_worktree.h"
 #include "verified_file.h"
 
-enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_HOST, BP_SSH, BP_UNPACK, BP_PACK, BP_DOWNLOAD, BP_OP_COUNT };
+enum bp_op { BP_COPY, BP_REPLACE, BP_INSTALL, BP_ENV, BP_RUN, BP_STATE, BP_TOOL, BP_DEFAULT, BP_HOST, BP_SSH, BP_UNPACK, BP_PACK, BP_DOWNLOAD, BP_GIT_CLONE, BP_GIT_PULL, BP_OP_COUNT };
 enum { BP_MAX_ARGS = 128, BP_MAX_FILES = 128, BP_MAX_STEPS = 256, BP_DETAIL_CAP = 512 };
 
 struct bp_file {
@@ -67,6 +68,8 @@ struct bp_step {
     char *source; /* Call path including the position within this module. */
     char *path, *from, *to, *name, *version, *entry, *value;
     char *url, *sha256; /* Owned operands of a download step. */
+    char *git_repository; /* Owned source of a Git clone step. */
+    char git_commit[BRW_COMMIT_CAP]; /* Actual checked-out SHA-1 after a successful Git step. */
     char *program, **args; /* Owned strings. The staged payload occupies script_arg. */
     char *tool; /* Owned name of the previously declared tool used by this step. */
     const char *child_path; /* Borrowed dependency PATH prefix during command execution. */
@@ -142,6 +145,9 @@ const char *bp_validate_step(const char *workspace, const struct bp_step *step);
 const char *bp_validate_text_plan(const char *workspace, const struct bp_plan *plan,
                                   size_t *failed_step);
 const char *bp_apply_step(const char *workspace, const struct bp_step *step);
+#ifdef _WIN32
+const char *bp_git_step(const char *workspace, struct bp_step *step, bool preview);
+#endif
 /* With apply false, validate without launching or writing exit_code. With apply
    true, execute the command. If exit_code is supplied, normal exits (including
    nonzero) store the child status. Launch, wait and staging failures return errors.

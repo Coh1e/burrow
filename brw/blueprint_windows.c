@@ -1,5 +1,6 @@
 #include "blueprint_edit.h"
 #include "install_windows.h"
+#include "git_windows.h"
 #include "settings_backend_windows.h"
 #include <winternl.h>
 #include <fcntl.h>
@@ -12,6 +13,74 @@
 #include "command_line_windows.h"
 #include "shim_script_windows.h"
 #include <bcrypt.h>
+
+struct git_worktree_scope { HANDLE tree, metadata; };
+
+static bool git_directory_matches(const char *resolved, HANDLE expected)
+{
+    wchar_t *path = wide(resolved);
+    if (!path) return false;
+    size_t length = wcslen(path);
+    if (length && (path[length - 1] == L'/' || path[length - 1] == L'\\')) path[length - 1] = 0;
+    HANDLE actual = open_directory(path);
+    free(path);
+    if (actual == INVALID_HANDLE_VALUE) return false;
+    BY_HANDLE_FILE_INFORMATION a, b;
+    bool same = GetFileInformationByHandle(actual, &a) && GetFileInformationByHandle(expected, &b) &&
+        a.dwVolumeSerialNumber == b.dwVolumeSerialNumber &&
+        a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow;
+    CloseHandle(actual);
+    return same;
+}
+
+static bool git_scope_matches(void *context, const char *worktree, const char *metadata, const char *common)
+{
+    const struct git_worktree_scope *scope = context;
+    return git_directory_matches(worktree, scope->tree) &&
+           git_directory_matches(metadata, scope->metadata) && git_directory_matches(common, scope->metadata);
+}
+
+const char *bp_git_step(const char *workspace, struct bp_step *step, bool preview)
+{
+    const bool cloning = step->op == BP_GIT_CLONE;
+    wchar_t *path = wide(step->path), *repository = wide(step->git_repository), *leaf = NULL;
+    HANDLE parent = path ? open_parent(workspace, path, &leaf) : INVALID_HANDLE_VALUE;
+    HANDLE tree = INVALID_HANDLE_VALUE, metadata = INVALID_HANDLE_VALUE;
+    const char *error = "unsafe-parent";
+    if (parent == INVALID_HANDLE_VALUE) goto done;
+    if (cloning && !repository) {
+        error = "invalid-git-input";
+        goto done;
+    }
+    if (!cloning) {
+        error = "unmanaged-worktree";
+        tree = open_child(parent, leaf, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                          FILE_OPEN, FILE_DIRECTORY_FILE);
+        if (tree == INVALID_HANDLE_VALUE || !ordinary(tree, true)) goto done;
+        metadata = open_child(tree, L".git", FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              FILE_OPEN, FILE_DIRECTORY_FILE);
+        if (metadata == INVALID_HANDLE_VALUE || !ordinary(metadata, true)) goto done;
+    }
+    wchar_t directory[BRW_PATH_CAP];
+    DWORD length = GetFinalPathNameByHandleW(cloning ? parent : tree, directory, BRW_PATH_CAP, VOLUME_NAME_DOS);
+    error = "invalid-path";
+    if (!length || length >= BRW_PATH_CAP) goto done;
+    if (cloning && swprintf(directory + length, BRW_PATH_CAP - length, L"%ls%ls",
+                           directory[length - 1] == L'\\' ? L"" : L"\\", leaf) < 0) goto done;
+    const wchar_t *git_path = length >= 7 && !wcsncmp(directory, L"\\\\?\\", 4) &&
+        directory[5] == L':' ? directory + 4 : directory;
+    struct git_worktree_scope scope = {tree, metadata};
+    char commit[BRW_COMMIT_CAP] = {0};
+    error = brw_git_worktree(repository, git_path, preview, commit, cloning ? NULL : git_scope_matches, &scope);
+    if (!error && !preview) memcpy(step->git_commit, commit, sizeof commit);
+done:
+    if (metadata != INVALID_HANDLE_VALUE) CloseHandle(metadata);
+    if (tree != INVALID_HANDLE_VALUE) CloseHandle(tree);
+    if (parent != INVALID_HANDLE_VALUE) CloseHandle(parent);
+    free(repository);
+    free(path);
+    return error;
+}
 
 bool bp_create_output_file(struct bp_output_file *file)
 {

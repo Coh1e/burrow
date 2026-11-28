@@ -206,21 +206,26 @@ static bool publishes_file(enum bp_op op)
     return op == BP_PACK || op == BP_DOWNLOAD;
 }
 
-/* Unpack publishes a directory. Pack and download publish ordinary files. */
+static bool publishes_directory(enum bp_op op)
+{
+    return op == BP_UNPACK || op == BP_GIT_CLONE;
+}
+
 static const char *output_dependency(const char *workspace, const struct bp_plan *plan,
                                      size_t known_from, size_t index, size_t *ready_after)
 {
     const struct bp_step *step = &plan->steps[index];
     *ready_after = 0;
     bool file = publishes_file(step->op);
-    bool publishes = file || step->op == BP_UNPACK;
-    if (!publishes && step->op != BP_COPY && step->op != BP_REPLACE) return NULL;
+    bool publishes = file || publishes_directory(step->op);
+    if (!publishes && step->op != BP_COPY && step->op != BP_REPLACE && step->op != BP_GIT_PULL)
+        return NULL;
     if (!bp_safe_path(step->path)) return "unsafe-output-path";
     size_t start = file ? known_from : 0;
     for (size_t i = start; i < index; ++i) {
         const struct bp_step *prior = &plan->steps[i];
         bool prior_file = publishes_file(prior->op);
-        if (prior->op != BP_UNPACK && !prior_file &&
+        if (!publishes_directory(prior->op) && !prior_file &&
             !(publishes && (prior->op == BP_COPY || prior->op == BP_REPLACE))) continue;
         enum path_relation relation;
         const char *error = path_relation(workspace, prior->path, step->path, file && known_from != 0, &relation);
@@ -228,7 +233,8 @@ static const char *output_dependency(const char *workspace, const struct bp_plan
         if (relation == PATH_NO_KNOWN_MATCH) continue;
         if (prior_file && i < known_from)
             *ready_after = known_from;
-        else if ((relation == PATH_BELOW && prior->op == BP_UNPACK) ||
+        else if ((relation == PATH_BELOW && publishes_directory(prior->op)) ||
+                 (relation == PATH_EQUAL && prior->op == BP_GIT_CLONE && step->op == BP_GIT_PULL) ||
                  (relation == PATH_EQUAL && prior_file && step->op == BP_REPLACE))
             *ready_after = i + 1;
         else return "destination-exists";
@@ -256,14 +262,14 @@ static const char *preflight_pack(const char *workspace, struct bp_plan *plan, s
     for (size_t i = start; i < index; ++i) {
         const struct bp_step *prior = &plan->steps[i];
         if (prior->op != BP_COPY && prior->op != BP_REPLACE &&
-            prior->op != BP_UNPACK && !publishes_file(prior->op)) continue;
+            !publishes_directory(prior->op) && !publishes_file(prior->op)) continue;
         for (size_t j = 0; j < pack.count; ++j) {
             enum path_relation relation;
             const char *error = path_relation(workspace, prior->path, pack.inputs[j], start != 0, &relation);
             if (error) return error;
             if (relation == PATH_NO_KNOWN_MATCH) continue;
-            if ((prior->op == BP_UNPACK && relation == PATH_EQUAL) ||
-                (prior->op != BP_UNPACK && relation == PATH_BELOW)) return "archive-input-unavailable";
+            if ((publishes_directory(prior->op) && relation == PATH_EQUAL) ||
+                (!publishes_directory(prior->op) && relation == PATH_BELOW)) return "archive-input-unavailable";
             pending = future[j] = true;
         }
     }
@@ -307,6 +313,7 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
     *result = (struct bp_run_result){0};
     for (size_t i = 0; i < plan->count; ++i) {
         plan->steps[i].entry_status = BP_UNCHECKED;
+        plan->steps[i].git_commit[0] = '\0';
         struct bp_state *state = plan->steps[i].state;
         if (state) {
             free(state->detected);
@@ -321,7 +328,7 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
     size_t ready_after[BP_MAX_STEPS] = {0};
     size_t known_from = 0;
     for (size_t i = 0; i < plan->count; ++i) {
-        const struct bp_step *s = &plan->steps[i];
+        struct bp_step *s = &plan->steps[i];
         if (s->skip_op || s->op == BP_TOOL || s->op == BP_DEFAULT || s->op == BP_SSH) continue;
         if (s->op == BP_DOWNLOAD) {
             const struct digby_download_plan download = download_plan(workspace, s);
@@ -342,6 +349,10 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
                 const struct digby_download_plan download = download_plan(workspace, s);
                 error = digby_download(&download, true);
             }
+#ifdef _WIN32
+        } else if (s->op == BP_GIT_CLONE || s->op == BP_GIT_PULL) {
+            if (!known_from && !ready_after[i]) error = bp_git_step(workspace, s, true);
+#endif
         } else if (s->state) {
             follows_state = true;
             error = validate_step(workspace, &s->state->check);
@@ -354,7 +365,8 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             return error;
         }
         /* A command can rearrange workspace inputs and published files. */
-        if (s->op == BP_RUN || (s->state && s->state->has_change)) known_from = i + 1;
+        if (s->op == BP_RUN || s->op == BP_GIT_CLONE || s->op == BP_GIT_PULL ||
+            (s->state && s->state->has_change)) known_from = i + 1;
     }
     size_t segment_end = 0;
     bool earlier_effect = false, earlier_entry_effect = false;
@@ -443,6 +455,10 @@ const char *digby_run_blueprint(struct bp_plan *plan, const char *workspace, boo
             } else if (step->op == BP_DOWNLOAD) {
                 const struct digby_download_plan download = download_plan(workspace, step);
                 error = digby_download(&download, false);
+#ifdef _WIN32
+            } else if (step->op == BP_GIT_CLONE || step->op == BP_GIT_PULL) {
+                error = bp_git_step(workspace, step, false);
+#endif
             } else if (step->op == BP_RUN) {
                 error = command(plan->lock, workspace, step, outputs, NULL, &started);
             } else error = bp_apply_step(workspace, step);
