@@ -52,6 +52,10 @@ static void print_step(const struct bp_plan *plan, const struct bp_step *s, bool
     field("source", s->source);
     if (s->ssh) print_ssh(s->ssh);
     field("path", s->path);
+    if (!s->skip_op && (s->op == BP_GIT_CLONE || s->op == BP_GIT_PULL)) {
+        if (preview) field("remoteStatus", "unverified");
+        if (*s->git_commit) field("commit", s->git_commit);
+    }
     if (s->op == BP_DOWNLOAD) {
         field("url", s->url);
         field("sha256", s->sha256);
@@ -238,6 +242,7 @@ int brw_blueprint_command(int argc, const char *const *argv)
     capabilities |= 1u << BP_INSTALL;
 #endif
 #ifdef _WIN32
+    capabilities |= (1u << BP_GIT_CLONE) | (1u << BP_GIT_PULL);
     if (brw_windows_ssh_available()) {
         plan.ssh_backend = brw_windows_ssh_run;
         capabilities |= 1u << BP_SSH;

@@ -43,6 +43,10 @@ if(BUILD_TESTING)
   if(NOT Python3_Interpreter_FOUND)
     set(Python3_EXECUTABLE python3)
   endif()
+  if(WIN32)
+    add_test(NAME blueprint_git COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tests/blueprint-git.py" "$<TARGET_FILE:brw>")
+  endif()
   add_test(NAME blueprint_unpack COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tests/blueprint-unpack.py" "$<TARGET_FILE:brw>")
   add_test(NAME blueprint_pack COMMAND "${Python3_EXECUTABLE}"

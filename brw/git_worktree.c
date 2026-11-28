@@ -104,7 +104,8 @@ done:
     return error;
 }
 
-const char *brw_pull_worktree(const char *path, bool preview, char commit[BRW_COMMIT_CAP])
+const char *brw_pull_worktree_scoped(const char *path, bool preview, char commit[BRW_COMMIT_CAP],
+                                    brw_git_scope scope, void *context)
 {
     git_repository *repo = NULL;
     git_config *config = NULL;
@@ -118,7 +119,13 @@ const char *brw_pull_worktree(const char *path, bool preview, char commit[BRW_CO
     if (!path || !*path || !commit) return "invalid-git-input";
     const char *error = "unmanaged-worktree";
     if (git_repository_open_ext(&repo, path, GIT_REPOSITORY_OPEN_NO_SEARCH, NULL) < 0 ||
-        git_repository_is_bare(repo) || git_repository_config(&config, repo) < 0 ||
+        git_repository_is_bare(repo)) goto done;
+    if (scope && !scope(context, git_repository_workdir(repo), git_repository_path(repo),
+                        git_repository_commondir(repo))) {
+        error = "unsafe-worktree";
+        goto done;
+    }
+    if (git_repository_config(&config, repo) < 0 ||
         git_config_open_level(&local, config, GIT_CONFIG_LEVEL_LOCAL) < 0 ||
         git_config_get_bool(&managed, local, "brw.managed") < 0 || !managed) goto done;
     error = "missing-upstream";
@@ -153,4 +160,9 @@ done:
     git_config_free(config);
     git_repository_free(repo);
     return error;
+}
+
+const char *brw_pull_worktree(const char *path, bool preview, char commit[BRW_COMMIT_CAP])
+{
+    return brw_pull_worktree_scoped(path, preview, commit, NULL, NULL);
 }

@@ -63,6 +63,8 @@ Both modules export a synchronous function returning steps. Relative ES imports 
 | `unpack` | `payload`, `path` | Extracts a verified archive and publishes its contents as a new directory in the workspace. |
 | `pack` | `inputs`, `path`, `format` | Creates a new workspace archive from the listed workspace files in declaration order. |
 | `download` | `url`, `sha256`, `path` | Verifies the downloaded bytes and publishes them as a new workspace file. |
+| `git-clone` | `repository`, `path` | On Windows, clones into private staging and publishes a new managed worktree. |
+| `git-pull` | `path` | On Windows, fast-forwards a clean managed worktree to its configured upstream. |
 | `ssh` | `target`, `command`, optional `port` and `timeoutSeconds` | On Windows, runs one POSIX shell command on the SSH service authorized for this invocation. |
 
 For example, declare `requires\trun` (with a tab) and list `build.cmake` as a payload beside the child module. This step runs CMake with the verified script and a single argument containing a space.
@@ -74,6 +76,12 @@ For example, declare `requires\trun` (with a tab) and list `build.cmake` as a pa
 The argument list accepts up to 128 entries, including at most one script reference. Digby resolves the reference from the declaring module and stages the verified bytes in a temporary file for this invocation. Scripts can use the working directory for project files. The temporary location contains only the standalone script. String arguments pass directly to the program, including empty strings and literal `|`. To execute a pipeline, select an interpreter such as `sh` with `["-c", scriptText]` or `powershell.exe` with `["-NoProfile", "-Command", scriptText]`. Child output goes to stderr so the CLI report remains readable on stdout. A failed launch or nonzero exit stops the plan.
 
 The planning runtime has no filesystem, process or network bindings. A bundle may declare up to 128 files. The reader limits the manifest to 128 KiB, each module to 1 MiB, each payload to 64 MiB and loaded member data to 128 MiB. Nested calls, plan size, JavaScript heap, stack and execution time are also bounded. An unavailable capability, invalid import or exceeded planning limit fails before application.
+
+## Work with a Git repository
+
+Declare `requires<TAB>git-clone` or `requires<TAB>git-pull` in the manifest. The destination `path` is workspace-relative. Clone uses the repository's default branch. Pull uses the checked-out branch's configured upstream and requires a worktree managed by `brw`.
+
+Preview checks local prerequisites and reports `remoteStatus: "unverified"`. If an earlier Git step can create or change the worktree, its dependent checks run during application. Each successful applied Git step reports the checked-out SHA-1 as `commit`. A dirty worktree or a non-fast-forward update stops later steps and keeps the current checkout.
 
 ## Download a verified file
 

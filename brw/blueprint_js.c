@@ -218,6 +218,7 @@ void bp_plan_free(struct bp_plan *plan)
         }
         free_pack(s->pack);
         free(s->url);
+        free(s->git_repository);
         free(s->sha256);
         free(s->skip_platform);
         free(s->skip_op);
@@ -515,6 +516,17 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }
     switch (s->op) {
+    case BP_GIT_CLONE:
+    case BP_GIT_PULL:
+        s->path = field(ctx, obj, "path");
+        if (!s->path || !bp_safe_path(s->path)) fail(p, "invalid-path", location);
+        else if (s->op == BP_GIT_CLONE) {
+            s->git_repository = field(ctx, obj, "repository");
+            if (!s->git_repository || !*s->git_repository ||
+                !bp_valid_utf8(s->git_repository, strlen(s->git_repository)))
+                fail(p, "invalid-git-input", location);
+        }
+        break;
     case BP_DOWNLOAD: {
         s->path = field(ctx, obj, "path");
         char *url = field(ctx, obj, "url");
