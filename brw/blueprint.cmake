@@ -19,7 +19,7 @@ add_library(brw_blueprint_core STATIC blueprint_js.c blueprint_bundle.c)
 target_link_libraries(brw_blueprint_core PRIVATE brw_quickjs brw_verified_files digby)
 add_library(brw_blueprint STATIC blueprint_cli.c blueprint_lock.c blueprint_lock_${brw_file_backend}.c
   blueprint_run.c blueprint_edit.c blueprint_${brw_file_backend}.c)
-target_link_libraries(brw_blueprint PRIVATE brw_blueprint_core digby digby_archive)
+target_link_libraries(brw_blueprint PRIVATE brw_blueprint_core digby digby_archive digby_download)
 target_include_directories(brw_blueprint PRIVATE "${bp_sha_source}")
 if(NOT WIN32)
   target_include_directories(brw_blueprint PRIVATE "${archive_source}/libarchive")
@@ -47,6 +47,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/../tests/blueprint-unpack.py" "$<TARGET_FILE:brw>")
   add_test(NAME blueprint_pack COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tests/blueprint-pack.py" "$<TARGET_FILE:brw>")
+  add_test(NAME blueprint_download COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tests/blueprint-download.py" "$<TARGET_FILE:brw>")
   if(NOT WIN32)
     add_executable(digby_archive_posix_test digby_archive_posix_test.c)
     if(APPLE)

@@ -217,6 +217,8 @@ void bp_plan_free(struct bp_plan *plan)
             free(s->ssh);
         }
         free_pack(s->pack);
+        free(s->url);
+        free(s->sha256);
         free(s->skip_platform);
         free(s->skip_op);
         free(s->registry);
@@ -513,6 +515,20 @@ static void add_step(JSContext *ctx, struct planner *p, JSValueConst obj, const 
         if (!s->path || !bp_safe_path(s->path)) { fail(p, "invalid-path", location); return; }
     }
     switch (s->op) {
+    case BP_DOWNLOAD: {
+        s->path = field(ctx, obj, "path");
+        char *url = field(ctx, obj, "url");
+        s->sha256 = field(ctx, obj, "sha256");
+        if (!s->path || !s->sha256 || !url) fail(p, "invalid-step", location);
+        else if (!brw_valid_sha256(s->sha256)) fail(p, "invalid-digest", location);
+        else if (!brw_valid_http_url(url)) fail(p, "download-url", location);
+        else {
+            s->url = url;
+            break;
+        }
+        free(url);
+        break;
+    }
     case BP_PACK: {
         const char *error = parse_pack(ctx, obj, s);
         if (error) fail(p, error, location);

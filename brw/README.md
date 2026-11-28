@@ -23,6 +23,7 @@ POSIX to run the following CTest contracts.
 | `digby_ssh` | A local simulated transport counts connections and sends. Preview opens no connection, authorization and host identity failures send no command, and loss after dispatch reports an unknown exit without a retry. |
 | `blueprint_unpack` | Local TAR, gzip and ZIP fixtures use both the standalone CLI and a nested Blueprint. They check read-only preview, later consumption of the published tree and preservation of the workspace on errors. The fixture uses Python 3. |
 | `blueprint_pack` | The CLI and Blueprint create tar, tar.gz and ZIP archives from local inputs. A later step reads the published file. Workspace snapshots cover preview, an occupied target and failure on the final input. |
+| `blueprint_download` | A loopback HTTP fixture counts connections during preview, checks published bytes via a later pack, and inspects the workspace after a mismatch, short response or cancellation. |
 | `digby_literal`, `blueprint_cli` | UTF-8 byte offsets, file copy and text replacement, archived tool and sibling contents, and preservation of the previous command when an archive lacks its declared entry |
 | `git_worktree` | Actual commits after clone and fast-forward, refusal of dirty or diverged worktrees |
 
@@ -99,6 +100,10 @@ contains one result object. The client writes remote output to stderr.
 An unknown result returns a nonzero exit code. Digby sends the command at
 most once per invocation. A confirmed remote exit of 255 appears as
 `completed` with `remoteExit: 255`.
+
+## Download a verified workspace file
+
+Run `brw download URL PATH --sha256 DIGEST --workspace DIRECTORY` with the expected SHA-256 and a new workspace-relative destination. Add `--dry-run --json` to inspect the plan offline. The same download can supply a later Blueprint step with a verified file. [Blueprint download example and transfer rules](blueprint.md#download-a-verified-file)
 
 ## Unpack a verified workspace archive
 

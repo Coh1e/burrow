@@ -6,11 +6,11 @@
 #include <stdio.h>
 
 struct digby_archive_stage;
-struct digby_pack_stage;
+struct digby_file_stage;
 
 /* The check and both begin functions borrow the opened workspace and validated
    relative path for the call. A successful begin pins its own output parent. */
-const char *digby_archive_destination(const struct bp_directory *workspace, const char *relative);
+const char *digby_check_destination(const struct bp_directory *workspace, const char *relative);
 const char *digby_archive_begin(const struct bp_directory *workspace, const char *relative,
                                 struct digby_archive_stage **out);
 
@@ -24,14 +24,17 @@ const char *digby_archive_entry(struct digby_archive_stage *stage, const char *r
    cleanup-stage error can leave the staging directory for inspection. */
 const char *digby_archive_finish(struct digby_archive_stage *stage, bool publish);
 
-/* Stages a new archive file beside its validated workspace-relative target.
+/* Stages one file beside its validated workspace-relative target for pack or download.
    Success returns an owned stage and its borrowed binary output stream.
    Finish closes the stream and consumes the stage on every path. Publication
    never replaces a concurrent output. On POSIX the file stays inside a private
    directory until publication. Detected stage changes return stage-changed.
-   If directory cleanup fails after publication, the complete output remains. */
-const char *digby_pack_begin(const struct bp_directory *workspace, const char *relative,
-                             struct digby_pack_stage **out, FILE **stream);
-const char *digby_pack_finish(struct digby_pack_stage *stage, bool publish);
+   If directory cleanup fails after publication, the complete output remains.
+   On publish, an optional before_publish callback borrows context after close
+   and ownership checks, just before rename. A static error vetoes publication. */
+const char *digby_file_begin(const struct bp_directory *workspace, const char *relative,
+                             struct digby_file_stage **out, FILE **stream);
+const char *digby_file_finish(struct digby_file_stage *stage, bool publish,
+                              const char *(*before_publish)(void *context), void *context);
 
 #endif
